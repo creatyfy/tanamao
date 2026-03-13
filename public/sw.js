@@ -26,8 +26,8 @@ self.addEventListener('push', function(event) {
       const data = event.data.json();
       const options = {
         body: data.body,
-        icon: data.icon || 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?w=192&h=192&fit=crop',
-        badge: data.badge || 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?w=96&h=96&fit=crop',
+        icon: data.icon || '/icon-192.png',
+        badge: data.badge || '/icon-192.png',
         vibrate: [200, 100, 200, 100, 200],
         data: {
           url: data.url || '/'

@@ -49,9 +49,36 @@ export default function MobileAuth() {
     fullName: '', cpf: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', pixKey: '', operationCity: ''
   });
 
-  const handleChange = (e: any) => {
+  const handleChange = async (e: any) => {
     const { name, value, type, checked } = e.target;
-    setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
+    const finalValue = type === 'checkbox' ? checked : value;
+    
+    setFormData(prev => ({ ...prev, [name]: finalValue }));
+
+    // Busca automática de CEP
+    if (name === 'cep') {
+      const cleanCep = finalValue.replace(/\D/g, '');
+      if (cleanCep.length === 8) {
+        try {
+          const res = await fetch(`https://viacep.com.br/ws/${cleanCep}/json/`);
+          const data = await res.json();
+          if (!data.erro) {
+            setFormData(prev => ({
+              ...prev,
+              street: data.logradouro || prev.street,
+              neighborhood: data.bairro || prev.neighborhood,
+              city: data.localidade || prev.city,
+              state: data.uf || prev.state
+            }));
+            setErrorMsg('');
+          } else {
+            setErrorMsg('CEP não encontrado.');
+          }
+        } catch (error) {
+          console.error("Erro ao buscar CEP:", error);
+        }
+      }
+    }
   };
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -214,7 +241,8 @@ export default function MobileAuth() {
             accepts_cash: formData.acceptsCash,
             address_id: addressId,
             status: 'pending', 
-            is_approved: false 
+            is_approved: false,
+            commission_rate: 4 // Taxa do app definida para 4%
           };
 
           const { data: existingStore } = await supabase.from('stores').select('id').eq('owner_id', userId).maybeSingle();

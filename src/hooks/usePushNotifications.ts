@@ -28,8 +28,8 @@ export function usePushNotifications() {
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
         new Notification(title, {
-          icon: 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?w=192&h=192&fit=crop', // Ícone genérico de comida/app
-          badge: 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?w=96&h=96&fit=crop',
+          icon: '/icon-192.png',
+          badge: '/icon-192.png',
           vibrate: [200, 100, 200],
           ...options,
         });

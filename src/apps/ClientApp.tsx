@@ -891,13 +891,13 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       )}
 
       {currentScreen === 'store' && selectedStore && (
-        <div className="flex-1 overflow-y-auto bg-white pb-24">
-          <div className="relative h-40 bg-gray-200">
+        <div className="flex-1 overflow-y-auto bg-white pb-24 relative">
+          <div className="relative h-40 bg-gray-200 shrink-0">
             <img src={selectedStore.banner_url || 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?w=800&h=400&fit=crop'} className="w-full h-full object-cover" alt="Banner" />
             <button onClick={() => setCurrentScreen('home')} className="absolute top-4 left-4 bg-white p-2 rounded-full shadow-md text-brand-dark"><ChevronLeft size={20} /></button>
           </div>
           <div className="px-4 pb-4 pt-2 relative">
-            <div className="bg-white rounded-2xl shadow-md p-4 -mt-8 relative z-10 border border-gray-100">
+            <div className="bg-white rounded-2xl shadow-md p-4 -mt-8 relative z-10 border border-gray-100 mb-4">
               <h1 className="text-2xl font-bold text-brand-dark">{selectedStore.name}</h1>
               <div className="flex items-center text-sm text-gray-600 mt-2 space-x-4">
                 <span className="flex items-center text-brand-secondary font-bold"><Star size={16} className="mr-1 fill-current" /> {selectedStore.avg_rating}</span>
@@ -906,14 +906,55 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
               </div>
             </div>
 
-            <div className="mt-8">
+            {/* Category Navigation Totems */}
+            {storeCategories.length > 0 && (
+              <div className="sticky top-0 z-30 bg-white pt-2 pb-2 border-b border-gray-100 -mx-4 px-4 mb-6 shadow-sm">
+                <div className="flex space-x-2 overflow-x-auto scrollbar-hide">
+                  {storeCategories.map(category => {
+                    const hasProducts = products.some(p => p.category_id === category.id);
+                    if (!hasProducts) return null;
+                    return (
+                      <button
+                        key={`nav-${category.id}`}
+                        onClick={() => {
+                          const el = document.getElementById(`category-${category.id}`);
+                          if (el) {
+                            const y = el.getBoundingClientRect().top + window.scrollY - 100;
+                            window.scrollTo({ top: y, behavior: 'smooth' });
+                          }
+                        }}
+                        className="whitespace-nowrap px-4 py-2 bg-gray-100 hover:bg-brand-light text-gray-700 hover:text-brand-primary rounded-full text-sm font-bold transition-colors"
+                      >
+                        {category.name}
+                      </button>
+                    )
+                  })}
+                  {products.filter(p => !p.category_id).length > 0 && (
+                    <button
+                      onClick={() => {
+                        const el = document.getElementById('category-outros');
+                        if (el) {
+                          const y = el.getBoundingClientRect().top + window.scrollY - 100;
+                          window.scrollTo({ top: y, behavior: 'smooth' });
+                        }
+                      }}
+                      className="whitespace-nowrap px-4 py-2 bg-gray-100 hover:bg-brand-light text-gray-700 hover:text-brand-primary rounded-full text-sm font-bold transition-colors"
+                    >
+                      Outros
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-2">
               {/* Produtos com categoria */}
               {storeCategories.map(category => {
                 const categoryProducts = products.filter(p => p.category_id === category.id);
                 if (categoryProducts.length === 0) return null;
 
                 return (
-                  <div key={category.id} className="mb-8">
+                  <div key={category.id} id={`category-${category.id}`} className="mb-8 scroll-mt-24">
                     <h2 className="font-black text-brand-dark text-xl mb-4 border-b border-gray-100 pb-2">{category.name}</h2>
                     <div className="space-y-4">
                       {categoryProducts.map(renderProduct)}
@@ -924,7 +965,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
 
               {/* Produtos sem categoria (Outros) */}
               {products.filter(p => !p.category_id).length > 0 && (
-                <div className="mb-8">
+                <div id="category-outros" className="mb-8 scroll-mt-24">
                   <h2 className="font-black text-brand-dark text-xl mb-4 border-b border-gray-100 pb-2">Outros</h2>
                   <div className="space-y-4">
                     {products.filter(p => !p.category_id).map(renderProduct)}
@@ -941,7 +982,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           </div>
           
           {cart.length > 0 && (
-            <div className="absolute bottom-4 left-4 right-4 z-20">
+            <div className="fixed sm:absolute bottom-4 left-4 right-4 z-40 max-w-md mx-auto">
               <button onClick={() => setCurrentScreen('cart')} className="w-full bg-brand-primary text-white rounded-full py-4 px-6 flex justify-between items-center shadow-lg font-bold">
                 <div className="flex items-center"><span className="bg-white text-brand-primary rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">{cart.reduce((acc, item) => acc + item.quantity, 0)}</span> Ver carrinho</div>
                 <span>R$ {cartTotal.toFixed(2)}</span>
@@ -953,7 +994,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
 
       {currentScreen === 'cart' && (
         <div className="flex-1 flex flex-col bg-white">
-          <div className="p-6 flex items-center border-b border-gray-100">
+          <div className="p-6 flex items-center border-b border-gray-100 shrink-0">
             <button onClick={() => setCurrentScreen('store')} className="text-brand-dark mr-4"><ChevronLeft size={24} strokeWidth={2.5} /></button>
             <h1 className="text-xl font-bold text-brand-dark">Seu Carrinho</h1>
           </div>
@@ -961,15 +1002,22 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             <div className="space-y-6">
               {cart.map((item, idx) => (
                 <div key={idx} className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className="flex items-center border border-gray-200 rounded-full px-2 py-1 mr-4 bg-white">
+                  <div className="flex items-center flex-1">
+                    <div className="flex items-center border border-gray-200 rounded-full px-2 py-1 mr-3 bg-white shrink-0">
                       <button onClick={() => updateQuantity(item.id, -1)} className="p-1 text-gray-400"><Minus size={14} strokeWidth={3} /></button>
                       <span className="w-6 text-center text-sm font-bold text-brand-dark">{item.quantity}</span>
                       <button onClick={() => updateQuantity(item.id, 1)} className="p-1 text-brand-primary"><Plus size={14} strokeWidth={3} /></button>
                     </div>
-                    <span className="text-sm font-bold text-brand-dark">{item.name}</span>
+                    {item.image_url ? (
+                      <img src={item.image_url} alt={item.name} className="w-10 h-10 rounded-lg object-cover mr-3 shrink-0 border border-gray-100" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 mr-3 shrink-0 border border-gray-200">
+                        <StoreIcon size={16} />
+                      </div>
+                    )}
+                    <span className="text-sm font-bold text-brand-dark line-clamp-2 pr-2">{item.name}</span>
                   </div>
-                  <span className="text-sm font-bold text-brand-dark">R$ {(item.price * item.quantity).toFixed(2)}</span>
+                  <span className="text-sm font-bold text-brand-dark shrink-0">R$ {(item.price * item.quantity).toFixed(2)}</span>
                 </div>
               ))}
             </div>
@@ -981,19 +1029,19 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
               </div>
             )}
           </div>
-          <div className="p-6 bg-white">
+          <div className="p-6 bg-white shrink-0 border-t border-gray-100">
             <button onClick={proceedToCheckout} className="w-full bg-brand-primary text-white rounded-full py-4 font-bold text-lg shadow-md">Escolher Pagamento</button>
           </div>
         </div>
       )}
 
       {currentScreen === 'checkout' && (
-        <div className="flex-1 flex flex-col bg-gray-50">
-          <div className="bg-white p-4 flex items-center border-b border-gray-100">
+        <div className="flex-1 flex flex-col bg-gray-50 min-h-0">
+          <div className="bg-white p-4 flex items-center border-b border-gray-100 shrink-0">
             <button onClick={() => setCurrentScreen('cart')} className="p-2 -ml-2 text-brand-dark"><ChevronLeft size={24} /></button>
             <h1 className="text-lg font-bold text-brand-dark ml-2">Finalizar Pedido</h1>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24">
             <div className="bg-white p-4 rounded-2xl shadow-sm">
               <h2 className="font-bold text-brand-dark mb-2 flex items-center"><MapPin size={18} className="mr-2 text-brand-primary"/> Entrega</h2>
               <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-xl border border-gray-100">
@@ -1090,7 +1138,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             </div>
             
           </div>
-          <div className="p-4 bg-white border-t border-gray-100">
+          <div className="p-4 bg-white border-t border-gray-100 shrink-0">
             <button onClick={handleCheckout} disabled={actionLoading} className="w-full bg-brand-primary text-white rounded-full py-4 font-bold text-lg shadow-md flex justify-center items-center">
               {actionLoading ? <Loader2 className="animate-spin" size={24}/> : `Fazer Pedido • R$ ${finalTotal.toFixed(2)}`}
             </button>
