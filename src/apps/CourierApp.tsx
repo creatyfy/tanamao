@@ -1,48 +1,69 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Courier, Delivery, Order } from '../types';
-import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, List, Bell, Star, Store, Loader2 } from 'lucide-react';
+import { Toast } from '../components/Toast';
+import { usePushNotifications } from '../hooks/usePushNotifications';
+import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, List, Bell, Star, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing } from 'lucide-react';
 
 export default function CourierApp({ onExit }: { onExit: () => void }) {
   const { user } = useAuth();
-  const [courier, setCourier] = useState<Courier | null>(null);
+  const { permission: notifPermission, requestPermission, sendNotification } = usePushNotifications();
+  const [courier, setCourier] = useState<any>(null);
   const [activeTab, setActiveTab] = useState('home');
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => setToast({ message, type });
   
   const [deliveryState, setDeliveryState] = useState('none'); 
   const [acceptTimer, setAcceptTimer] = useState(15);
   const [activeDelivery, setActiveDelivery] = useState<any>(null);
+  const [gpsError, setGpsError] = useState(false);
+  
+  // Earnings History
+  const [deliveriesHistory, setDeliveriesHistory] = useState<any[]>([]);
+  const [earningsPage, setEarningsPage] = useState(0);
+  const [earningsHasMore, setEarningsHasMore] = useState(true);
+  const EARNINGS_PAGE_SIZE = 20;
+
+  // Perfil
+  const [showProfileEdit, setShowProfileEdit] = useState(false);
+  const [profileForm, setProfileForm] = useState({ name: '', phone: '' });
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Ganhos por período
+  const [earningsPeriod, setEarningsPeriod] = useState<'today' | 'week' | 'month'>('today');
+  const [periodEarnings, setPeriodEarnings] = useState(0);
+  const [periodDeliveries, setPeriodDeliveries] = useState(0);
 
   useEffect(() => {
     if (user) fetchCourier();
   }, [user]);
 
+  useEffect(() => {
+    if (activeTab === 'earnings' && courier) {
+      setEarningsPage(0);
+      setDeliveriesHistory([]);
+      setEarningsHasMore(true);
+      fetchEarningsHistory(0, false);
+    }
+  }, [activeTab, courier]);
+
+  useEffect(() => {
+    if (deliveriesHistory.length > 0) {
+      calcPeriodEarnings(earningsPeriod);
+    } else {
+      setPeriodDeliveries(0);
+      setPeriodEarnings(0);
+    }
+  }, [deliveriesHistory, earningsPeriod]);
+
   const fetchCourier = async () => {
     try {
-      const { data } = await supabase.from('couriers').select('*').eq('user_id', user!.id).single();
+      const { data } = await supabase.from('couriers').select('*, users:user_id(*)').eq('user_id', user!.id).maybeSingle();
       if (data) {
         setCourier(data);
-        if (data.is_online) subscribeToDeliveries(data.id);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const toggleOnline = async () => {
-    if (!courier) return;
-    setLoading(true);
-    try {
-      const newStatus = !courier.is_online;
-      await supabase.from('couriers').update({ is_online: newStatus }).eq('id', courier.id);
-      setCourier({ ...courier, is_online: newStatus });
-      if (newStatus) {
-        subscribeToDeliveries(courier.id);
-      } else {
-        supabase.removeAllChannels();
       }
     } catch (error) {
       console.error(error);
@@ -52,17 +73,196 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   };
 
   const subscribeToDeliveries = (courierId: number) => {
-    supabase.channel('courier_offers')
+    const channel = supabase.channel('courier_offers')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'deliveries', filter: `courier_id=eq.${courierId}` }, async (payload) => {
         const delivery = payload.new;
         if (delivery.status === 'offered') {
-          // Fetch order details
-          const { data: order } = await supabase.from('orders').select('*, stores(name, address_id), addresses(*)').eq('id', delivery.order_id).single();
+          // Busca dados completos do pedido, loja e cliente
+          const { data: order } = await supabase
+            .from('orders')
+            .select(`
+              *,
+              stores(name, addresses(*)),
+              addresses(*),
+              users:client_id(name),
+              order_items(*)
+            `)
+            .eq('id', delivery.order_id)
+            .maybeSingle();
+            
+          if (!order) {
+            showToast('O pedido não está mais disponível.', 'warning');
+            setDeliveryState('none');
+            return;
+          }
+
+          // Dispara Notificação Push
+          sendNotification('🏍️ Nova Corrida Disponível!', {
+            body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${order.stores?.name}. Aceite rápido!`,
+          });
+
           setActiveDelivery({ ...delivery, order });
           setDeliveryState('offered');
           setAcceptTimer(15);
+          navigator.vibrate?.([200, 100, 200]); // Vibra o celular se suportado
         }
       }).subscribe();
+      
+    return channel;
+  };
+
+  // Cleanup effect for Realtime channel
+  useEffect(() => {
+    let channel: any;
+    if (courier?.is_online) {
+      channel = subscribeToDeliveries(courier.id);
+    }
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [courier?.is_online]);
+
+  const toggleOnline = async () => {
+    if (!courier) return;
+    
+    if (!courier.is_online) {
+      setLoading(true);
+      setGpsError(false);
+      
+      if (!navigator.geolocation) {
+        showToast('Seu dispositivo não suporta GPS.', 'error');
+        setLoading(false);
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          try {
+            const newStatus = true;
+            await supabase.from('couriers').update({ 
+              is_online: newStatus,
+              last_lat: pos.coords.latitude,
+              last_lng: pos.coords.longitude,
+              location_at: new Date().toISOString()
+            }).eq('id', courier.id);
+            
+            setCourier({ ...courier, is_online: newStatus });
+            showToast('Você está online!', 'success');
+          } catch (error) {
+            showToast('Erro ao ficar online.', 'error');
+          } finally {
+            setLoading(false);
+          }
+        },
+        async (error) => {
+          console.error("Erro de localização:", error);
+          setGpsError(true);
+          showToast('GPS bloqueado. Usando localização simulada para testes.', 'warning');
+          
+          try {
+            const newStatus = true;
+            await supabase.from('couriers').update({ 
+              is_online: newStatus,
+              last_lat: -23.550520, // Mock latitude (São Paulo)
+              last_lng: -46.633308, // Mock longitude
+              location_at: new Date().toISOString()
+            }).eq('id', courier.id);
+            
+            setCourier({ ...courier, is_online: newStatus });
+          } catch (e) {
+            showToast("Erro ao ficar online no fallback.", 'error');
+          } finally {
+            setLoading(false);
+          }
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    } else {
+      setLoading(true);
+      try {
+        const newStatus = false;
+        await supabase.from('couriers').update({ is_online: newStatus }).eq('id', courier.id);
+        setCourier({ ...courier, is_online: newStatus });
+        showToast('Você está offline.', 'success');
+      } catch (error) {
+        showToast('Erro ao ficar offline.', 'error');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const fetchEarningsHistory = async (page = 0, append = false) => {
+    setLoading(true);
+    try {
+      const from = page * EARNINGS_PAGE_SIZE;
+      const to = from + EARNINGS_PAGE_SIZE - 1;
+      const { data } = await supabase
+        .from('deliveries')
+        .select('*, orders(store_id, stores(name), created_at)')
+        .eq('courier_id', courier.id)
+        .eq('status', 'delivered')
+        .order('delivered_at', { ascending: false })
+        .range(from, to);
+
+      if (data) {
+        setDeliveriesHistory(prev => append ? [...prev, ...data] : data);
+        setEarningsHasMore(data.length === EARNINGS_PAGE_SIZE);
+      }
+    } catch (error) {
+      showToast('Erro ao carregar histórico de entregas', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calcPeriodEarnings = (period: 'today' | 'week' | 'month') => {
+    const now = new Date();
+    let start: Date;
+
+    if (period === 'today') {
+      start = new Date(now); start.setHours(0, 0, 0, 0);
+    } else if (period === 'week') {
+      start = new Date(now); start.setDate(now.getDate() - 7);
+    } else {
+      start = new Date(now); start.setDate(now.getDate() - 30);
+    }
+
+    const filtered = deliveriesHistory.filter(d => {
+      const date = new Date(d.orders?.created_at);
+      return date >= start;
+    });
+
+    setPeriodDeliveries(filtered.length);
+    setPeriodEarnings(filtered.reduce((acc: number, d: any) => acc + (d.courier_earning || 0), 0));
+  };
+
+  const handleSaveProfile = async () => {
+    if (!profileForm.name.trim()) {
+      showToast('Nome não pode ser vazio', 'warning');
+      return;
+    }
+    setProfileLoading(true);
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ name: profileForm.name, phone: profileForm.phone })
+        .eq('id', user!.id);
+
+      if (error) throw error;
+
+      // Atualizar estado local
+      setCourier((prev: any) => ({
+        ...prev,
+        users: { ...prev.users, name: profileForm.name, phone: profileForm.phone }
+      }));
+      setShowProfileEdit(false);
+      showToast('Perfil atualizado!', 'success');
+    } catch {
+      showToast('Erro ao salvar perfil', 'error');
+    } finally {
+      setProfileLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -76,32 +276,50 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     return () => clearInterval(interval);
   }, [deliveryState, acceptTimer]);
 
-  // GPS Simulation
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    if (courier?.is_online && deliveryState !== 'none') {
-      interval = setInterval(() => {
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(async (pos) => {
-            await supabase.from('couriers').update({
-              last_lat: pos.coords.latitude,
-              last_lng: pos.coords.longitude,
-              location_at: new Date().toISOString()
-            }).eq('id', courier.id);
-          });
-        }
-      }, 5000);
+    let watchId: number;
+
+    if (courier?.is_online && navigator.geolocation) {
+      watchId = navigator.geolocation.watchPosition(
+        async (pos) => {
+          setGpsError(false);
+          await supabase.from('couriers').update({
+            last_lat: pos.coords.latitude,
+            last_lng: pos.coords.longitude,
+            location_at: new Date().toISOString()
+          }).eq('id', courier.id);
+        },
+        (err) => {
+          console.error("Erro no rastreamento contínuo:", err);
+          setGpsError(true);
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+      );
     }
-    return () => clearInterval(interval);
-  }, [courier?.is_online, deliveryState]);
+
+    return () => {
+      if (watchId !== undefined && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchId);
+      }
+    };
+  }, [courier?.is_online, courier?.id]);
 
   const handleAccept = async () => {
-    setLoading(true);
+    setActionLoading(true);
     try {
-      await supabase.from('deliveries').update({ status: 'going_to_store', accepted_at: new Date().toISOString() }).eq('id', activeDelivery.id);
-      await supabase.from('orders').update({ courier_id: courier!.id }).eq('id', activeDelivery.order_id);
+      const { error: delErr } = await supabase.from('deliveries').update({ status: 'going_to_store', accepted_at: new Date().toISOString() }).eq('id', activeDelivery.id);
+      if (delErr) throw delErr;
+
+      const { error: ordErr } = await supabase.from('orders').update({ courier_id: courier!.id }).eq('id', activeDelivery.order_id);
+      if (ordErr) throw ordErr;
+
       setDeliveryState('going_to_store');
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+      showToast('Corrida aceita! Siga para a loja.');
+    } catch (e: any) { 
+      showToast("Erro ao aceitar corrida.", 'error');
+    } finally { 
+      setActionLoading(false); 
+    }
   };
 
   const handleReject = () => {
@@ -110,119 +328,473 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   };
 
   const handleArrivedStore = async () => {
-    setLoading(true);
+    setActionLoading(true);
     try {
       await supabase.from('deliveries').update({ status: 'at_store', pickup_at: new Date().toISOString() }).eq('id', activeDelivery.id);
       setDeliveryState('at_store');
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+    } catch (e) { showToast('Erro ao atualizar status', 'error'); } finally { setActionLoading(false); }
   };
 
   const handlePickup = async () => {
-    setLoading(true);
+    setActionLoading(true);
     try {
       await supabase.from('deliveries').update({ status: 'delivering' }).eq('id', activeDelivery.id);
+      await supabase.from('orders').update({ status: 'delivering' }).eq('id', activeDelivery.order_id);
       setDeliveryState('going_to_client');
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+      showToast('Pedido retirado! Siga para o cliente.');
+    } catch (e) { showToast('Erro ao atualizar status', 'error'); } finally { setActionLoading(false); }
   };
 
   const handleDelivered = async () => {
-    setLoading(true);
+    setActionLoading(true);
     try {
       await supabase.from('deliveries').update({ status: 'delivered', delivered_at: new Date().toISOString() }).eq('id', activeDelivery.id);
       await supabase.from('orders').update({ status: 'delivered', delivered_at: new Date().toISOString() }).eq('id', activeDelivery.order_id);
+      
+      // Update courier balance and total deliveries
+      const newBalance = (courier.available_balance || 0) + activeDelivery.courier_earning;
+      const newTotal = (courier.total_deliveries || 0) + 1;
+      await supabase.from('couriers').update({ available_balance: newBalance, total_deliveries: newTotal }).eq('id', courier.id);
+      setCourier({ ...courier, available_balance: newBalance, total_deliveries: newTotal });
+
       setDeliveryState('none');
       setActiveDelivery(null);
       setActiveTab('earnings');
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+      showToast('Entrega finalizada com sucesso!', 'success');
+    } catch (e) { showToast('Erro ao finalizar entrega', 'error'); } finally { setActionLoading(false); }
   };
 
   const isDeliveryActive = deliveryState !== 'none';
 
-  if (!courier) return <div className="bg-gray-900 h-screen text-white p-8">Carregando...</div>;
+  if (loading && !courier && activeTab !== 'earnings') {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-900">
+        <Loader2 className="animate-spin text-brand-primary mb-4" size={48} />
+        <p className="text-gray-400 font-medium">Carregando painel do motoboy...</p>
+      </div>
+    );
+  }
+
+  if (!loading && !courier) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-900">
+        <p className="text-red-400 font-bold mb-4">Perfil de motoboy não encontrado.</p>
+        <button onClick={onExit} className="px-6 py-2 bg-gray-800 text-white rounded-xl font-bold">Sair do App</button>
+      </div>
+    );
+  }
+
+  if (!courier) return null;
 
   return (
     <div className="w-full max-w-md mx-auto h-screen bg-gray-900 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-800 font-sans">
-      {loading && <div className="absolute inset-0 bg-gray-900/80 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-brand-primary" size={40}/></div>}
+      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       
       {!isDeliveryActive && (
         <div className="bg-gray-900 text-white p-5 flex justify-between items-center border-b border-gray-800 shrink-0">
           <div className="flex items-center">
             <div className="relative">
-              <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center font-bold text-xl border-2 border-gray-700">M</div>
-              <div className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-gray-900 ${courier.is_online ? 'bg-brand-primary' : 'bg-gray-500'}`}></div>
+              {courier.users?.avatar_url ? (
+                <img src={courier.users.avatar_url} alt="Perfil" className="w-12 h-12 rounded-full object-cover border-2 border-gray-700" />
+              ) : (
+                <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center font-bold text-xl border-2 border-gray-700">
+                  {courier.users?.name?.charAt(0).toUpperCase() || 'M'}
+                </div>
+              )}
+              {courier.is_online ? (
+                gpsError ? (
+                  <div className="absolute bottom-0 right-0 w-4 h-4 bg-yellow-500 rounded-full border-2 border-gray-900 flex items-center justify-center"><AlertTriangle size={10} className="text-gray-900"/></div>
+                ) : (
+                  <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-brand-primary rounded-full border-2 border-gray-900"></div>
+                )
+              ) : (
+                <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-gray-500 rounded-full border-2 border-gray-900"></div>
+              )}
             </div>
             <div className="ml-3">
-              <h2 className="font-bold text-sm">Motoboy</h2>
+              <h2 className="font-bold text-sm">{courier.users?.name || 'Motoboy'}</h2>
+              {courier.is_online && (
+                <p className={`text-[10px] font-bold ${gpsError ? 'text-yellow-500' : 'text-brand-primary'}`}>
+                  {gpsError ? '⚠️ GPS com problema' : '● GPS Ativo'}
+                </p>
+              )}
             </div>
           </div>
-          <button onClick={onExit} className="w-10 h-10 bg-gray-800 rounded-full flex items-center justify-center text-gray-400">
-            <LogOut size={18} />
-          </button>
         </div>
       )}
 
       <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col">
+        
+        {/* BANNER DE NOTIFICAÇÕES */}
+        {!isDeliveryActive && activeTab === 'home' && notifPermission === 'default' && (
+          <div className="m-4 bg-gray-800 border border-gray-700 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+            <div className="flex items-center">
+              <div className="w-10 h-10 bg-gray-700 text-brand-primary rounded-full flex items-center justify-center mr-3">
+                <BellRing size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-sm">Ative as Notificações</h3>
+                <p className="text-[10px] text-gray-400">Para não perder nenhuma corrida.</p>
+              </div>
+            </div>
+            <button onClick={requestPermission} className="bg-brand-primary text-white px-4 py-2 rounded-xl font-bold text-xs hover:bg-green-600 transition-colors">
+              Ativar
+            </button>
+          </div>
+        )}
+
         {deliveryState === 'offered' && activeDelivery && (
           <div className="flex-1 flex flex-col bg-gray-900 p-4 justify-center relative">
             <div className="bg-gray-800 w-full rounded-3xl p-6 shadow-2xl relative z-10 border border-gray-700">
               <div className="text-center mb-6"><span className="bg-brand-secondary text-brand-dark text-xs font-bold px-4 py-1.5 rounded-full uppercase tracking-wider animate-pulse">Nova Entrega Disponível</span></div>
+              
+              <div className="mb-6 bg-gray-900 p-4 rounded-xl border border-gray-700">
+                <div className="flex items-start mb-3">
+                  <Store className="text-brand-primary mr-3 mt-1" size={20} />
+                  <div>
+                    <p className="text-white font-bold">{activeDelivery.order.stores?.name}</p>
+                    <p className="text-gray-400 text-xs mt-1">{activeDelivery.order.stores?.addresses?.street}, {activeDelivery.order.stores?.addresses?.number} - {activeDelivery.order.stores?.addresses?.neighborhood}</p>
+                  </div>
+                </div>
+              </div>
+
               <div className="flex justify-between items-end mb-8">
-                <div><p className="text-gray-400 text-sm mb-1">Valor da Entrega</p><p className="text-5xl font-black text-brand-primary">R$ {activeDelivery.courier_earning?.toFixed(2) || '8.50'}</p></div>
+                <div><p className="text-gray-400 text-sm mb-1">Seu Ganho</p><p className="text-5xl font-black text-brand-primary">R$ {activeDelivery.courier_earning?.toFixed(2) || '8.50'}</p></div>
               </div>
               <div className="w-full bg-gray-700 rounded-full h-2 mb-6 overflow-hidden">
                 <div className="bg-brand-secondary h-2 rounded-full transition-all duration-1000 ease-linear" style={{ width: `${(acceptTimer / 15) * 100}%` }}></div>
               </div>
               <div className="flex space-x-3">
-                <button onClick={handleReject} className="flex-1 py-4 rounded-xl font-bold text-gray-300 bg-gray-700">Recusar ({acceptTimer}s)</button>
-                <button onClick={handleAccept} className="flex-[2] py-4 rounded-xl font-bold text-white bg-brand-primary">Aceitar Corrida</button>
+                <button onClick={handleReject} disabled={actionLoading} className="flex-1 py-4 rounded-xl font-bold text-gray-300 bg-gray-700">Recusar ({acceptTimer}s)</button>
+                <button onClick={handleAccept} disabled={actionLoading} className="flex-[2] py-4 rounded-xl font-bold text-white bg-brand-primary flex justify-center items-center">
+                  {actionLoading ? <Loader2 className="animate-spin" size={20}/> : 'Aceitar Corrida'}
+                </button>
               </div>
             </div>
           </div>
         )}
 
-        {deliveryState === 'going_to_store' && (
-          <div className="flex-1 flex flex-col bg-gray-900 p-6 justify-end">
-             <div className="bg-gray-800 p-6 rounded-3xl border border-gray-700">
-              <h2 className="font-bold text-xl text-white mb-4">Siga para a Loja</h2>
-              <button onClick={handleArrivedStore} className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg">Cheguei na Loja</button>
-             </div>
+        {deliveryState === 'going_to_store' && activeDelivery && (
+          <div className="flex-1 flex flex-col bg-gray-900 p-6 justify-between">
+            <div className="mt-8">
+              <h2 className="text-gray-400 text-sm font-bold uppercase tracking-widest mb-2">Coleta na Loja</h2>
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 mb-4">
+                <h3 className="text-2xl font-black text-white mb-1">{activeDelivery.order.stores?.name}</h3>
+                <p className="text-gray-400 text-sm flex items-start mt-2"><MapPin size={16} className="mr-2 shrink-0 mt-0.5"/> {activeDelivery.order.stores?.addresses?.street}, {activeDelivery.order.stores?.addresses?.number} - {activeDelivery.order.stores?.addresses?.neighborhood}</p>
+              </div>
+              
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700">
+                <p className="text-gray-400 text-xs mb-2">Pedido #{activeDelivery.order_id}</p>
+                <div className="space-y-1">
+                  {activeDelivery.order.order_items?.map((item:any) => (
+                    <p key={item.id} className="text-white text-sm font-medium">{item.quantity}x {item.product_name}</p>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            <button onClick={handleArrivedStore} disabled={actionLoading} className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-brand-primary/20">
+              {actionLoading ? <Loader2 className="animate-spin" size={24}/> : 'Cheguei na Loja'}
+            </button>
           </div>
         )}
 
-        {deliveryState === 'at_store' && (
+        {deliveryState === 'at_store' && activeDelivery && (
           <div className="flex-1 flex flex-col bg-gray-900 p-6 justify-center">
             <div className="bg-brand-primary/10 border border-brand-primary/30 rounded-2xl p-6 text-center mb-6">
-              <p className="text-brand-primary text-sm font-bold mb-1 uppercase tracking-widest">Pedido</p>
-              <p className="text-5xl font-black text-white">#{activeDelivery?.order_id}</p>
+              <p className="text-brand-primary text-sm font-bold mb-1 uppercase tracking-widest">Apresente o número</p>
+              <p className="text-6xl font-black text-white">#{activeDelivery?.order_id}</p>
             </div>
-            <button onClick={handlePickup} className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg"><CheckCircle size={20} className="mr-2 inline" /> Confirmar Retirada</button>
+            <button onClick={handlePickup} disabled={actionLoading} className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center">
+              {actionLoading ? <Loader2 className="animate-spin" size={24}/> : <><CheckCircle size={20} className="mr-2" /> Confirmar Retirada</>}
+            </button>
           </div>
         )}
 
-        {deliveryState === 'going_to_client' && (
-          <div className="flex-1 flex flex-col bg-gray-900 p-6 justify-end">
-            <div className="bg-gray-800 p-6 rounded-3xl border border-gray-700">
-              <h2 className="font-bold text-xl text-white mb-4">Siga para o Cliente</h2>
-              <button onClick={handleDelivered} className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg"><CheckCircle size={20} className="mr-2 inline" /> Finalizar Entrega</button>
-             </div>
+        {deliveryState === 'going_to_client' && activeDelivery && (
+          <div className="flex-1 flex flex-col bg-gray-900 p-6 justify-between">
+            <div className="mt-8">
+              <h2 className="text-gray-400 text-sm font-bold uppercase tracking-widest mb-2">Entrega no Cliente</h2>
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 mb-4">
+                <h3 className="text-xl font-bold text-white mb-1">{activeDelivery.order.users?.name}</h3>
+                <p className="text-gray-400 text-sm flex items-start mt-2"><MapPin size={16} className="mr-2 shrink-0 mt-0.5"/> {activeDelivery.order.addresses?.street}, {activeDelivery.order.addresses?.number} {activeDelivery.order.addresses?.complement ? `- ${activeDelivery.order.addresses?.complement}` : ''}</p>
+                <p className="text-gray-400 text-sm ml-6">{activeDelivery.order.addresses?.neighborhood}</p>
+              </div>
+
+              {/* OBSERVAÇÕES DO CLIENTE */}
+              {activeDelivery.order.client_notes && (
+                <div className="bg-yellow-900/30 border border-yellow-600/50 p-4 rounded-2xl mb-4">
+                  <div className="flex items-center text-yellow-500 font-bold mb-2 text-sm"><FileText size={18} className="mr-2"/> OBSERVAÇÕES DO CLIENTE</div>
+                  <p className="text-yellow-100 text-sm font-medium">{activeDelivery.order.client_notes}</p>
+                </div>
+              )}
+
+              {activeDelivery.order.payment_method === 'cash' ? (
+                <div className="bg-green-900/40 border border-green-500/50 p-5 rounded-2xl">
+                  <div className="flex items-center text-green-400 font-bold mb-2"><Banknote size={20} className="mr-2"/> COBRAR EM DINHEIRO</div>
+                  <p className="text-3xl font-black text-white">R$ {activeDelivery.order.total.toFixed(2)}</p>
+                  {activeDelivery.order.change_for && (
+                    <p className="text-green-300 text-sm mt-2 font-medium">Levar troco para R$ {activeDelivery.order.change_for.toFixed(2)}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-blue-900/40 border border-blue-500/50 p-5 rounded-2xl">
+                  <div className="flex items-center text-blue-400 font-bold mb-1"><CreditCard size={20} className="mr-2"/> PAGAMENTO PIX</div>
+                  <p className="text-blue-200 text-sm">O cliente já escolheu pagar via PIX. Combine a chave na entrega. Valor: R$ {activeDelivery.order.total.toFixed(2)}</p>
+                </div>
+              )}
+            </div>
+
+            <button onClick={handleDelivered} disabled={actionLoading} className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-brand-primary/20">
+              {actionLoading ? <Loader2 className="animate-spin" size={24}/> : <><CheckCircle size={20} className="mr-2" /> Finalizar Entrega</>}
+            </button>
           </div>
         )}
 
         {!isDeliveryActive && activeTab === 'home' && (
           <div className="flex-1 flex flex-col p-6 items-center justify-center">
-            <button onClick={toggleOnline} className={`w-56 h-56 rounded-full flex flex-col items-center justify-center shadow-2xl transition-all duration-500 ${courier.is_online ? 'bg-brand-primary scale-105' : 'bg-gray-800 border-4 border-gray-700'}`}>
-              <Power size={56} className={`mb-3 ${courier.is_online ? 'text-white' : 'text-gray-400'}`} />
-              <span className={`font-black text-2xl tracking-wider ${courier.is_online ? 'text-white' : 'text-gray-400'}`}>{courier.is_online ? 'ONLINE' : 'OFFLINE'}</span>
+            <button onClick={toggleOnline} disabled={loading} className={`w-56 h-56 rounded-full flex flex-col items-center justify-center shadow-2xl transition-all duration-500 ${courier.is_online ? 'bg-brand-primary scale-105' : 'bg-gray-800 border-4 border-gray-700 hover:bg-gray-700'}`}>
+              {loading ? <Loader2 className="animate-spin text-white" size={48}/> : (
+                <>
+                  <Power size={56} className={`mb-3 ${courier.is_online ? 'text-white' : 'text-gray-400'}`} />
+                  <span className={`font-black text-2xl tracking-wider ${courier.is_online ? 'text-white' : 'text-gray-400'}`}>{courier.is_online ? 'ONLINE' : 'OFFLINE'}</span>
+                </>
+              )}
             </button>
-            <p className="text-gray-400 mt-10 text-center text-sm font-medium">{courier.is_online ? 'Buscando entregas...' : 'Toque para ficar online.'}</p>
+            <p className="text-gray-400 mt-10 text-center text-sm font-medium">{courier.is_online ? 'Rastreamento GPS ativado. Buscando entregas...' : 'Toque para ligar o GPS e ficar online.'}</p>
+          </div>
+        )}
+
+        {!isDeliveryActive && activeTab === 'earnings' && (
+          <div className="flex-1 flex flex-col p-6 overflow-y-auto">
+            <h2 className="text-2xl font-bold text-white mb-5">Seus Ganhos</h2>
+
+            {/* Cards de saldo total */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700">
+                <div className="w-10 h-10 bg-brand-primary/20 rounded-full flex items-center justify-center text-brand-primary mb-3">
+                  <DollarSign size={20}/>
+                </div>
+                <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Saldo Disponível</p>
+                <p className="text-2xl font-black text-white mt-1">R$ {courier.available_balance?.toFixed(2) || '0.00'}</p>
+              </div>
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700">
+                <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400 mb-3">
+                  <Bike size={20}/>
+                </div>
+                <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Total de Entregas</p>
+                <p className="text-2xl font-black text-white mt-1">{courier.total_deliveries || 0}</p>
+              </div>
+            </div>
+
+            {/* Filtro de período */}
+            <div className="bg-gray-800 rounded-2xl border border-gray-700 p-4 mb-6">
+              <div className="flex bg-gray-900 p-1 rounded-xl mb-4">
+                {([['today', 'Hoje'], ['week', '7 dias'], ['month', '30 dias']] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => setEarningsPeriod(val)}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${earningsPeriod === val ? 'bg-brand-primary text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="text-center">
+                  <p className="text-brand-primary text-2xl font-black">R$ {periodEarnings.toFixed(2)}</p>
+                  <p className="text-gray-400 text-xs mt-1">Ganhos no período</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-white text-2xl font-black">{periodDeliveries}</p>
+                  <p className="text-gray-400 text-xs mt-1">Entregas no período</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Histórico */}
+            <h3 className="text-lg font-bold text-white mb-4">Histórico de Entregas</h3>
+            <div className="space-y-3">
+              {loading && deliveriesHistory.length === 0 ? (
+                <div className="flex justify-center py-8"><Loader2 className="animate-spin text-brand-primary" size={32}/></div>
+              ) : deliveriesHistory.length === 0 ? (
+                <div className="text-center py-10 bg-gray-800 rounded-2xl border border-gray-700">
+                  <Bike size={40} className="text-gray-600 mx-auto mb-3" />
+                  <p className="text-gray-400 text-sm">Nenhuma entrega realizada ainda.<br/>Fique online para receber corridas!</p>
+                </div>
+              ) : (
+                deliveriesHistory.map(delivery => (
+                  <div key={delivery.id} className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex justify-between items-center">
+                    <div>
+                      <p className="font-bold text-white">{delivery.orders?.stores?.name || 'Loja'}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {new Date(delivery.orders?.created_at).toLocaleDateString('pt-BR')} às {new Date(delivery.orders?.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-black text-brand-primary">R$ {delivery.courier_earning?.toFixed(2)}</p>
+                      <span className="text-[10px] font-bold bg-green-900/40 text-green-400 px-2 py-0.5 rounded mt-1 inline-block">
+                        <CheckCircle size={10} className="inline mr-1 mb-0.5"/> Entregue
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+              
+              {/* Botão carregar mais */}
+              {earningsHasMore && deliveriesHistory.length > 0 && (
+                <div className="flex justify-center mt-4">
+                  <button
+                    onClick={() => {
+                      const next = earningsPage + 1;
+                      setEarningsPage(next);
+                      fetchEarningsHistory(next, true);
+                    }}
+                    disabled={loading}
+                    className="px-6 py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-xl font-bold hover:bg-gray-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : null}
+                    Carregar mais
+                  </button>
+                </div>
+              )}
+              {!earningsHasMore && deliveriesHistory.length > 0 && (
+                <p className="text-center text-gray-500 text-sm mt-4 pb-4">Todas as entregas foram carregadas.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!isDeliveryActive && activeTab === 'profile' && (
+          <div className="flex-1 flex flex-col p-6 overflow-y-auto">
+            <h2 className="text-2xl font-bold text-white mb-6">Meu Perfil</h2>
+
+            {/* Avatar e nome */}
+            <div className="flex flex-col items-center mb-8">
+              <div className="w-24 h-24 rounded-full bg-gray-800 border-4 border-brand-primary flex items-center justify-center text-brand-primary font-black text-4xl mb-4 overflow-hidden">
+                {courier?.users?.avatar_url
+                  ? <img src={courier.users.avatar_url} alt="Perfil" className="w-full h-full object-cover" />
+                  : (courier?.users?.name?.charAt(0).toUpperCase() || 'M')
+                }
+              </div>
+              <h3 className="text-xl font-black text-white">{courier?.users?.name || 'Motoboy'}</h3>
+              <p className="text-gray-400 text-sm mt-1">{courier?.users?.email}</p>
+              <div className="flex items-center gap-2 mt-2">
+                {courier?.is_approved
+                  ? <span className="text-xs font-bold bg-green-900/40 text-green-400 px-3 py-1 rounded-full border border-green-800">✓ Aprovado</span>
+                  : <span className="text-xs font-bold bg-yellow-900/40 text-yellow-400 px-3 py-1 rounded-full border border-yellow-800">⏳ Em análise</span>
+                }
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 text-center">
+                <p className="text-2xl font-black text-brand-primary">{courier?.total_deliveries || 0}</p>
+                <p className="text-gray-400 text-xs mt-1">Entregas realizadas</p>
+              </div>
+              <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 text-center">
+                <p className="text-2xl font-black text-white">R$ {courier?.available_balance?.toFixed(2) || '0.00'}</p>
+                <p className="text-gray-400 text-xs mt-1">Saldo disponível</p>
+              </div>
+            </div>
+
+            {/* Dados editáveis */}
+            {!showProfileEdit ? (
+              <div className="bg-gray-800 rounded-2xl border border-gray-700 p-5 space-y-4">
+                <div className="flex justify-between items-center mb-2">
+                  <h4 className="font-bold text-white">Dados Pessoais</h4>
+                  <button
+                    onClick={() => {
+                      setProfileForm({ name: courier?.users?.name || '', phone: courier?.users?.phone || '' });
+                      setShowProfileEdit(true);
+                    }}
+                    className="text-brand-primary text-sm font-bold hover:underline"
+                  >
+                    Editar
+                  </button>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Nome</p>
+                  <p className="text-white font-medium">{courier?.users?.name || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">E-mail</p>
+                  <p className="text-white font-medium">{courier?.users?.email || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Telefone</p>
+                  <p className="text-white font-medium">{courier?.users?.phone || 'Não informado'}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gray-800 rounded-2xl border border-gray-700 p-5 space-y-4">
+                <h4 className="font-bold text-white mb-2">Editar Dados</h4>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Nome</label>
+                  <input
+                    type="text"
+                    value={profileForm.name}
+                    onChange={e => setProfileForm({ ...profileForm, name: e.target.value })}
+                    className="w-full bg-gray-900 border border-gray-600 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Telefone</label>
+                  <input
+                    type="tel"
+                    value={profileForm.phone}
+                    onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })}
+                    placeholder="(00) 00000-0000"
+                    className="w-full bg-gray-900 border border-gray-600 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none"
+                  />
+                </div>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setShowProfileEdit(false)}
+                    className="flex-1 py-3 bg-gray-700 text-gray-300 rounded-xl font-bold hover:bg-gray-600 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleSaveProfile}
+                    disabled={profileLoading}
+                    className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center disabled:opacity-50"
+                  >
+                    {profileLoading ? <Loader2 size={18} className="animate-spin" /> : 'Salvar'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Sair */}
+            <button
+              onClick={onExit}
+              className="mt-6 w-full py-3 bg-gray-800 border border-gray-700 text-red-400 rounded-xl font-bold hover:bg-gray-700 transition-colors flex items-center justify-center gap-2"
+            >
+              <LogOut size={18} /> Sair do App
+            </button>
           </div>
         )}
       </div>
 
       {!isDeliveryActive && (
-        <div className="bg-gray-900 border-t border-gray-800 flex justify-around py-3 pb-6 shrink-0">
-          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center w-16 ${activeTab === 'home' ? 'text-brand-primary' : 'text-gray-500'}`}><Power size={24} /><span className="text-[10px] mt-1 font-medium">Início</span></button>
-          <button onClick={() => setActiveTab('earnings')} className={`flex flex-col items-center w-16 ${activeTab === 'earnings' ? 'text-brand-primary' : 'text-gray-500'}`}><DollarSign size={24} /><span className="text-[10px] mt-1 font-medium">Ganhos</span></button>
+        <div className="bg-gray-900 border-t border-gray-800 flex justify-around py-3 pb-6 shrink-0 z-20">
+          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center w-16 ${activeTab === 'home' ? 'text-brand-primary' : 'text-gray-500'}`}>
+            <Power size={24} /><span className="text-[10px] mt-1 font-medium">Início</span>
+          </button>
+          <button onClick={() => setActiveTab('earnings')} className={`flex flex-col items-center w-16 ${activeTab === 'earnings' ? 'text-brand-primary' : 'text-gray-500'}`}>
+            <DollarSign size={24} /><span className="text-[10px] mt-1 font-medium">Ganhos</span>
+          </button>
+          <button
+            onClick={() => {
+              setProfileForm({ name: courier?.users?.name || '', phone: courier?.users?.phone || '' });
+              setActiveTab('profile');
+            }}
+            className={`flex flex-col items-center w-16 ${activeTab === 'profile' ? 'text-brand-primary' : 'text-gray-500'}`}
+          >
+            <User size={24} /><span className="text-[10px] mt-1 font-medium">Perfil</span>
+          </button>
         </div>
       )}
     </div>

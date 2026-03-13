@@ -28,7 +28,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .from('users')
         .select('*')
         .eq('id', userId)
-        .single();
+        .maybeSingle(); // CORREÇÃO: Usar maybeSingle para evitar erro se o perfil ainda estiver sendo criado
       
       if (error) throw error;
       setProfile(data);

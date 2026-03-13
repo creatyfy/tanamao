@@ -26,6 +26,7 @@ export interface Store {
   is_approved: boolean;
   status: string;
   commission_rate: number;
+  addresses?: any;
 }
 
 export interface Product {
@@ -39,14 +40,40 @@ export interface Product {
   category_id: number;
 }
 
+export interface Coupon {
+  id: number;
+  code: string;
+  type: 'fixed' | 'percentage';
+  value: number;
+  min_order_value: number;
+  max_uses: number | null;
+  max_uses_per_user: number;
+  store_id: number;
+  created_by: string;
+  starts_at: string | null;
+  expires_at: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface Order {
   id: number;
   client_id: string;
   store_id: number;
   courier_id: number | null;
   status: string;
+  subtotal: number;
+  delivery_fee: number;
+  discount_amount: number;
   total: number;
+  payment_method: string;
+  change_for: number | null;
+  coupon_id?: number | null;
+  client_notes?: string | null;
+  cancel_reason?: string | null;
+  cancelled_by?: string | null;
   created_at: string;
+  order_items?: any[];
 }
 
 export interface Delivery {
@@ -65,4 +92,14 @@ export interface Courier {
   status: string;
   available_balance: number;
   total_deliveries: number;
+}
+
+export interface Review {
+  id: number;
+  reviewer_id: string;
+  target_type: string;
+  target_id: number;
+  rating: number;
+  comment: string | null;
+  created_at: string;
 }

@@ -5,7 +5,7 @@ import ClientApp from './apps/ClientApp';
 import StoreApp from './apps/StoreApp';
 import CourierApp from './apps/CourierApp';
 import AdminApp from './apps/AdminApp';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Clock } from 'lucide-react';
 
 function App() {
   const { user, profile, loading, signOut } = useAuth();
@@ -22,6 +22,20 @@ function App() {
 
   if (!user || !profile) {
     return <MobileAuth />;
+  }
+
+  // Bloqueia o acesso de usuários não aprovados (is_active: false)
+  if (!profile.is_active && profile.role !== 'admin') {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
+        <div className="w-24 h-24 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mb-6 shadow-inner">
+          <Clock size={48} />
+        </div>
+        <h2 className="text-2xl font-black text-brand-dark mb-2">Cadastro em Análise</h2>
+        <p className="text-gray-600 mb-8 font-medium max-w-sm">Seu perfil está em fase de aprovação pela nossa equipe. Você poderá acessar o aplicativo assim que for liberado!</p>
+        <button onClick={signOut} className="px-8 py-4 bg-brand-primary text-white rounded-2xl font-bold w-full max-w-xs shadow-lg hover:bg-green-600 transition-colors">Voltar para o Login</button>
+      </div>
+    );
   }
 
   if (profile.role === 'client') return <ClientApp onExit={signOut} />;

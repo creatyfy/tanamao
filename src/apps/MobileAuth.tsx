@@ -3,15 +3,16 @@ import { supabase } from '../lib/supabase';
 import { 
   Mail, Lock, User, ArrowRight, Store, Bike, 
   FileText, CheckCircle, Loader2, Phone, MapPin, DollarSign,
-  Clock, Map, CreditCard, Calendar
+  Clock, Map, CreditCard, Calendar, Camera
 } from 'lucide-react';
 
-const InputField = ({ icon: Icon, placeholder, type = "text", required = false, name, value, onChange }: any) => (
+const InputField = ({ icon: Icon, placeholder, type = "text", required = false, name, value, onChange, maxLength }: any) => (
   <div className="relative mb-3">
     {Icon && <Icon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />}
     <input 
       type={type} 
       name={name}
+      maxLength={maxLength}
       placeholder={placeholder} 
       required={required}
       value={value}
@@ -28,24 +29,24 @@ const FormSection = ({ title, children }: { title: string, children: React.React
   </div>
 );
 
+const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
+
 export default function MobileAuth() {
   const [isLogin, setIsLogin] = useState(true);
   const [registerRole, setRegisterRole] = useState<'client' | 'store' | 'courier'>('client');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   
-  // Estado unificado para todos os campos do formulário
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  
   const [formData, setFormData] = useState({
-    // Comum
     email: '', password: '', phone: '',
     cep: '', street: '', number: '', complement: '', neighborhood: '', city: '', state: '',
-    // Cliente
     name: '',
-    // Loja
     storeName: '', ownerName: '', cnpj: '', description: '', category: '', prepTime: '', minOrder: '', deliveryFee: '',
     acceptsPix: true, acceptsCard: true, acceptsCash: false,
-    // Motoboy
-    fullName: '', cpf: '', rg: '', birthDate: '', vehicleType: 'moto', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', pixKey: '', operationCity: ''
+    fullName: '', cpf: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', pixKey: '', operationCity: ''
   });
 
   const handleChange = (e: any) => {
@@ -53,12 +54,31 @@ export default function MobileAuth() {
     setFormData(prev => ({ ...prev, [name]: type === 'checkbox' ? checked : value }));
   };
 
+  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      setPhotoFile(file);
+      setPhotoPreview(URL.createObjectURL(file));
+    }
+  };
+
   const handleAuthError = (err: any) => {
-    console.error("Auth Error Details:", err);
+    console.error("Auth Error Debug:", err);
     let msg = err.message || 'Ocorreu um erro inesperado.';
-    if (msg.includes('Invalid login credentials')) msg = 'E-mail ou senha incorretos.';
-    else if (msg.includes('User already registered')) msg = 'Este e-mail já está cadastrado.';
-    else if (msg.includes('rate limit')) msg = 'Muitas tentativas. Aguarde um momento.';
+    
+    if (msg.includes('Invalid login credentials')) {
+      msg = 'E-mail ou senha incorretos.';
+    } else if (msg.includes('rate limit')) {
+      msg = 'Muitas tentativas. Aguarde um momento.';
+    } else if (msg.includes('duplicate key')) {
+      msg = 'Algum dado informado (como CPF, CNPJ ou Placa) já está em uso por outra conta.';
+    } else if (msg.includes('too long')) {
+      msg = 'Algum campo excedeu o limite de caracteres. Verifique os dados informados.';
+    } else if (msg.includes('Failed to fetch')) {
+      msg = 'Erro de conexão. Verifique sua internet.';
+    } else if (msg.includes('new row violates row-level security')) {
+      msg = 'Erro de permissão no banco de dados. Por favor, aplique as migrações SQL pendentes.';
+    }
     setErrorMsg(msg);
   };
 
@@ -69,134 +89,167 @@ export default function MobileAuth() {
     
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email: formData.email, password: formData.password });
-        if (error) throw error;
+        const { data, error: signInError } = await supabase.auth.signInWithPassword({ 
+          email: formData.email, 
+          password: formData.password 
+        });
+        
+        if (signInError) throw signInError;
+
+        const { data: profile } = await supabase.from('users').select('id').eq('id', data.user.id).maybeSingle();
+        if (!profile) {
+          await supabase.auth.signOut();
+          throw new Error('Seu cadastro ficou incompleto. Por favor, vá em "Cadastre-se agora", preencha os dados e use a MESMA SENHA para finalizar.');
+        }
+
       } else {
         const roleMap: Record<string, string> = { client: 'client', store: 'store_owner', courier: 'courier' };
         const userName = registerRole === 'store' ? formData.ownerName : (registerRole === 'courier' ? formData.fullName : formData.name);
 
-        const { data, error } = await supabase.auth.signUp({
+        let userId = null;
+
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
           options: { data: { name: userName, role: roleMap[registerRole] } }
         });
-        if (error) throw error;
 
-        if (data.user) {
-          const userId = data.user.id;
-
-          // 1. Criar Usuário
-          const { error: userErr } = await supabase.from('users').insert({
-            id: userId,
-            name: userName || formData.email.split('@')[0],
-            email: formData.email,
-            phone: formData.phone,
-            role: roleMap[registerRole],
-            is_active: registerRole === 'client'
-          });
-          if (userErr && !userErr.message.includes('duplicate key')) throw userErr;
-
-          // 2. Criar Endereço (Para Loja e Motoboy)
-          let addressId = null;
-          if (registerRole === 'store' || registerRole === 'courier') {
-            const { data: addrData, error: addrErr } = await supabase.from('addresses').insert({
-              user_id: userId,
-              street: formData.street || 'Não informado',
-              number: formData.number || 'S/N',
-              complement: formData.complement,
-              neighborhood: formData.neighborhood || 'Não informado',
-              city: formData.city || 'Não informado',
-              state: formData.state || 'SP',
-              zip_code: formData.cep || '00000000'
-            }).select().single();
-            if (!addrErr && addrData) addressId = addrData.id;
-          }
-
-          // 3. Criar Loja
-          if (registerRole === 'store') {
-            const { error: storeErr } = await supabase.from('stores').insert({
-              owner_id: userId,
-              name: formData.storeName || 'Nova Loja',
-              slug: `loja-${Date.now()}`,
-              cnpj: formData.cnpj,
-              phone: formData.phone,
-              description: formData.description,
-              avg_prep_time_min: parseInt(formData.prepTime) || 30,
-              min_order_value: parseFloat(formData.minOrder) || 0,
-              delivery_fee: parseFloat(formData.deliveryFee) || 0,
-              accepts_pix: formData.acceptsPix,
-              accepts_card: formData.acceptsCard,
-              accepts_cash: formData.acceptsCash,
-              address_id: addressId,
-              status: 'pending',
-              is_approved: false
+        if (signUpError) {
+          if (signUpError.message.includes('already registered')) {
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+              email: formData.email,
+              password: formData.password
             });
-            if (storeErr) throw storeErr;
-            
-            alert('Cadastro de Loja enviado com sucesso! Aguarde a aprovação do administrador.');
-            await supabase.auth.signOut();
-            setIsLogin(true);
-          } 
-          
-          // 4. Criar Motoboy
-          else if (registerRole === 'courier') {
-            const { error: courierErr } = await supabase.from('couriers').insert({
-              user_id: userId,
-              cpf: formData.cpf || '00000000000',
-              vehicle_type: formData.vehicleType,
-              vehicle_brand: formData.vehicleBrand,
-              vehicle_model: formData.vehicleModel,
-              vehicle_year: parseInt(formData.vehicleYear) || new Date().getFullYear(),
-              license_plate: formData.licensePlate,
-              pix_key: formData.pixKey,
-              operation_city: formData.operationCity || formData.city,
-              status: 'pending',
-              is_approved: false
-            });
-            if (courierErr) throw courierErr;
-            
-            alert('Cadastro de Motoboy enviado com sucesso! Aguarde a aprovação do administrador.');
-            await supabase.auth.signOut();
-            setIsLogin(true);
-          }
-        }
-      }
-    } catch (error: any) {
-      handleAuthError(error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleTestLogin = async (testEmail: string, role: string) => {
-    setLoading(true);
-    setErrorMsg('');
-    const testPassword = '123456';
-
-    try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email: testEmail, password: testPassword });
-
-      if (signInError) {
-        if (signInError.message.includes('Invalid login credentials')) {
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email: testEmail, password: testPassword, options: { data: { name: `Teste ${role}`, role } }
-          });
-          if (signUpError) throw signUpError;
-
-          if (signUpData.user) {
-            const userId = signUpData.user.id;
-            await supabase.from('users').insert({ id: userId, name: `Teste ${role}`, email: testEmail, role: role, is_active: true });
-
-            if (role === 'store_owner') {
-              await supabase.from('stores').insert({ owner_id: userId, name: 'Loja de Teste', slug: `loja-teste-${Date.now()}`, status: 'active', is_approved: true, is_open: true });
-            } else if (role === 'courier') {
-              await supabase.from('couriers').insert({ user_id: userId, cpf: '00000000000', vehicle_type: 'moto', status: 'active', is_approved: true });
-            }
-            await supabase.auth.signInWithPassword({ email: testEmail, password: testPassword });
+            if (signInError) throw new Error('Este e-mail já está cadastrado. Se for você, a senha está incorreta.');
+            userId = signInData.user.id;
+          } else {
+            throw signUpError;
           }
         } else {
-          throw signInError;
+          userId = signUpData.user?.id;
         }
+
+        if (!userId) throw new Error('Falha ao obter ID do usuário.');
+
+        let finalAvatarUrl = null;
+        if (photoFile && userId) {
+          try {
+            const fileExt = photoFile.name ? photoFile.name.split('.').pop() : 'jpg';
+            const fileName = `avatar_${userId}_${Date.now()}.${fileExt}`;
+            
+            const { error: uploadError } = await supabase.storage
+              .from('avatars')
+              .upload(fileName, photoFile, { cacheControl: '3600', upsert: false });
+
+            if (!uploadError) {
+              const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
+              finalAvatarUrl = publicUrlData.publicUrl;
+            } else {
+              console.warn('Aviso: Falha ao fazer upload da foto. O bucket "avatars" pode não existir.', uploadError);
+            }
+          } catch (err) {
+            console.warn('Erro ao processar foto:', err);
+          }
+        }
+
+        const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : null;
+        const cleanCep = formData.cep ? formData.cep.replace(/\D/g, '') : '00000000';
+        const cleanCnpj = formData.cnpj ? formData.cnpj.replace(/\D/g, '') : null;
+        const cleanCpf = formData.cpf ? formData.cpf.replace(/\D/g, '') : '00000000000';
+        const isActive = registerRole === 'client';
+
+        const userData: any = {
+          id: userId,
+          name: userName || formData.email.split('@')[0],
+          email: formData.email,
+          phone: cleanPhone,
+          role: roleMap[registerRole],
+          is_active: isActive, 
+          password_hash: 'supabase_auth'
+        };
+        
+        if (finalAvatarUrl) userData.avatar_url = finalAvatarUrl;
+
+        const { error: userErr } = await supabase.from('users').upsert(userData, { onConflict: 'id' });
+        if (userErr) throw new Error(`Erro ao salvar perfil: ${userErr.message}`);
+
+        let addressId = null;
+        if (registerRole === 'store' || registerRole === 'courier') {
+          const addressData = {
+            user_id: userId,
+            street: formData.street || 'Não informado',
+            number: formData.number || 'S/N',
+            complement: formData.complement || null,
+            neighborhood: formData.neighborhood || 'Não informado',
+            city: formData.city || 'Não informado',
+            state: formData.state || 'SP',
+            zip_code: cleanCep
+          };
+
+          const { data: existingAddr } = await supabase.from('addresses').select('id').eq('user_id', userId).maybeSingle();
+          
+          if (existingAddr) {
+            addressId = existingAddr.id;
+            await supabase.from('addresses').update(addressData).eq('id', addressId);
+          } else {
+            const { data: newAddr, error: addrErr } = await supabase.from('addresses').insert(addressData).select().single();
+            if (addrErr) throw new Error(`Erro ao salvar endereço: ${addrErr.message}`);
+            addressId = newAddr.id;
+          }
+        }
+
+        if (registerRole === 'store') {
+          const storeData = {
+            owner_id: userId,
+            name: formData.storeName || 'Nova Loja',
+            slug: `loja-${userId.substring(0,8)}`,
+            cnpj: cleanCnpj,
+            phone: cleanPhone,
+            description: formData.description || null,
+            avg_prep_time_min: formData.prepTime ? parseInt(formData.prepTime) : 30,
+            min_order_value: formData.minOrder ? parseFloat(formData.minOrder) : 0,
+            delivery_fee: formData.deliveryFee ? parseFloat(formData.deliveryFee) : 0,
+            accepts_pix: formData.acceptsPix,
+            accepts_card: formData.acceptsCard,
+            accepts_cash: formData.acceptsCash,
+            address_id: addressId,
+            status: 'pending', 
+            is_approved: false 
+          };
+
+          const { data: existingStore } = await supabase.from('stores').select('id').eq('owner_id', userId).maybeSingle();
+          if (existingStore) {
+            await supabase.from('stores').update(storeData).eq('id', existingStore.id);
+          } else {
+            const { error: storeErr } = await supabase.from('stores').insert(storeData);
+            if (storeErr) throw new Error(`Erro ao criar loja: ${storeErr.message}`);
+          }
+        } 
+        else if (registerRole === 'courier') {
+          const courierData = {
+            user_id: userId,
+            cpf: cleanCpf,
+            vehicle_type: formData.vehicleType,
+            vehicle_brand: formData.vehicleBrand || null,
+            vehicle_model: formData.vehicleModel || null,
+            vehicle_year: formData.vehicleYear ? parseInt(formData.vehicleYear) : new Date().getFullYear(),
+            license_plate: formData.licensePlate || null,
+            pix_key: formData.pixKey || null,
+            operation_city: formData.operationCity || formData.city,
+            status: 'pending', 
+            is_approved: false 
+          };
+
+          const { data: existingCourier } = await supabase.from('couriers').select('id').eq('user_id', userId).maybeSingle();
+          if (existingCourier) {
+            await supabase.from('couriers').update(courierData).eq('id', existingCourier.id);
+          } else {
+            const { error: courierErr } = await supabase.from('couriers').insert(courierData);
+            if (courierErr) throw new Error(`Erro ao criar motoboy: ${courierErr.message}`);
+          }
+        }
+
+        window.location.reload();
       }
     } catch (error: any) {
       handleAuthError(error);
@@ -228,23 +281,13 @@ export default function MobileAuth() {
         </div>
 
         <div className="p-6 flex-1 flex flex-col">
-          {errorMsg && <div className="bg-red-50 text-red-500 p-3 rounded-xl text-sm font-bold mb-4 text-center border border-red-100">{errorMsg}</div>}
+          {errorMsg && <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-bold mb-4 text-center border border-red-200 shadow-sm">{errorMsg}</div>}
 
           <form onSubmit={handleSubmit} className="flex-1 flex flex-col">
             {isLogin ? (
               <div className="space-y-4">
                 <InputField icon={Mail} name="email" placeholder="Seu e-mail" type="email" required value={formData.email} onChange={handleChange} />
                 <InputField icon={Lock} name="password" placeholder="Sua senha" type="password" required value={formData.password} onChange={handleChange} />
-                
-                <div className="mt-6 border-t border-gray-100 pt-6">
-                  <p className="text-xs font-bold text-gray-400 text-center mb-3 uppercase tracking-wider">Acesso Rápido (Testes)</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <button type="button" onClick={() => handleTestLogin('cliente@teste.com', 'client')} disabled={loading} className="py-3 bg-gray-50 text-gray-600 rounded-xl text-sm font-bold hover:bg-gray-100 border border-gray-200 flex items-center justify-center"><User size={16} className="mr-2" /> Cliente</button>
-                    <button type="button" onClick={() => handleTestLogin('loja@teste.com', 'store_owner')} disabled={loading} className="py-3 bg-brand-light text-brand-primary rounded-xl text-sm font-bold hover:bg-green-100 border border-brand-primary/20 flex items-center justify-center"><Store size={16} className="mr-2" /> Loja</button>
-                    <button type="button" onClick={() => handleTestLogin('motoboy@teste.com', 'courier')} disabled={loading} className="py-3 bg-gray-50 text-gray-600 rounded-xl text-sm font-bold hover:bg-gray-100 border border-gray-200 flex items-center justify-center"><Bike size={16} className="mr-2" /> Motoboy</button>
-                    <button type="button" onClick={() => handleTestLogin('admin@teste.com', 'admin')} disabled={loading} className="py-3 bg-gray-50 text-gray-600 rounded-xl text-sm font-bold hover:bg-gray-100 border border-gray-200 flex items-center justify-center"><Lock size={16} className="mr-2" /> Admin</button>
-                  </div>
-                </div>
               </div>
             ) : (
               <div className="space-y-2">
@@ -280,7 +323,12 @@ export default function MobileAuth() {
                       <InputField name="neighborhood" placeholder="Bairro" required value={formData.neighborhood} onChange={handleChange} />
                       <div className="flex space-x-2">
                         <div className="flex-[2]"><InputField name="city" placeholder="Cidade" required value={formData.city} onChange={handleChange} /></div>
-                        <div className="flex-1"><InputField name="state" placeholder="Estado (UF)" required value={formData.state} onChange={handleChange} /></div>
+                        <div className="flex-1 relative mb-3">
+                          <select name="state" required value={formData.state} onChange={handleChange} className="w-full bg-white border border-gray-200 rounded-xl py-3 pl-4 pr-4 focus:outline-none focus:ring-2 focus:ring-brand-primary text-sm font-medium text-brand-dark appearance-none">
+                            <option value="" disabled>UF</option>
+                            {UFS.map(uf => <option key={uf} value={uf}>{uf}</option>)}
+                          </select>
+                        </div>
                       </div>
                     </FormSection>
                     <FormSection title="Operação e Taxas">
@@ -300,6 +348,31 @@ export default function MobileAuth() {
 
                 {registerRole === 'courier' && (
                   <>
+                    <FormSection title="Foto de Perfil (Selfie)">
+                      <div className="flex flex-col items-center justify-center py-2">
+                        <label htmlFor="camera-upload" className="w-32 h-32 rounded-full bg-gray-100 border-4 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative shadow-inner cursor-pointer hover:bg-gray-200 transition-colors">
+                          {photoPreview ? (
+                            <img src={photoPreview} alt="Preview" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="flex flex-col items-center text-gray-400">
+                              <Camera size={32} className="mb-1" />
+                              <span className="text-[10px] font-bold uppercase text-center leading-tight px-2">Tirar<br/>Selfie</span>
+                            </div>
+                          )}
+                        </label>
+                        <input
+                          id="camera-upload"
+                          type="file"
+                          accept="image/*"
+                          capture="user"
+                          onChange={handlePhotoChange}
+                          className="hidden"
+                        />
+                        <p className="text-xs text-gray-500 mt-3 text-center max-w-[250px]">
+                          Toque acima para abrir a câmera do seu celular e tirar uma foto do seu rosto.
+                        </p>
+                      </div>
+                    </FormSection>
                     <FormSection title="Dados Pessoais">
                       <InputField icon={User} name="fullName" placeholder="Nome completo" required value={formData.fullName} onChange={handleChange} />
                       <InputField icon={FileText} name="cpf" placeholder="CPF" required value={formData.cpf} onChange={handleChange} />
@@ -315,22 +388,28 @@ export default function MobileAuth() {
                         <div className="flex-[2]"><InputField name="street" placeholder="Rua" required value={formData.street} onChange={handleChange} /></div>
                         <div className="flex-1"><InputField name="number" placeholder="Número" required value={formData.number} onChange={handleChange} /></div>
                       </div>
+                      <InputField name="complement" placeholder="Complemento" value={formData.complement} onChange={handleChange} />
                       <InputField name="neighborhood" placeholder="Bairro" required value={formData.neighborhood} onChange={handleChange} />
                       <div className="flex space-x-2">
                         <div className="flex-[2]"><InputField name="city" placeholder="Cidade" required value={formData.city} onChange={handleChange} /></div>
-                        <div className="flex-1"><InputField name="state" placeholder="Estado (UF)" required value={formData.state} onChange={handleChange} /></div>
+                        <div className="flex-1 relative mb-3">
+                          <select name="state" required value={formData.state} onChange={handleChange} className="w-full bg-white border border-gray-200 rounded-xl py-3 pl-4 pr-4 focus:outline-none focus:ring-2 focus:ring-brand-primary text-sm font-medium text-brand-dark appearance-none">
+                            <option value="" disabled>UF</option>
+                            {UFS.map(uf => <option key={uf} value={uf}>{uf}</option>)}
+                          </select>
+                        </div>
                       </div>
                     </FormSection>
                     <FormSection title="Informações do Veículo">
                       <div className="relative mb-3">
                         <Bike className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                         <select name="vehicleType" value={formData.vehicleType} onChange={handleChange} className="w-full bg-white border border-gray-200 rounded-xl py-3 pl-11 pr-4 focus:outline-none focus:ring-2 focus:ring-brand-primary text-sm font-medium text-brand-dark appearance-none">
-                          <option value="moto">Moto</option>
-                          <option value="bicicleta">Bicicleta</option>
-                          <option value="carro">Carro</option>
+                          <option value="motorcycle">Moto</option>
+                          <option value="bicycle">Bicicleta</option>
+                          <option value="car">Carro</option>
                         </select>
                       </div>
-                      {formData.vehicleType !== 'bicicleta' && (
+                      {formData.vehicleType !== 'bicycle' && (
                         <>
                           <InputField name="vehicleBrand" placeholder="Marca (ex: Honda)" value={formData.vehicleBrand} onChange={handleChange} />
                           <InputField name="vehicleModel" placeholder="Modelo (ex: CG 160)" value={formData.vehicleModel} onChange={handleChange} />
@@ -354,7 +433,7 @@ export default function MobileAuth() {
 
             <button type="submit" disabled={loading} className={`w-full bg-brand-primary text-white rounded-2xl py-4 font-bold text-lg shadow-lg shadow-brand-primary/30 hover:bg-green-600 transition-colors flex justify-center items-center mt-6 mb-4 shrink-0 ${loading ? 'opacity-70' : ''}`}>
               {loading ? <Loader2 className="animate-spin" size={20} /> : (
-                <>{isLogin ? 'Entrar' : registerRole === 'client' ? 'Cadastrar' : 'Enviar para Aprovação'} {isLogin ? <ArrowRight size={20} className="ml-2" /> : <CheckCircle size={20} className="ml-2" />}</>
+                <>{isLogin ? 'Entrar' : 'Cadastrar'} {isLogin ? <ArrowRight size={20} className="ml-2" /> : <CheckCircle size={20} className="ml-2" />}</>
               )}
             </button>
           </form>

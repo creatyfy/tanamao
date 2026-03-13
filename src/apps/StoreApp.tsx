@@ -1,47 +1,170 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Store, Order, Product } from '../types';
+import { Store, Order, Product, Coupon } from '../types';
+import { Toast } from '../components/Toast';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 import { 
   LayoutDashboard, ShoppingBag, Package, DollarSign, LogOut, 
   Check, X, Clock, Plus, Bell, Star, BarChart3, Tag, 
   FolderTree, Bike, Settings, ChevronRight, Edit2, Trash2, 
-  Image as ImageIcon, Search, MapPin, MessageSquare, Loader2
+  Image as ImageIcon, Search, MapPin, MessageSquare, Loader2, History, Ticket, Percent, UploadCloud, BellRing
 } from 'lucide-react';
 
 export default function StoreApp({ onExit }: { onExit: () => void }) {
   const { user } = useAuth();
+  const { permission: notifPermission, requestPermission, sendNotification } = usePushNotifications();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   
-  // Data
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => setToast({ message, type });
+  
   const [store, setStore] = useState<Store | null>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [productCategories, setProductCategories] = useState<any[]>([]);
+  
+  // Dashboard Metrics
+  const [dashboardMetrics, setDashboardMetrics] = useState({ totalOrders: 0, deliveredOrders: 0, revenue: 0 });
+
+  // History Tab
+  const [historyFilter, setHistoryFilter] = useState<'today' | 'yesterday' | 'week'>('today');
+  const [historyOrders, setHistoryOrders] = useState<any[]>([]);
+  const [lastUpdate, setLastUpdate] = useState(Date.now());
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyHasMore, setHistoryHasMore] = useState(true);
+  const PAGE_SIZE = 20;
+
+  // Product Modal State
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [productForm, setProductForm] = useState({ name: '', description: '', price: '', image_url: '', is_available: true, category_id: '' });
+  const [productImageFile, setProductImageFile] = useState<File | null>(null);
+  const [productImagePreview, setProductImagePreview] = useState<string | null>(null);
+
+  // Category Modal State
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<any>(null);
+  const [categoryForm, setCategoryForm] = useState({ name: '', sort_order: '0', is_active: true });
+
+  // Coupon Modal State
+  const [showCouponModal, setShowCouponModal] = useState(false);
+  const [couponForm, setCouponForm] = useState({ code: '', type: 'percentage', value: '', min_order_value: '0', expires_at: '', is_active: true });
+
+  // Confirm Modal
+  const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void} | null>(null);
 
   useEffect(() => {
     if (user) fetchStoreData();
   }, [user]);
 
+  useEffect(() => {
+    if (activeTab === 'history' && store) {
+      setHistoryPage(0);
+      setHistoryOrders([]);
+      setHistoryHasMore(true);
+      fetchHistoryOrders(0, false);
+    }
+    if (activeTab === 'coupons' && store) fetchCoupons(store.id);
+    if (activeTab === 'categories' && store) fetchProductCategories(store.id);
+  }, [activeTab, historyFilter, store, lastUpdate]);
+
   const fetchStoreData = async () => {
     setLoading(true);
     try {
-      // Get Store
-      const { data: storeData } = await supabase.from('stores').select('*').eq('owner_id', user!.id).single();
+      const { data: storeData } = await supabase.from('stores').select('*').eq('owner_id', user!.id).maybeSingle();
       if (storeData) {
         setStore(storeData);
         fetchOrders(storeData.id);
         fetchProducts(storeData.id);
+        fetchProductCategories(storeData.id);
+        fetchDashboardMetrics(storeData.id);
         
-        // Realtime Orders
         const channel = supabase.channel(`store_orders_${storeData.id}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `store_id=eq.${storeData.id}` }, () => {
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `store_id=eq.${storeData.id}` }, (payload) => {
+            
+            // Dispara notificação se for um NOVO pedido
+            if (payload.eventType === 'INSERT' && payload.new.status === 'pending') {
+              sendNotification('🔔 Novo Pedido Recebido!', {
+                body: `Pedido #${payload.new.id} no valor de R$ ${payload.new.total.toFixed(2)}. Acesse o painel para aceitar.`,
+              });
+            }
+
             fetchOrders(storeData.id);
+            fetchDashboardMetrics(storeData.id);
+            setLastUpdate(Date.now()); // Trigger history refresh if active
           }).subscribe();
         return () => { supabase.removeChannel(channel); };
       }
     } catch (error) {
       console.error('Erro ao carregar loja:', error);
+      showToast('Erro ao carregar dados da loja', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchDashboardMetrics = async (storeId: number) => {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    
+    const { data: todayOrders } = await supabase
+      .from('orders')
+      .select('total, status')
+      .eq('store_id', storeId)
+      .gte('created_at', todayStart.toISOString());
+
+    if (todayOrders) {
+      const totalOrders = todayOrders.length;
+      const deliveredOrders = todayOrders.filter(o => o.status === 'delivered').length;
+      const revenue = todayOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.total, 0);
+      setDashboardMetrics({ totalOrders, deliveredOrders, revenue });
+    }
+  };
+
+  const fetchHistoryOrders = async (page = 0, append = false) => {
+    if (!store) return;
+    setLoading(true);
+    try {
+      let startDate = new Date();
+      let endDate = new Date();
+      
+      if (historyFilter === 'today') {
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (historyFilter === 'yesterday') {
+        startDate.setDate(startDate.getDate() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setDate(endDate.getDate() - 1);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (historyFilter === 'week') {
+        startDate.setDate(startDate.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      }
+
+      const from = page * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+
+      const { data } = await supabase
+        .from('orders')
+        .select('*, users:client_id(name), order_items(*)')
+        .eq('store_id', store.id)
+        .in('status', ['delivered', 'cancelled'])
+        .gte('created_at', startDate.toISOString())
+        .lte('created_at', endDate.toISOString())
+        .order('created_at', { ascending: false })
+        .range(from, to);
+        
+      if (data) {
+        setHistoryOrders(prev => append ? [...prev, ...data] : data);
+        setHistoryHasMore(data.length === PAGE_SIZE);
+      }
+    } catch (error) {
+      showToast('Erro ao carregar histórico', 'error');
     } finally {
       setLoading(false);
     }
@@ -49,16 +172,32 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
   const fetchOrders = async (storeId: number) => {
     const { data } = await supabase.from('orders')
-      .select(`*, users:client_id(name), order_items(*)`)
+      .select(`*, users:client_id(name), order_items(*), addresses:delivery_address_id(*)`)
       .eq('store_id', storeId)
-      .in('status', ['pending', 'accepted', 'preparing', 'ready'])
+      .in('status', ['pending', 'preparing', 'ready'])
       .order('created_at', { ascending: false });
     if (data) setOrders(data);
   };
 
   const fetchProducts = async (storeId: number) => {
-    const { data } = await supabase.from('products').select('*').eq('store_id', storeId);
+    const { data } = await supabase.from('products')
+      .select('*, product_categories(name)')
+      .eq('store_id', storeId)
+      .order('name');
     if (data) setProducts(data);
+  };
+
+  const fetchProductCategories = async (storeId: number) => {
+    const { data } = await supabase.from('product_categories')
+      .select('*')
+      .eq('store_id', storeId)
+      .order('sort_order', { ascending: true });
+    if (data) setProductCategories(data);
+  };
+
+  const fetchCoupons = async (storeId: number) => {
+    const { data } = await supabase.from('coupons').select('*').eq('store_id', storeId).order('created_at', { ascending: false });
+    if (data) setCoupons(data);
   };
 
   const toggleStoreStatus = async (isOpen: boolean) => {
@@ -67,37 +206,342 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     try {
       await supabase.from('stores').update({ is_open: isOpen }).eq('id', store.id);
       setStore({ ...store, is_open: isOpen });
+      showToast(isOpen ? 'Loja aberta!' : 'Loja fechada!', 'success');
     } catch (error) {
-      console.error(error);
+      showToast('Erro ao alterar status da loja', 'error');
     } finally {
       setLoading(false);
     }
   };
 
   const updateOrderStatus = async (orderId: number, status: string) => {
-    setLoading(true);
+    setActionLoading(orderId);
     try {
       const updateData: any = { status };
       if (status === 'cancelled') updateData.cancelled_by = 'store';
-      await supabase.from('orders').update(updateData).eq('id', orderId);
+      
+      const { error: updateErr } = await supabase.from('orders').update(updateData).eq('id', orderId);
+      if (updateErr) throw updateErr;
+
+      if (status === 'ready') {
+        const { data: couriers, error: fetchErr } = await supabase.from('couriers').select('id').eq('is_online', true).limit(1);
+        
+        if (couriers && couriers.length > 0) {
+          const { error: deliveryErr } = await supabase.from('deliveries').insert({
+            order_id: orderId,
+            courier_id: couriers[0].id,
+            status: 'offered',
+            courier_earning: store?.delivery_fee || 8.50
+          });
+          
+          if (deliveryErr) {
+            console.error("Erro RLS ao despachar:", deliveryErr);
+            showToast("Erro ao chamar motoboy. Verifique as permissões.", 'error');
+          } else {
+            showToast("Motoboy despachado com sucesso!");
+          }
+        } else {
+          showToast('Nenhum motoboy online no momento. O pedido aguardará.', 'warning');
+        }
+      } else {
+        showToast('Status do pedido atualizado!');
+      }
+
       fetchOrders(store!.id);
-    } catch (error) {
-      console.error(error);
+      fetchDashboardMetrics(store!.id);
+    } catch (error: any) {
+      showToast("Erro ao atualizar pedido.", 'error');
     } finally {
-      setLoading(false);
+      setActionLoading(null);
     }
+  };
+
+  // --- CATEGORY ACTIONS ---
+  const handleSaveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!store) return;
+    setActionLoading(-3);
+    try {
+      const categoryData = {
+        store_id: store.id,
+        name: categoryForm.name,
+        sort_order: parseInt(categoryForm.sort_order) || 0,
+        is_active: categoryForm.is_active
+      };
+
+      if (editingCategory) {
+        await supabase.from('product_categories').update(categoryData).eq('id', editingCategory.id);
+        showToast('Categoria atualizada!');
+      } else {
+        await supabase.from('product_categories').insert(categoryData);
+        showToast('Categoria criada!');
+      }
+      setShowCategoryModal(false);
+      fetchProductCategories(store.id);
+    } catch (error) {
+      showToast('Erro ao salvar categoria', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteCategory = (id: number) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Categoria',
+      message: 'Tem certeza que deseja excluir esta categoria? Os produtos associados a ela ficarão sem categoria.',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          // Remover a categoria dos produtos antes de excluir
+          await supabase.from('products').update({ category_id: null }).eq('category_id', id);
+          await supabase.from('product_categories').delete().eq('id', id);
+          showToast('Categoria excluída');
+          fetchProductCategories(store!.id);
+          fetchProducts(store!.id);
+        } catch (error) {
+          showToast('Erro ao excluir categoria', 'error');
+        }
+      }
+    });
+  };
+
+  const toggleCategoryStatus = async (category: any) => {
+    try {
+      await supabase.from('product_categories').update({ is_active: !category.is_active }).eq('id', category.id);
+      fetchProductCategories(store!.id);
+    } catch (error) {
+      showToast('Erro ao atualizar status', 'error');
+    }
+  };
+
+  const openNewCategoryModal = () => {
+    setEditingCategory(null);
+    setCategoryForm({ name: '', sort_order: '0', is_active: true });
+    setShowCategoryModal(true);
+  };
+
+  const openEditCategoryModal = (category: any) => {
+    setEditingCategory(category);
+    setCategoryForm({ name: category.name, sort_order: category.sort_order.toString(), is_active: category.is_active });
+    setShowCategoryModal(true);
+  };
+
+  // --- PRODUCT ACTIONS ---
+  const handleProductImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        showToast('A imagem deve ter no máximo 5MB', 'warning');
+        return;
+      }
+      setProductImageFile(file);
+      setProductImagePreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleSaveProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!store) return;
+    setActionLoading(-1); 
+    
+    try {
+      let finalImageUrl = productForm.image_url;
+
+      if (productImageFile) {
+        const fileExt = productImageFile.name.split('.').pop();
+        const fileName = `product_${store.id}_${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('products')
+          .upload(fileName, productImageFile, { cacheControl: '3600', upsert: false });
+
+        if (uploadError) {
+          console.error("Upload error:", uploadError);
+          throw new Error('Erro ao fazer upload da imagem.');
+        }
+
+        const { data: publicUrlData } = supabase.storage.from('products').getPublicUrl(fileName);
+        finalImageUrl = publicUrlData.publicUrl;
+      }
+
+      const productData = {
+        store_id: store.id,
+        name: productForm.name,
+        description: productForm.description,
+        price: parseFloat(productForm.price),
+        image_url: finalImageUrl || null,
+        is_available: productForm.is_available,
+        category_id: productForm.category_id ? parseInt(productForm.category_id) : null
+      };
+
+      if (editingProduct) {
+        await supabase.from('products').update(productData).eq('id', editingProduct.id);
+        showToast('Produto atualizado!');
+      } else {
+        await supabase.from('products').insert(productData);
+        showToast('Produto criado!');
+      }
+      
+      setShowProductModal(false);
+      fetchProducts(store.id);
+    } catch (error: any) {
+      showToast(error.message || 'Erro ao salvar produto', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteProduct = (id: number) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Produto',
+      message: 'Tem certeza que deseja excluir este produto? Esta ação não pode ser desfeita.',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          await supabase.from('products').delete().eq('id', id);
+          showToast('Produto excluído');
+          fetchProducts(store!.id);
+        } catch (error) {
+          showToast('Erro ao excluir produto', 'error');
+        }
+      }
+    });
+  };
+
+  const toggleProductAvailability = async (product: Product) => {
+    try {
+      await supabase.from('products').update({ is_available: !product.is_available }).eq('id', product.id);
+      fetchProducts(store!.id);
+    } catch (error) {
+      showToast('Erro ao atualizar status', 'error');
+    }
+  };
+
+  const openNewProductModal = () => {
+    setEditingProduct(null);
+    setProductForm({ name: '', description: '', price: '', image_url: '', is_available: true, category_id: '' });
+    setProductImageFile(null);
+    setProductImagePreview(null);
+    setShowProductModal(true);
+  };
+
+  const openEditProductModal = (product: any) => {
+    setEditingProduct(product);
+    setProductForm({
+      name: product.name,
+      description: product.description || '',
+      price: product.price.toString(),
+      image_url: product.image_url || '',
+      is_available: product.is_available,
+      category_id: product.category_id?.toString() || ''
+    });
+    setProductImageFile(null);
+    setProductImagePreview(product.image_url || null);
+    setShowProductModal(true);
+  };
+
+  // --- COUPON ACTIONS ---
+  const handleSaveCoupon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!store || !user) return;
+    setActionLoading(-2);
+
+    try {
+      const couponData = {
+        store_id: store.id,
+        created_by: user.id,
+        code: couponForm.code.toUpperCase().replace(/\s+/g, ''),
+        type: couponForm.type,
+        value: parseFloat(couponForm.value),
+        min_order_value: parseFloat(couponForm.min_order_value || '0'),
+        expires_at: couponForm.expires_at ? new Date(couponForm.expires_at).toISOString() : null,
+        is_active: couponForm.is_active,
+        max_uses_per_user: 1
+      };
+
+      const { error } = await supabase.from('coupons').insert(couponData);
+      if (error) {
+        if (error.message.includes('duplicate key')) throw new Error('Este código de cupom já existe.');
+        throw error;
+      }
+
+      showToast('Cupom criado com sucesso!');
+      setShowCouponModal(false);
+      fetchCoupons(store.id);
+    } catch (error: any) {
+      showToast(error.message || 'Erro ao criar cupom', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const toggleCouponStatus = async (coupon: Coupon) => {
+    try {
+      await supabase.from('coupons').update({ is_active: !coupon.is_active }).eq('id', coupon.id);
+      fetchCoupons(store!.id);
+      showToast(coupon.is_active ? 'Cupom desativado' : 'Cupom ativado');
+    } catch (error) {
+      showToast('Erro ao atualizar cupom', 'error');
+    }
+  };
+
+  const handleDeleteCoupon = (id: number) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Cupom',
+      message: 'Tem certeza que deseja excluir este cupom? Clientes não poderão mais utilizá-lo.',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          await supabase.from('coupons').delete().eq('id', id);
+          showToast('Cupom excluído');
+          fetchCoupons(store!.id);
+        } catch (error) {
+          showToast('Erro ao excluir cupom', 'error');
+        }
+      }
+    });
+  };
+
+  const formatTime = (dateString: string) => {
+    return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(dateString));
   };
 
   const menuItems = [
     { id: 'dashboard', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
-    { id: 'orders', icon: <ShoppingBag size={20} />, label: 'Pedidos' },
+    { id: 'orders', icon: <ShoppingBag size={20} />, label: 'Pedidos Ativos' },
+    { id: 'history', icon: <History size={20} />, label: 'Histórico' },
+    { id: 'categories', icon: <FolderTree size={20} />, label: 'Categorias' },
     { id: 'products', icon: <Package size={20} />, label: 'Cardápio' },
+    { id: 'coupons', icon: <Ticket size={20} />, label: 'Cupons' },
   ];
 
-  if (!store) return <div className="p-8">Carregando loja...</div>;
+  if (loading && !store) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50">
+        <Loader2 className="animate-spin text-brand-primary mb-4" size={48} />
+        <p className="text-gray-500 font-medium">Carregando painel da loja...</p>
+      </div>
+    );
+  }
+
+  if (!loading && !store) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50">
+        <p className="text-red-500 font-bold mb-4">Loja não encontrada ou não aprovada.</p>
+        <button onClick={onExit} className="px-6 py-2 bg-gray-200 rounded-xl font-bold">Sair do Painel</button>
+      </div>
+    );
+  }
+
+  if (!store) return null;
 
   return (
     <div className="flex h-screen bg-gray-50 w-full font-sans">
+      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
+      
       {/* SIDEBAR */}
       <div className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-sm z-10">
         <div className="p-6 border-b border-gray-100">
@@ -124,10 +568,10 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         
         <header className="bg-white border-b border-gray-200 h-20 flex items-center justify-between px-8 shrink-0">
           <div className="flex items-center space-x-4">
-            <div className="w-10 h-10 bg-gray-200 rounded-lg flex items-center justify-center font-bold text-gray-500">{store.name.charAt(0)}</div>
+            <div className="w-10 h-10 bg-brand-light text-brand-primary rounded-lg flex items-center justify-center font-bold text-xl">{store.name.charAt(0)}</div>
             <div>
               <h2 className="font-bold text-brand-dark leading-tight">{store.name}</h2>
-              <p className="text-xs text-gray-500">{store.is_approved ? 'Aprovada' : 'Pendente'}</p>
+              <p className="text-xs text-gray-500">{store.is_approved ? 'Verificada' : 'Pendente'}</p>
             </div>
           </div>
           <div className="flex items-center space-x-6">
@@ -139,15 +583,49 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         </header>
 
         <main className="flex-1 overflow-y-auto p-8">
+          
+          {/* BANNER DE NOTIFICAÇÕES */}
+          {notifPermission === 'default' && (
+            <div className="max-w-6xl mx-auto mb-6 bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+              <div className="flex items-center">
+                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mr-4">
+                  <BellRing size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-blue-900">Ative as Notificações</h3>
+                  <p className="text-sm text-blue-700">Seja avisado imediatamente quando um novo pedido chegar.</p>
+                </div>
+              </div>
+              <button onClick={requestPermission} className="bg-blue-600 text-white px-5 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors shadow-sm">
+                Ativar Agora
+              </button>
+            </div>
+          )}
+
           {/* DASHBOARD */}
           {activeTab === 'dashboard' && (
             <div className="max-w-6xl mx-auto space-y-8">
               <h2 className="text-3xl font-black text-brand-dark">Olá, Parceiro! 👋</h2>
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                  <div className="p-3 bg-brand-light rounded-xl text-brand-primary w-fit mb-4"><ShoppingBag size={24} /></div>
-                  <h3 className="text-3xl font-black text-brand-dark">{orders.length}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Pedidos Ativos</p>
+                  <div className="p-3 bg-blue-50 rounded-xl text-blue-500 w-fit mb-4"><ShoppingBag size={24} /></div>
+                  <h3 className="text-3xl font-black text-brand-dark">{dashboardMetrics.totalOrders}</h3>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Pedidos hoje</p>
+                </div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                  <div className="p-3 bg-green-50 rounded-xl text-green-500 w-fit mb-4"><Check size={24} /></div>
+                  <h3 className="text-3xl font-black text-brand-dark">{dashboardMetrics.deliveredOrders}</h3>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Entregues hoje</p>
+                </div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                  <div className="p-3 bg-brand-light rounded-xl text-brand-primary w-fit mb-4"><DollarSign size={24} /></div>
+                  <h3 className="text-3xl font-black text-brand-dark">R$ {dashboardMetrics.revenue.toFixed(2)}</h3>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Faturamento hoje</p>
+                </div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                  <div className="p-3 bg-yellow-50 rounded-xl text-yellow-500 w-fit mb-4"><Star size={24} /></div>
+                  <h3 className="text-3xl font-black text-brand-dark">{store.avg_rating > 0 ? store.avg_rating : '—'}</h3>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Avaliação média</p>
                 </div>
               </div>
             </div>
@@ -161,20 +639,50 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                 
                 {/* Novos */}
                 <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-full">
-                  <h3 className="font-bold text-gray-700 mb-4">Novos</h3>
+                  <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
+                    Novos <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'pending').length}</span>
+                  </h3>
                   <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+                    {orders.filter(o => o.status === 'pending').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido novo</p>}
                     {orders.filter(o => o.status === 'pending').map(order => (
-                      <div key={order.id} className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-l-brand-secondary">
-                        <div className="flex justify-between items-start mb-3">
-                          <div><span className="text-xs font-bold text-gray-400">#{order.id}</span><h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4></div>
+                      <div key={order.id} className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-l-brand-secondary relative">
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <span className="text-xs font-bold text-gray-400">#{order.id}</span>
+                            <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
+                          </div>
+                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
                         </div>
-                        <div className="text-sm text-gray-600 mb-4 space-y-1">
+                        
+                        {order.addresses && (
+                          <p className="text-xs text-gray-500 mb-3 flex items-start">
+                            <MapPin size={12} className="mr-1 shrink-0 mt-0.5"/>
+                            {order.addresses.street}, {order.addresses.number} - {order.addresses.neighborhood}
+                          </p>
+                        )}
+
+                        {order.client_notes && (
+                          <div className="bg-yellow-50 text-yellow-800 text-xs p-2 rounded-lg mb-3 flex items-start border border-yellow-200">
+                            <span className="mr-1">📝</span> <span className="font-medium">{order.client_notes}</span>
+                          </div>
+                        )}
+
+                        <div className="text-sm text-gray-600 mb-3 space-y-1">
                           {order.order_items?.map((item:any) => <p key={item.id}>{item.quantity}x {item.product_name}</p>)}
                         </div>
-                        <div className="font-bold text-brand-dark mb-4">R$ {order.total.toFixed(2)}</div>
+                        <div className="flex justify-between items-center mb-4">
+                          <div className="font-black text-brand-dark text-lg">R$ {order.total.toFixed(2)}</div>
+                          {order.payment_method === 'cash' ? (
+                            <span className="text-[10px] font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded border border-yellow-200">💵 DINHEIRO</span>
+                          ) : (
+                            <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded border border-blue-200">📱 PIX</span>
+                          )}
+                        </div>
                         <div className="flex space-x-2">
-                          <button onClick={() => updateOrderStatus(order.id, 'accepted')} className="flex-1 bg-brand-primary text-white py-2.5 rounded-xl text-sm font-bold">Aceitar</button>
-                          <button onClick={() => updateOrderStatus(order.id, 'cancelled')} className="px-4 bg-gray-100 text-gray-500 py-2.5 rounded-xl text-sm font-bold">Recusar</button>
+                          <button onClick={() => updateOrderStatus(order.id, 'preparing')} disabled={actionLoading === order.id} className="flex-1 bg-brand-primary text-white py-2.5 rounded-xl text-sm font-bold flex justify-center items-center">
+                            {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : 'Aceitar e Preparar'}
+                          </button>
+                          <button onClick={() => updateOrderStatus(order.id, 'cancelled')} disabled={actionLoading === order.id} className="px-4 bg-gray-100 text-gray-500 py-2.5 rounded-xl text-sm font-bold">Recusar</button>
                         </div>
                       </div>
                     ))}
@@ -183,14 +691,41 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
                 {/* Em Preparo */}
                 <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-full">
-                  <h3 className="font-bold text-gray-700 mb-4">Em Preparo</h3>
+                  <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
+                    Em Preparo <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'preparing').length}</span>
+                  </h3>
                   <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-                    {orders.filter(o => o.status === 'accepted' || o.status === 'preparing').map(order => (
+                    {orders.filter(o => o.status === 'preparing').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido em preparo</p>}
+                    {orders.filter(o => o.status === 'preparing').map(order => (
                       <div key={order.id} className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-l-blue-500">
-                        <div className="flex justify-between items-start mb-3">
-                          <div><span className="text-xs font-bold text-gray-400">#{order.id}</span><h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4></div>
+                        <div className="flex justify-between items-start mb-2">
+                          <div>
+                            <span className="text-xs font-bold text-gray-400">#{order.id}</span>
+                            <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
+                          </div>
+                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
                         </div>
-                        <button onClick={() => updateOrderStatus(order.id, 'ready')} className="w-full bg-blue-50 text-blue-600 py-2.5 rounded-xl text-sm font-bold">Marcar como Pronto</button>
+
+                        {order.addresses && (
+                          <p className="text-xs text-gray-500 mb-3 flex items-start">
+                            <MapPin size={12} className="mr-1 shrink-0 mt-0.5"/>
+                            {order.addresses.street}, {order.addresses.number} - {order.addresses.neighborhood}
+                          </p>
+                        )}
+
+                        {order.client_notes && (
+                          <div className="bg-yellow-50 text-yellow-800 text-xs p-2 rounded-lg mb-3 flex items-start border border-yellow-200">
+                            <span className="mr-1">📝</span> <span className="font-medium">{order.client_notes}</span>
+                          </div>
+                        )}
+
+                        <div className="text-sm text-gray-600 mb-4 space-y-1 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                          {order.order_items?.map((item:any) => <p key={item.id} className="font-medium">{item.quantity}x {item.product_name}</p>)}
+                        </div>
+
+                        <button onClick={() => updateOrderStatus(order.id, 'ready')} disabled={actionLoading === order.id} className="w-full bg-blue-50 text-blue-600 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center hover:bg-blue-100 transition-colors">
+                          {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : 'Marcar como Pronto'}
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -198,18 +733,182 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
                 {/* Prontos */}
                 <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-full">
-                  <h3 className="font-bold text-gray-700 mb-4">Prontos / Rota</h3>
+                  <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
+                    Prontos / Rota <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'ready' || o.status === 'delivering').length}</span>
+                  </h3>
                   <div className="flex-1 overflow-y-auto space-y-4 pr-2">
+                    {orders.filter(o => o.status === 'ready' || o.status === 'delivering').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido aguardando entrega</p>}
                     {orders.filter(o => o.status === 'ready' || o.status === 'delivering').map(order => (
-                      <div key={order.id} className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-l-brand-primary opacity-70">
-                        <span className="text-xs font-bold text-gray-400">#{order.id}</span>
+                      <div key={order.id} className={`bg-white rounded-2xl p-5 shadow-sm border-l-4 ${order.courier_id ? 'border-l-brand-primary' : 'border-l-yellow-400'} opacity-90`}>
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-xs font-bold text-gray-400">#{order.id}</span>
+                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
+                        </div>
                         <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
-                        <p className="text-xs text-gray-500 mt-2">Aguardando/Com Motoboy</p>
+                        
+                        {order.addresses && (
+                          <p className="text-xs text-gray-500 mb-2 flex items-start mt-1">
+                            <MapPin size={12} className="mr-1 shrink-0 mt-0.5"/>
+                            {order.addresses.street}, {order.addresses.number} - {order.addresses.neighborhood}
+                          </p>
+                        )}
+                        
+                        {order.courier_id ? (
+                          <div className="mt-3 bg-green-50 text-green-700 text-xs font-bold p-2 rounded-lg flex items-center">
+                            <Bike size={14} className="mr-1"/> Com motoboy
+                          </div>
+                        ) : (
+                          <div className="mt-3 bg-yellow-50 text-yellow-700 text-xs font-bold p-2 rounded-lg flex items-center border border-yellow-200">
+                            <Loader2 size={14} className="mr-1 animate-spin"/> Aguardando motoboy
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
                 </div>
 
+              </div>
+            </div>
+          )}
+
+          {/* HISTÓRICO DE PEDIDOS */}
+          {activeTab === 'history' && (
+            <div className="max-w-6xl mx-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-brand-dark">Histórico de Pedidos</h2>
+                <div className="flex bg-gray-200 p-1 rounded-xl">
+                  <button onClick={() => setHistoryFilter('today')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${historyFilter === 'today' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hoje</button>
+                  <button onClick={() => setHistoryFilter('yesterday')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${historyFilter === 'yesterday' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Ontem</button>
+                  <button onClick={() => setHistoryFilter('week')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${historyFilter === 'week' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Últimos 7 dias</button>
+                </div>
+              </div>
+              
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
+                      <th className="p-4 font-medium">#ID</th>
+                      <th className="p-4 font-medium">Cliente</th>
+                      <th className="p-4 font-medium">Itens</th>
+                      <th className="p-4 font-medium">Total</th>
+                      <th className="p-4 font-medium">Pagamento</th>
+                      <th className="p-4 font-medium">Status</th>
+                      <th className="p-4 font-medium">Horário</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {historyOrders.map(order => (
+                      <tr key={order.id} className="hover:bg-gray-50">
+                        <td className="p-4 font-bold text-gray-400">#{order.id}</td>
+                        <td className="p-4 font-bold text-brand-dark">{order.users?.name || 'Cliente'}</td>
+                        <td className="p-4 text-sm text-gray-600 max-w-[200px] truncate">
+                          {order.order_items?.map((item:any) => `${item.quantity}x ${item.product_name}`).join(', ')}
+                        </td>
+                        <td className="p-4 font-bold text-brand-dark">R$ {order.total.toFixed(2)}</td>
+                        <td className="p-4">
+                          {order.payment_method === 'cash' ? (
+                            <span className="text-[10px] font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded">💵 Dinheiro</span>
+                          ) : (
+                            <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded">📱 PIX</span>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          {order.status === 'delivered' ? (
+                            <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded flex items-center w-fit"><Check size={12} className="mr-1"/> Entregue</span>
+                          ) : (
+                            <div className="flex flex-col">
+                              <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-1 rounded flex items-center w-fit"><X size={12} className="mr-1"/> Cancelado</span>
+                              {order.status === 'cancelled' && order.cancel_reason && (
+                                <span className="text-[10px] text-red-400 mt-1">"{order.cancel_reason}"</span>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-4 text-sm text-gray-500">
+                          {new Date(order.created_at).toLocaleDateString('pt-BR')} às {formatTime(order.created_at)}
+                        </td>
+                      </tr>
+                    ))}
+                    {historyOrders.length === 0 && !loading && (
+                      <tr>
+                        <td colSpan={7} className="p-12 text-center text-gray-500">
+                          Nenhum pedido no período selecionado.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+                {historyHasMore && historyOrders.length > 0 && (
+                  <div className="flex justify-center my-6">
+                    <button
+                      onClick={() => {
+                        const nextPage = historyPage + 1;
+                        setHistoryPage(nextPage);
+                        fetchHistoryOrders(nextPage, true);
+                      }}
+                      disabled={loading}
+                      className="px-8 py-3 bg-white border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {loading ? <Loader2 size={16} className="animate-spin" /> : null}
+                      Carregar mais pedidos
+                    </button>
+                  </div>
+                )}
+                {!historyHasMore && historyOrders.length > 0 && (
+                  <p className="text-center text-gray-400 text-sm mt-6 pb-4">Todos os pedidos foram carregados.</p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* CATEGORIAS DO CARDÁPIO */}
+          {activeTab === 'categories' && (
+            <div className="max-w-6xl mx-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-brand-dark">Categorias do Cardápio</h2>
+                <button onClick={openNewCategoryModal} className="bg-brand-primary text-white px-6 py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors">
+                  <Plus size={20} className="mr-2" /> Nova Categoria
+                </button>
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
+                      <th className="p-4 font-medium">Nome da Categoria</th>
+                      <th className="p-4 font-medium">Ordem</th>
+                      <th className="p-4 font-medium">Status</th>
+                      <th className="p-4 font-medium text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {productCategories.map(c => (
+                      <tr key={c.id} className="hover:bg-gray-50">
+                        <td className="p-4 font-bold text-brand-dark">{c.name}</td>
+                        <td className="p-4 text-gray-600">{c.sort_order}</td>
+                        <td className="p-4">
+                          <button onClick={() => toggleCategoryStatus(c)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${c.is_active ? 'bg-brand-light text-brand-primary hover:bg-green-100' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>
+                            {c.is_active ? 'Ativa' : 'Inativa'}
+                          </button>
+                        </td>
+                        <td className="p-4 text-right">
+                          <button onClick={() => openEditCategoryModal(c)} className="p-2 text-gray-400 hover:text-blue-500 transition-colors"><Edit2 size={18}/></button>
+                          <button onClick={() => handleDeleteCategory(c.id)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
+                        </td>
+                      </tr>
+                    ))}
+                    {productCategories.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="p-12 text-center text-gray-500">
+                          <div className="flex flex-col items-center justify-center">
+                            <FolderTree size={48} className="text-gray-300 mb-4" />
+                            <p className="font-medium">Nenhuma categoria criada ainda.</p>
+                            <p className="text-sm mt-1">Crie categorias (ex: Lanches, Bebidas) para organizar seu cardápio.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
@@ -219,26 +918,127 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             <div className="max-w-6xl mx-auto">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-brand-dark">Gestão de Cardápio</h2>
-                <button className="bg-brand-primary text-white px-6 py-3 rounded-xl font-bold flex items-center shadow-md"><Plus size={20} className="mr-2" /> Novo Produto</button>
+                <button onClick={openNewProductModal} className="bg-brand-primary text-white px-6 py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors">
+                  <Plus size={20} className="mr-2" /> Novo Produto
+                </button>
               </div>
               <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
                 <table className="w-full text-left border-collapse">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
+                      <th className="p-4 font-medium w-20">Foto</th>
                       <th className="p-4 font-medium">Nome</th>
+                      <th className="p-4 font-medium">Categoria</th>
                       <th className="p-4 font-medium">Preço</th>
                       <th className="p-4 font-medium">Status</th>
+                      <th className="p-4 font-medium text-right">Ações</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {products.map(p => (
                       <tr key={p.id} className="hover:bg-gray-50">
-                        <td className="p-4 font-bold text-brand-dark">{p.name}</td>
+                        <td className="p-4">
+                          {p.image_url ? (
+                            <img src={p.image_url} alt={p.name} className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
+                          ) : (
+                            <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 border border-gray-200">
+                              <ImageIcon size={20} />
+                            </div>
+                          )}
+                        </td>
+                        <td className="p-4">
+                          <p className="font-bold text-brand-dark">{p.name}</p>
+                          <p className="text-xs text-gray-500 truncate max-w-xs">{p.description}</p>
+                        </td>
+                        <td className="p-4 text-sm text-gray-600">
+                          {p.product_categories?.name || <span className="text-gray-400 italic">Sem categoria</span>}
+                        </td>
                         <td className="p-4 font-bold text-brand-dark">R$ {p.price.toFixed(2)}</td>
-                        <td className="p-4"><span className={`px-3 py-1 rounded-full text-xs font-bold ${p.is_available ? 'bg-brand-light text-brand-primary' : 'bg-gray-200 text-gray-600'}`}>{p.is_available ? 'Ativo' : 'Pausado'}</span></td>
+                        <td className="p-4">
+                          <button onClick={() => toggleProductAvailability(p)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${p.is_available ? 'bg-brand-light text-brand-primary hover:bg-green-100' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>
+                            {p.is_available ? 'Ativo' : 'Pausado'}
+                          </button>
+                        </td>
+                        <td className="p-4 text-right">
+                          <button onClick={() => openEditProductModal(p)} className="p-2 text-gray-400 hover:text-blue-500 transition-colors"><Edit2 size={18}/></button>
+                          <button onClick={() => handleDeleteProduct(p.id)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
+                        </td>
                       </tr>
                     ))}
-                    {products.length === 0 && <tr><td colSpan={3} className="p-4 text-center text-gray-500">Nenhum produto cadastrado.</td></tr>}
+                    {products.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="p-12 text-center text-gray-500">
+                          <div className="flex flex-col items-center justify-center">
+                            <Package size={48} className="text-gray-300 mb-4" />
+                            <p className="font-medium">Nenhum produto cadastrado ainda.</p>
+                            <p className="text-sm mt-1">Clique em "Novo Produto" para começar a vender.</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* CUPONS */}
+          {activeTab === 'coupons' && (
+            <div className="max-w-6xl mx-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-brand-dark">Cupons de Desconto</h2>
+                <button onClick={() => { setCouponForm({ code: '', type: 'percentage', value: '', min_order_value: '0', expires_at: '', is_active: true }); setShowCouponModal(true); }} className="bg-brand-primary text-white px-6 py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors">
+                  <Plus size={20} className="mr-2" /> Novo Cupom
+                </button>
+              </div>
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
+                      <th className="p-4 font-medium">Código</th>
+                      <th className="p-4 font-medium">Desconto</th>
+                      <th className="p-4 font-medium">Pedido Mínimo</th>
+                      <th className="p-4 font-medium">Validade</th>
+                      <th className="p-4 font-medium">Status</th>
+                      <th className="p-4 font-medium text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {coupons.map(c => (
+                      <tr key={c.id} className="hover:bg-gray-50">
+                        <td className="p-4">
+                          <span className="font-black text-brand-dark bg-gray-100 px-3 py-1.5 rounded-lg tracking-wider border border-gray-200">{c.code}</span>
+                        </td>
+                        <td className="p-4 font-bold text-brand-primary">
+                          {c.type === 'percentage' ? `${c.value}%` : `R$ ${c.value.toFixed(2)}`}
+                        </td>
+                        <td className="p-4 text-gray-600 text-sm">
+                          {c.min_order_value > 0 ? `R$ ${c.min_order_value.toFixed(2)}` : 'Sem mínimo'}
+                        </td>
+                        <td className="p-4 text-gray-600 text-sm">
+                          {c.expires_at ? new Date(c.expires_at).toLocaleDateString('pt-BR') : 'Sem validade'}
+                        </td>
+                        <td className="p-4">
+                          <button onClick={() => toggleCouponStatus(c)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${c.is_active ? 'bg-brand-light text-brand-primary hover:bg-green-100' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>
+                            {c.is_active ? 'Ativo' : 'Inativo'}
+                          </button>
+                        </td>
+                        <td className="p-4 text-right">
+                          <button onClick={() => handleDeleteCoupon(c.id)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
+                        </td>
+                      </tr>
+                    ))}
+                    {coupons.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="p-12 text-center text-gray-500">
+                          <div className="flex flex-col items-center justify-center">
+                            <Ticket size={48} className="text-gray-300 mb-4" />
+                            <p className="font-medium">Nenhum cupom criado ainda.</p>
+                            <p className="text-sm mt-1">Crie promoções para atrair mais clientes!</p>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -246,6 +1046,188 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           )}
         </main>
       </div>
+
+      {/* CATEGORY MODAL */}
+      {showCategoryModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-brand-dark">{editingCategory ? 'Editar Categoria' : 'Nova Categoria'}</h2>
+              <button onClick={() => setShowCategoryModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
+            </div>
+            <form onSubmit={handleSaveCategory} className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Nome da Categoria</label>
+                <input type="text" required placeholder="Ex: Lanches, Bebidas" value={categoryForm.name} onChange={e => setCategoryForm({...categoryForm, name: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+              </div>
+              <div className="flex space-x-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Ordem de Exibição</label>
+                  <input type="number" required value={categoryForm.sort_order} onChange={e => setCategoryForm({...categoryForm, sort_order: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+                  <p className="text-[10px] text-gray-500 mt-1">Menor número aparece primeiro</p>
+                </div>
+                <div className="flex-1 flex items-center pt-4">
+                  <label className="flex items-center cursor-pointer">
+                    <input type="checkbox" checked={categoryForm.is_active} onChange={e => setCategoryForm({...categoryForm, is_active: e.target.checked})} className="mr-2 w-5 h-5 accent-brand-primary" />
+                    <span className="font-bold text-gray-700">Ativa</span>
+                  </label>
+                </div>
+              </div>
+              <div className="pt-4 flex space-x-3">
+                <button type="button" onClick={() => setShowCategoryModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-colors">Cancelar</button>
+                <button type="submit" disabled={actionLoading === -3} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
+                  {actionLoading === -3 ? <Loader2 size={20} className="animate-spin"/> : 'Salvar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* PRODUCT MODAL */}
+      {showProductModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto scrollbar-hide">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-brand-dark">{editingProduct ? 'Editar Produto' : 'Novo Produto'}</h2>
+              <button onClick={() => setShowProductModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
+            </div>
+            <form onSubmit={handleSaveProduct} className="space-y-4">
+              
+              {/* IMAGE UPLOAD AREA */}
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Foto do Produto</label>
+                <div className="flex flex-col items-center justify-center">
+                  <label htmlFor="product-image-upload" className="w-full h-40 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative cursor-pointer hover:bg-gray-100 transition-colors group">
+                    {productImagePreview ? (
+                      <>
+                        <img src={productImagePreview} alt="Preview" className="w-full h-full object-cover" />
+                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <span className="text-white font-bold text-sm flex items-center"><UploadCloud size={18} className="mr-2"/> Trocar Imagem</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex flex-col items-center text-gray-400">
+                        <ImageIcon size={32} className="mb-2" />
+                        <span className="text-sm font-bold">Clique para enviar foto</span>
+                        <span className="text-xs mt-1">Max: 5MB</span>
+                      </div>
+                    )}
+                  </label>
+                  <input
+                    id="product-image-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleProductImageChange}
+                    className="hidden"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Nome do Produto</label>
+                <input type="text" required value={productForm.name} onChange={e => setProductForm({...productForm, name: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+              </div>
+              
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Categoria</label>
+                <select value={productForm.category_id} onChange={e => setProductForm({...productForm, category_id: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-brand-primary outline-none bg-white">
+                  <option value="">Sem categoria</option>
+                  {productCategories.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Descrição</label>
+                <textarea required value={productForm.description} onChange={e => setProductForm({...productForm, description: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none h-20 resize-none" />
+              </div>
+              <div className="flex space-x-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Preço (R$)</label>
+                  <input type="number" step="0.01" required value={productForm.price} onChange={e => setProductForm({...productForm, price: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+                </div>
+                <div className="flex-1 flex items-end pb-2">
+                  <label className="flex items-center cursor-pointer">
+                    <input type="checkbox" checked={productForm.is_available} onChange={e => setProductForm({...productForm, is_available: e.target.checked})} className="mr-2 w-5 h-5 accent-brand-primary" />
+                    <span className="font-bold text-gray-700">Disponível</span>
+                  </label>
+                </div>
+              </div>
+              
+              <div className="pt-4 flex space-x-3">
+                <button type="button" onClick={() => setShowProductModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-colors">Cancelar</button>
+                <button type="submit" disabled={actionLoading === -1} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
+                  {actionLoading === -1 ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Produto'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* COUPON MODAL */}
+      {showCouponModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-brand-dark flex items-center"><Ticket className="mr-2 text-brand-primary" size={24}/> Novo Cupom</h2>
+              <button onClick={() => setShowCouponModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
+            </div>
+            <form onSubmit={handleSaveCoupon} className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Código do Cupom</label>
+                <input type="text" required placeholder="Ex: BEMVINDO10" value={couponForm.code} onChange={e => setCouponForm({...couponForm, code: e.target.value.toUpperCase()})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none uppercase font-bold tracking-wider" />
+              </div>
+              <div className="flex space-x-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Tipo de Desconto</label>
+                  <select value={couponForm.type} onChange={e => setCouponForm({...couponForm, type: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-brand-primary outline-none bg-white">
+                    <option value="percentage">Porcentagem (%)</option>
+                    <option value="fixed">Valor Fixo (R$)</option>
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Valor</label>
+                  <input type="number" step="0.01" required placeholder={couponForm.type === 'percentage' ? '10' : '15.00'} value={couponForm.value} onChange={e => setCouponForm({...couponForm, value: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+                </div>
+              </div>
+              <div className="flex space-x-4">
+                <div className="flex-1">
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Pedido Mínimo (R$)</label>
+                  <input type="number" step="0.01" value={couponForm.min_order_value} onChange={e => setCouponForm({...couponForm, min_order_value: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Validade (Opcional)</label>
+                  <input type="date" value={couponForm.expires_at} onChange={e => setCouponForm({...couponForm, expires_at: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none text-sm" />
+                </div>
+              </div>
+              
+              <div className="pt-4 flex space-x-3">
+                <button type="button" onClick={() => setShowCouponModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold">Cancelar</button>
+                <button type="submit" disabled={actionLoading === -2} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center">
+                  {actionLoading === -2 ? <Loader2 size={20} className="animate-spin"/> : 'Criar Cupom'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CONFIRMAÇÃO GENÉRICO */}
+      {confirmModal && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-2xl max-w-sm w-full shadow-2xl animate-in zoom-in-95">
+            <h3 className="font-black text-xl text-gray-800 mb-2">{confirmModal.title}</h3>
+            <p className="text-gray-600 text-sm mb-6">{confirmModal.message}</p>
+            <div className="flex space-x-3">
+              <button onClick={() => setConfirmModal(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-colors">Cancelar</button>
+              <button onClick={confirmModal.onConfirm} className="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors">Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
