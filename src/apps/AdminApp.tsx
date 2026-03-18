@@ -496,7 +496,13 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                         <p className="font-bold text-gray-800">{order.users?.name}</p>
                         <p className="text-xs text-gray-500">Loja: {order.stores?.name}</p>
                       </td>
-                      <td className="p-4 text-sm text-gray-600">{order.couriers?.users?.name || '-'}</td>
+                      <td className="p-4 text-sm text-gray-600">
+                        {order.own_delivery ? (
+                          <span className="text-[10px] font-bold bg-purple-100 text-purple-700 px-2 py-1 rounded flex items-center w-fit"><User size={12} className="mr-1"/> Própria</span>
+                        ) : (
+                          order.couriers?.users?.name || '-'
+                        )}
+                      </td>
                       <td className="p-4">
                         <p className="font-bold text-gray-800">R$ {order.total.toFixed(2)}</p>
                         <p className="text-xs text-gray-500">{order.payment_method === 'cash' ? '💵 Dinheiro' : '📱 PIX'}</p>
@@ -910,9 +916,11 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                   {viewOrder.status === 'cancelled' && viewOrder.cancel_reason && (
                     <p className="text-xs text-red-400 mt-1 font-medium">Motivo: {viewOrder.cancel_reason}</p>
                   )}
-                  {viewOrder.couriers && (
+                  {viewOrder.own_delivery ? (
+                    <p className="text-xs text-purple-600 mt-1 flex items-center font-bold"><User size={12} className="mr-1"/> Entrega Própria da Loja</p>
+                  ) : viewOrder.couriers ? (
                     <p className="text-xs text-gray-500 mt-1 flex items-center"><Bike size={12} className="mr-1"/> {viewOrder.couriers.users?.name}</p>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>

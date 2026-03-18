@@ -8,7 +8,8 @@ import {
   LayoutDashboard, ShoppingBag, Package, DollarSign, LogOut, 
   Check, X, Clock, Plus, Bell, Star, BarChart3, Tag, 
   FolderTree, Bike, Settings, ChevronRight, Edit2, Trash2, 
-  Image as ImageIcon, Search, MapPin, MessageSquare, Loader2, History, Ticket, Percent, UploadCloud, BellRing
+  Image as ImageIcon, Search, MapPin, MessageSquare, Loader2, History, Ticket, Percent, UploadCloud, BellRing,
+  User, CheckCircle, Printer
 } from 'lucide-react';
 
 export default function StoreApp({ onExit }: { onExit: () => void }) {
@@ -26,9 +27,13 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [productCategories, setProductCategories] = useState<any[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]); // Novo estado para avaliações
   
-  // Dashboard Metrics
+  // Dashboard Metrics & Filters
   const [dashboardMetrics, setDashboardMetrics] = useState({ totalOrders: 0, deliveredOrders: 0, revenue: 0 });
+  const [dashboardFilter, setDashboardFilter] = useState<'today' | '7days' | '15days' | '30days' | 'custom'>('today');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   // History Tab
   const [historyFilter, setHistoryFilter] = useState<'today' | 'yesterday' | 'week'>('today');
@@ -61,6 +66,61 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     if (user) fetchStoreData();
   }, [user]);
 
+  // Efeito para buscar métricas do Dashboard com base no filtro
+  useEffect(() => {
+    const fetchDashboardMetrics = async () => {
+      if (!store) return;
+      
+      let startDate = new Date();
+      let endDate = new Date();
+      
+      if (dashboardFilter === 'today') {
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === '7days') {
+        startDate.setDate(startDate.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === '15days') {
+        startDate.setDate(startDate.getDate() - 15);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === '30days') {
+        startDate.setDate(startDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === 'custom') {
+        if (!customStartDate || !customEndDate) return; // Aguarda preencher as duas datas
+        
+        const startParts = customStartDate.split('-');
+        startDate = new Date(Number(startParts[0]), Number(startParts[1]) - 1, Number(startParts[2]));
+        startDate.setHours(0, 0, 0, 0);
+        
+        const endParts = customEndDate.split('-');
+        endDate = new Date(Number(endParts[0]), Number(endParts[1]) - 1, Number(endParts[2]));
+        endDate.setHours(23, 59, 59, 999);
+      }
+
+      const { data: periodOrders } = await supabase
+        .from('orders')
+        .select('total, status')
+        .eq('store_id', store.id)
+        .gte('created_at', startDate.toISOString())
+        .lte('created_at', endDate.toISOString());
+
+      if (periodOrders) {
+        const totalOrders = periodOrders.length;
+        const deliveredOrders = periodOrders.filter(o => o.status === 'delivered').length;
+        const revenue = periodOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.total, 0);
+        setDashboardMetrics({ totalOrders, deliveredOrders, revenue });
+      }
+    };
+
+    if (activeTab === 'dashboard' && store) {
+      fetchDashboardMetrics();
+    }
+  }, [activeTab, dashboardFilter, customStartDate, customEndDate, store, lastUpdate]);
+
   useEffect(() => {
     if (activeTab === 'history' && store) {
       setHistoryPage(0);
@@ -77,11 +137,35 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     try {
       const { data: storeData } = await supabase.from('stores').select('*').eq('owner_id', user!.id).maybeSingle();
       if (storeData) {
+        
+        // SELF-HEALING: Buscar avaliações reais e sincronizar a média da loja
+        // Isso resolve o problema do cliente não ter permissão (RLS) para atualizar a média da loja
+        const { data: storeReviews } = await supabase
+          .from('reviews')
+          .select('*, users:reviewer_id(name)')
+          .eq('target_type', 'store')
+          .eq('target_id', storeData.id)
+          .order('created_at', { ascending: false });
+          
+        let trueAvg = 0;
+        if (storeReviews && storeReviews.length > 0) {
+          setReviews(storeReviews);
+          const sum = storeReviews.reduce((acc, r) => acc + r.rating, 0);
+          trueAvg = parseFloat((sum / storeReviews.length).toFixed(1));
+        } else {
+          setReviews([]);
+        }
+        
+        // Se a média no banco estiver desatualizada, o dono da loja atualiza (ele tem permissão)
+        if (storeData.avg_rating !== trueAvg) {
+          await supabase.from('stores').update({ avg_rating: trueAvg }).eq('id', storeData.id);
+          storeData.avg_rating = trueAvg;
+        }
+
         setStore(storeData);
         fetchOrders(storeData.id);
         fetchProducts(storeData.id);
         fetchProductCategories(storeData.id);
-        fetchDashboardMetrics(storeData.id);
         
         const channel = supabase.channel(`store_orders_${storeData.id}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `store_id=eq.${storeData.id}` }, (payload) => {
@@ -94,8 +178,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             }
 
             fetchOrders(storeData.id);
-            fetchDashboardMetrics(storeData.id);
-            setLastUpdate(Date.now()); // Trigger history refresh if active
+            setLastUpdate(Date.now()); // Trigger history and dashboard refresh if active
           }).subscribe();
         return () => { supabase.removeChannel(channel); };
       }
@@ -104,24 +187,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       showToast('Erro ao carregar dados da loja', 'error');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchDashboardMetrics = async (storeId: number) => {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    
-    const { data: todayOrders } = await supabase
-      .from('orders')
-      .select('total, status')
-      .eq('store_id', storeId)
-      .gte('created_at', todayStart.toISOString());
-
-    if (todayOrders) {
-      const totalOrders = todayOrders.length;
-      const deliveredOrders = todayOrders.filter(o => o.status === 'delivered').length;
-      const revenue = todayOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.total, 0);
-      setDashboardMetrics({ totalOrders, deliveredOrders, revenue });
     }
   };
 
@@ -174,7 +239,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     const { data } = await supabase.from('orders')
       .select(`*, users:client_id(name), order_items(*), addresses:delivery_address_id(*)`)
       .eq('store_id', storeId)
-      .in('status', ['pending', 'preparing', 'ready'])
+      .in('status', ['pending', 'preparing', 'ready', 'delivering'])
       .order('created_at', { ascending: false });
     if (data) setOrders(data);
   };
@@ -214,6 +279,135 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     }
   };
 
+  const printOrder = (order: any) => {
+    const printWindow = window.open('', '_blank', 'width=400,height=600');
+    if (!printWindow) return;
+
+    const items = order.order_items?.map((item: any) =>
+      `<tr>
+        <td style="padding:2px 0">${item.quantity}x ${item.product_name}</td>
+        <td style="text-align:right;padding:2px 0">R$ ${(item.unit_price * item.quantity).toFixed(2)}</td>
+      </tr>`
+    ).join('') || '';
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('pt-BR');
+    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8"/>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          body {
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            width: 80mm;
+            padding: 4mm;
+            color: #000;
+          }
+          .center { text-align: center; }
+          .bold { font-weight: bold; }
+          .large { font-size: 16px; }
+          .xlarge { font-size: 22px; font-weight: bold; }
+          .divider { border-top: 1px dashed #000; margin: 6px 0; }
+          .divider-solid { border-top: 2px solid #000; margin: 6px 0; }
+          table { width: 100%; border-collapse: collapse; }
+          td { vertical-align: top; font-size: 12px; }
+          .total-row td { font-size: 14px; font-weight: bold; padding-top: 4px; }
+          .tag {
+            display: inline-block;
+            border: 1px solid #000;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-weight: bold;
+          }
+          @media print {
+            @page { margin: 0; size: 80mm auto; }
+            body { width: 80mm; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="center">
+          <p class="large bold">${store?.name || 'Tá Na Mão'}</p>
+          <p style="font-size:11px;margin-top:2px">${dateStr} às ${timeStr}</p>
+        </div>
+
+        <div class="divider-solid"></div>
+
+        <div class="center">
+          <p style="font-size:11px">PEDIDO</p>
+          <p class="xlarge">#${order.id}</p>
+        </div>
+
+        <div class="divider"></div>
+
+        <p class="bold">CLIENTE</p>
+        <p>${order.users?.name || 'Cliente'}</p>
+
+        ${order.addresses ? `
+          <div style="margin-top:4px">
+            <p class="bold">ENTREGAR EM</p>
+            <p>${order.addresses.street}, ${order.addresses.number}${order.addresses.complement ? ' - ' + order.addresses.complement : ''}</p>
+            <p>${order.addresses.neighborhood} - ${order.addresses.city}</p>
+          </div>
+        ` : ''}
+
+        <div class="divider"></div>
+
+        <p class="bold" style="margin-bottom:4px">ITENS</p>
+        <table>${items}</table>
+
+        ${order.subtotal !== order.total ? `
+          <div class="divider"></div>
+          <table>
+            <tr><td>Subtotal</td><td style="text-align:right">R$ ${order.subtotal?.toFixed(2) || order.total.toFixed(2)}</td></tr>
+            <tr><td>Taxa de entrega</td><td style="text-align:right">R$ ${order.delivery_fee?.toFixed(2) || '0.00'}</td></tr>
+            ${order.discount_amount > 0 ? `<tr><td>Desconto</td><td style="text-align:right">- R$ ${order.discount_amount.toFixed(2)}</td></tr>` : ''}
+          </table>
+        ` : ''}
+
+        <div class="divider-solid"></div>
+
+        <table>
+          <tr class="total-row">
+            <td>TOTAL</td>
+            <td style="text-align:right">R$ ${order.total.toFixed(2)}</td>
+          </tr>
+        </table>
+
+        <div style="margin-top:6px">
+          <span class="tag">${order.payment_method === 'cash' ? '💵 DINHEIRO' : '📱 PIX'}</span>
+          ${order.payment_method === 'cash' && order.change_for ? `
+            <p style="margin-top:3px;font-size:11px">Troco para: R$ ${order.change_for.toFixed(2)}</p>
+          ` : ''}
+        </div>
+
+        ${order.client_notes ? `
+          <div class="divider"></div>
+          <p class="bold">⚠ OBSERVAÇÕES</p>
+          <p style="font-size:12px">${order.client_notes}</p>
+        ` : ''}
+
+        <div class="divider"></div>
+        <p class="center" style="font-size:10px">Tá Na Mão Delivery</p>
+
+        <script>
+          window.onload = function() {
+            window.print();
+            window.onafterprint = function() { window.close(); };
+          };
+        </script>
+      </body>
+      </html>
+    `);
+
+    printWindow.document.close();
+  };
+
   const updateOrderStatus = async (orderId: number, status: string) => {
     setActionLoading(orderId);
     try {
@@ -224,33 +418,74 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       if (updateErr) throw updateErr;
 
       if (status === 'ready') {
-        const { data: couriers, error: fetchErr } = await supabase.from('couriers').select('id').eq('is_online', true).limit(1);
+        // Broadcast para todos os motoboys (sem courier_id)
+        const { error: deliveryErr } = await supabase.from('deliveries').insert({
+          order_id: orderId,
+          status: 'offered',
+          courier_earning: store?.delivery_fee || 8.50
+        });
         
-        if (couriers && couriers.length > 0) {
-          const { error: deliveryErr } = await supabase.from('deliveries').insert({
-            order_id: orderId,
-            courier_id: couriers[0].id,
-            status: 'offered',
-            courier_earning: store?.delivery_fee || 8.50
-          });
-          
-          if (deliveryErr) {
-            console.error("Erro RLS ao despachar:", deliveryErr);
-            showToast("Erro ao chamar motoboy. Verifique as permissões.", 'error');
-          } else {
-            showToast("Motoboy despachado com sucesso!");
-          }
+        if (deliveryErr) {
+          console.error("Erro RLS ao despachar:", deliveryErr);
+          showToast("Erro ao chamar motoboy. Verifique as permissões.", 'error');
         } else {
-          showToast('Nenhum motoboy online no momento. O pedido aguardará.', 'warning');
+          showToast("Procurando motoboys disponíveis...");
         }
       } else {
         showToast('Status do pedido atualizado!');
       }
 
       fetchOrders(store!.id);
-      fetchDashboardMetrics(store!.id);
+      setLastUpdate(Date.now());
     } catch (error: any) {
       showToast("Erro ao atualizar pedido.", 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleOwnDelivery = async (orderId: number) => {
+    setActionLoading(orderId);
+    try {
+      // Marca entrega própria e já coloca em rota — sem acionar motoboys
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          status: 'delivering',
+          own_delivery: true
+        })
+        .eq('id', orderId);
+
+      if (error) throw error;
+
+      showToast('Entrega própria iniciada. Confirme quando entregar.');
+      fetchOrders(store!.id);
+      setLastUpdate(Date.now());
+    } catch (error) {
+      showToast('Erro ao iniciar entrega própria.', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleConfirmOwnDelivery = async (orderId: number) => {
+    setActionLoading(orderId);
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          status: 'delivered',
+          delivered_at: new Date().toISOString()
+        })
+        .eq('id', orderId);
+
+      if (error) throw error;
+
+      showToast('Entrega confirmada!', 'success');
+      fetchOrders(store!.id);
+      setLastUpdate(Date.now());
+    } catch (error) {
+      showToast('Erro ao confirmar entrega.', 'error');
     } finally {
       setActionLoading(null);
     }
@@ -516,6 +751,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     { id: 'categories', icon: <FolderTree size={20} />, label: 'Categorias' },
     { id: 'products', icon: <Package size={20} />, label: 'Cardápio' },
     { id: 'coupons', icon: <Ticket size={20} />, label: 'Cupons' },
+    { id: 'reviews', icon: <Star size={20} />, label: 'Avaliações' },
   ];
 
   if (loading && !store) {
@@ -605,27 +841,46 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           {/* DASHBOARD */}
           {activeTab === 'dashboard' && (
             <div className="max-w-6xl mx-auto space-y-8">
-              <h2 className="text-3xl font-black text-brand-dark">Olá, Parceiro! 👋</h2>
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <h2 className="text-3xl font-black text-brand-dark">Olá, Parceiro! 👋</h2>
+                <div className="flex flex-col items-end gap-2 w-full md:w-auto">
+                  <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200 w-full overflow-x-auto scrollbar-hide">
+                    <button onClick={() => setDashboardFilter('today')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === 'today' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hoje</button>
+                    <button onClick={() => setDashboardFilter('7days')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === '7days' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>7 dias</button>
+                    <button onClick={() => setDashboardFilter('15days')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === '15days' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>15 dias</button>
+                    <button onClick={() => setDashboardFilter('30days')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === '30days' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>30 dias</button>
+                    <button onClick={() => setDashboardFilter('custom')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === 'custom' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Personalizado</button>
+                  </div>
+                  {dashboardFilter === 'custom' && (
+                    <div className="flex gap-2 items-center bg-white p-2 rounded-xl shadow-sm border border-gray-200 w-full md:w-auto justify-between">
+                      <input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent" />
+                      <span className="text-gray-400 text-sm font-medium">até</span>
+                      <input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-blue-50 rounded-xl text-blue-500 w-fit mb-4"><ShoppingBag size={24} /></div>
                   <h3 className="text-3xl font-black text-brand-dark">{dashboardMetrics.totalOrders}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Pedidos hoje</p>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Pedidos no período</p>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-green-50 rounded-xl text-green-500 w-fit mb-4"><Check size={24} /></div>
                   <h3 className="text-3xl font-black text-brand-dark">{dashboardMetrics.deliveredOrders}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Entregues hoje</p>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Entregues no período</p>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-brand-light rounded-xl text-brand-primary w-fit mb-4"><DollarSign size={24} /></div>
                   <h3 className="text-3xl font-black text-brand-dark">R$ {dashboardMetrics.revenue.toFixed(2)}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Faturamento hoje</p>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Faturamento no período</p>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-yellow-50 rounded-xl text-yellow-500 w-fit mb-4"><Star size={24} /></div>
-                  <h3 className="text-3xl font-black text-brand-dark">{store.avg_rating > 0 ? store.avg_rating : '—'}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Avaliação média</p>
+                  <h3 className="text-3xl font-black text-brand-dark">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</h3>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Avaliação geral da loja</p>
                 </div>
               </div>
             </div>
@@ -679,7 +934,14 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                           )}
                         </div>
                         <div className="flex space-x-2">
-                          <button onClick={() => updateOrderStatus(order.id, 'preparing')} disabled={actionLoading === order.id} className="flex-1 bg-brand-primary text-white py-2.5 rounded-xl text-sm font-bold flex justify-center items-center">
+                          <button 
+                            onClick={async () => {
+                              await updateOrderStatus(order.id, 'preparing');
+                              printOrder(order);
+                            }} 
+                            disabled={actionLoading === order.id} 
+                            className="flex-1 bg-brand-primary text-white py-2.5 rounded-xl text-sm font-bold flex justify-center items-center"
+                          >
                             {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : 'Aceitar e Preparar'}
                           </button>
                           <button onClick={() => updateOrderStatus(order.id, 'cancelled')} disabled={actionLoading === order.id} className="px-4 bg-gray-100 text-gray-500 py-2.5 rounded-xl text-sm font-bold">Recusar</button>
@@ -697,8 +959,15 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                   <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                     {orders.filter(o => o.status === 'preparing').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido em preparo</p>}
                     {orders.filter(o => o.status === 'preparing').map(order => (
-                      <div key={order.id} className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-l-blue-500">
-                        <div className="flex justify-between items-start mb-2">
+                      <div key={order.id} className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-l-blue-500 relative">
+                        <button
+                          onClick={() => printOrder(order)}
+                          title="Reimprimir comanda"
+                          className="absolute top-3 right-3 p-1.5 text-gray-400 hover:text-brand-primary hover:bg-gray-100 rounded-lg transition-colors"
+                        >
+                          <Printer size={14} />
+                        </button>
+                        <div className="flex justify-between items-start mb-2 pr-6">
                           <div>
                             <span className="text-xs font-bold text-gray-400">#{order.id}</span>
                             <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
@@ -723,9 +992,22 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                           {order.order_items?.map((item:any) => <p key={item.id} className="font-medium">{item.quantity}x {item.product_name}</p>)}
                         </div>
 
-                        <button onClick={() => updateOrderStatus(order.id, 'ready')} disabled={actionLoading === order.id} className="w-full bg-blue-50 text-blue-600 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center hover:bg-blue-100 transition-colors">
-                          {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : 'Marcar como Pronto'}
-                        </button>
+                        <div className="flex gap-2 mt-3">
+                          <button
+                            onClick={() => updateOrderStatus(order.id, 'ready')}
+                            disabled={actionLoading === order.id}
+                            className="flex-1 bg-blue-50 text-blue-600 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center hover:bg-blue-100 transition-colors"
+                          >
+                            {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : <><Bike size={14} className="mr-1.5"/>Chamar Motoboy</>}
+                          </button>
+                          <button
+                            onClick={() => handleOwnDelivery(order.id)}
+                            disabled={actionLoading === order.id}
+                            className="flex-1 bg-purple-50 text-purple-600 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center hover:bg-purple-100 transition-colors"
+                          >
+                            {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : <><User size={14} className="mr-1.5"/>Entrega Própria</>}
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -739,7 +1021,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                   <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                     {orders.filter(o => o.status === 'ready' || o.status === 'delivering').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido aguardando entrega</p>}
                     {orders.filter(o => o.status === 'ready' || o.status === 'delivering').map(order => (
-                      <div key={order.id} className={`bg-white rounded-2xl p-5 shadow-sm border-l-4 ${order.courier_id ? 'border-l-brand-primary' : 'border-l-yellow-400'} opacity-90`}>
+                      <div key={order.id} className={`bg-white rounded-2xl p-5 shadow-sm border-l-4 ${order.own_delivery ? 'border-l-purple-500' : order.courier_id ? 'border-l-brand-primary' : 'border-l-yellow-400'} opacity-90`}>
                         <div className="flex justify-between items-start mb-2">
                           <span className="text-xs font-bold text-gray-400">#{order.id}</span>
                           <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
@@ -753,7 +1035,25 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                           </p>
                         )}
                         
-                        {order.courier_id ? (
+                        {order.own_delivery ? (
+                          <div className="mt-3 space-y-2">
+                            <div className="bg-purple-50 text-purple-700 text-xs font-bold p-2 rounded-lg flex items-center border border-purple-200">
+                              <User size={14} className="mr-1"/> Entrega Própria
+                            </div>
+                            {order.status === 'delivering' && (
+                              <button
+                                onClick={() => handleConfirmOwnDelivery(order.id)}
+                                disabled={actionLoading === order.id}
+                                className="w-full bg-brand-primary text-white py-2.5 rounded-xl text-sm font-bold flex justify-center items-center hover:bg-green-600 transition-colors"
+                              >
+                                {actionLoading === order.id
+                                  ? <Loader2 size={16} className="animate-spin"/>
+                                  : <><CheckCircle size={14} className="mr-1.5"/>Confirmar Entrega</>
+                                }
+                              </button>
+                            )}
+                          </div>
+                        ) : order.courier_id ? (
                           <div className="mt-3 bg-green-50 text-green-700 text-xs font-bold p-2 rounded-lg flex items-center">
                             <Bike size={14} className="mr-1"/> Com motoboy
                           </div>
@@ -1042,6 +1342,54 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* AVALIAÇÕES */}
+          {activeTab === 'reviews' && (
+            <div className="max-w-6xl mx-auto">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-brand-dark">Avaliações dos Clientes</h2>
+                <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-gray-100 flex items-center">
+                  <Star className="text-yellow-400 mr-2 fill-current" size={20} />
+                  <span className="font-black text-brand-dark text-lg">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</span>
+                  <span className="text-gray-400 text-sm ml-2 font-medium">({reviews.length} avaliações)</span>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {reviews.map(review => (
+                  <div key={review.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-brand-light text-brand-primary rounded-full flex items-center justify-center font-black">
+                          {review.users?.name?.charAt(0).toUpperCase() || 'C'}
+                        </div>
+                        <div>
+                          <p className="font-bold text-brand-dark">{review.users?.name || 'Cliente'}</p>
+                          <p className="text-xs text-gray-500">{new Date(review.created_at).toLocaleDateString('pt-BR')}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center">
+                        {[...Array(5)].map((_, i) => (
+                          <Star key={i} size={14} className={i < review.rating ? 'text-yellow-400 fill-current' : 'text-gray-200'} />
+                        ))}
+                      </div>
+                    </div>
+                    {review.comment && (
+                      <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-xl italic">"{review.comment}"</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+              
+              {reviews.length === 0 && (
+                <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 shadow-sm">
+                  <Star size={48} className="text-gray-300 mx-auto mb-4" />
+                  <p className="text-gray-500 font-medium text-lg">Nenhuma avaliação recebida ainda.</p>
+                  <p className="text-gray-400 text-sm mt-1">Continue prestando um ótimo serviço para receber 5 estrelas!</p>
+                </div>
+              )}
             </div>
           )}
         </main>

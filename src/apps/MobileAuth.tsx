@@ -90,7 +90,7 @@ export default function MobileAuth() {
   };
 
   const handleAuthError = (err: any) => {
-    console.error("Auth Error Debug:", err);
+    console.log("Auth Error Debug:", err);
     let msg = err.message || 'Ocorreu um erro inesperado.';
     
     if (msg.includes('Invalid login credentials')) {

@@ -72,6 +72,8 @@ export interface Order {
   client_notes?: string | null;
   cancel_reason?: string | null;
   cancelled_by?: string | null;
+  delivery_code?: string;
+  own_delivery?: boolean;
   created_at: string;
   order_items?: any[];
 }
@@ -79,9 +81,11 @@ export interface Order {
 export interface Delivery {
   id: number;
   order_id: number;
-  courier_id: number;
+  courier_id: number | null;
   status: string;
   courier_earning: number;
+  accepted_at?: string;
+  delivered_at?: string;
 }
 
 export interface Courier {

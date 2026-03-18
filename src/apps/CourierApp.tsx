@@ -17,10 +17,20 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => setToast({ message, type });
   
   const [deliveryState, setDeliveryState] = useState('none'); 
+  const deliveryStateRef = React.useRef('none');
+  useEffect(() => { deliveryStateRef.current = deliveryState; }, [deliveryState]);
+
   const [acceptTimer, setAcceptTimer] = useState(15);
   const [activeDelivery, setActiveDelivery] = useState<any>(null);
+  const activeDeliveryRef = React.useRef<any>(null);
+  useEffect(() => { activeDeliveryRef.current = activeDelivery; }, [activeDelivery]);
+
   const [gpsError, setGpsError] = useState(false);
   
+  // Delivery Code Validation
+  const [deliveryCodeInput, setDeliveryCodeInput] = useState('');
+  const [deliveryCodeError, setDeliveryCodeError] = useState(false);
+
   // Earnings History
   const [deliveriesHistory, setDeliveriesHistory] = useState<any[]>([]);
   const [earningsPage, setEarningsPage] = useState(0);
@@ -73,41 +83,48 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   };
 
   const subscribeToDeliveries = (courierId: number) => {
-    const channel = supabase.channel('courier_offers')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'deliveries', filter: `courier_id=eq.${courierId}` }, async (payload) => {
+    const channel = supabase.channel(`broadcast_offers_${courierId}`)
+      // Escuta INSERT de qualquer oferta (sem filtro de courier_id)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'deliveries' }, async (payload) => {
         const delivery = payload.new;
-        if (delivery.status === 'offered') {
-          // Busca dados completos do pedido, loja e cliente
-          const { data: order } = await supabase
-            .from('orders')
-            .select(`
-              *,
-              stores(name, addresses(*)),
-              addresses(*),
-              users:client_id(name),
-              order_items(*)
-            `)
-            .eq('id', delivery.order_id)
-            .maybeSingle();
-            
-          if (!order) {
-            showToast('O pedido não está mais disponível.', 'warning');
-            setDeliveryState('none');
-            return;
-          }
+        if (delivery.status !== 'offered') return;
+        if (deliveryStateRef.current !== 'none') return; // já está em corrida, ignorar
 
-          // Dispara Notificação Push
-          sendNotification('🏍️ Nova Corrida Disponível!', {
-            body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${order.stores?.name}. Aceite rápido!`,
-          });
+        const { data: order } = await supabase
+          .from('orders')
+          .select('*, stores(name, addresses(*)), addresses(*), users:client_id(name), order_items(*)')
+          .eq('id', delivery.order_id)
+          .maybeSingle();
 
-          setActiveDelivery({ ...delivery, order });
-          setDeliveryState('offered');
-          setAcceptTimer(15);
-          navigator.vibrate?.([200, 100, 200]); // Vibra o celular se suportado
+        if (!order) return;
+
+        sendNotification('🏍️ Nova Corrida Disponível!', {
+          body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${order.stores?.name}. Aceite rápido!`,
+        });
+        navigator.vibrate?.([300, 100, 300, 100, 300]);
+
+        setActiveDelivery({ ...delivery, order });
+        setDeliveryState('offered');
+        setAcceptTimer(15);
+      })
+      // Escuta UPDATE para detectar quando oferta que está vendo foi aceita por outro
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'deliveries' }, (payload) => {
+        const updated = payload.new;
+        if (
+          deliveryStateRef.current === 'offered' &&
+          activeDeliveryRef.current?.id === updated.id &&
+          updated.status !== 'offered' &&
+          updated.courier_id !== courierId
+        ) {
+          showToast('Corrida aceita por outro motoboy.', 'warning');
+          setDeliveryState('none');
+          setActiveDelivery(null);
+          setDeliveryCodeInput('');
+          setDeliveryCodeError(false);
         }
-      }).subscribe();
-      
+      })
+      .subscribe();
+
     return channel;
   };
 
@@ -135,6 +152,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         return;
       }
 
+      // EXIGE GPS REAL PARA FICAR ONLINE
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           try {
@@ -155,27 +173,13 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           }
         },
         async (error) => {
-          console.error("Erro de localização:", error);
+          console.warn("Erro de localização:", error);
           setGpsError(true);
-          showToast('GPS bloqueado. Usando localização simulada para testes.', 'warning');
-          
-          try {
-            const newStatus = true;
-            await supabase.from('couriers').update({ 
-              is_online: newStatus,
-              last_lat: -23.550520, // Mock latitude (São Paulo)
-              last_lng: -46.633308, // Mock longitude
-              location_at: new Date().toISOString()
-            }).eq('id', courier.id);
-            
-            setCourier({ ...courier, is_online: newStatus });
-          } catch (e) {
-            showToast("Erro ao ficar online no fallback.", 'error');
-          } finally {
-            setLoading(false);
-          }
+          // Bloqueia o motoboy de ficar online se o GPS falhar
+          showToast('Ative o GPS do celular e dê permissão para ficar online.', 'error');
+          setLoading(false);
         },
-        { enableHighAccuracy: true, timeout: 5000 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     } else {
       setLoading(true);
@@ -270,8 +274,11 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     if (deliveryState === 'offered' && acceptTimer > 0) {
       interval = setInterval(() => setAcceptTimer(prev => prev - 1), 1000);
     } else if (deliveryState === 'offered' && acceptTimer === 0) {
+      showToast('Tempo esgotado.', 'warning');
       setDeliveryState('none');
       setActiveDelivery(null);
+      setDeliveryCodeInput('');
+      setDeliveryCodeError(false);
     }
     return () => clearInterval(interval);
   }, [deliveryState, acceptTimer]);
@@ -279,10 +286,11 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     let watchId: number;
 
+    // RASTREAMENTO CONTÍNUO REAL
     if (courier?.is_online && navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition(
         async (pos) => {
-          setGpsError(false);
+          setGpsError(false); // GPS voltou / está funcionando
           await supabase.from('couriers').update({
             last_lat: pos.coords.latitude,
             last_lng: pos.coords.longitude,
@@ -290,8 +298,8 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           }).eq('id', courier.id);
         },
         (err) => {
-          console.error("Erro no rastreamento contínuo:", err);
-          setGpsError(true);
+          console.warn("Sinal de GPS perdido:", err);
+          setGpsError(true); // Mostra o ícone amarelo de alerta
         },
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
       );
@@ -307,24 +315,48 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   const handleAccept = async () => {
     setActionLoading(true);
     try {
-      const { error: delErr } = await supabase.from('deliveries').update({ status: 'going_to_store', accepted_at: new Date().toISOString() }).eq('id', activeDelivery.id);
-      if (delErr) throw delErr;
+      // UPDATE atômico: só passa se status ainda for 'offered'
+      const { data: updated, error: delErr } = await supabase
+        .from('deliveries')
+        .update({
+          status: 'going_to_store',
+          courier_id: courier!.id,
+          accepted_at: new Date().toISOString()
+        })
+        .eq('id', activeDelivery.id)
+        .eq('status', 'offered') // proteção: falha se outro motoboy chegou primeiro
+        .select()
+        .maybeSingle();
 
-      const { error: ordErr } = await supabase.from('orders').update({ courier_id: courier!.id }).eq('id', activeDelivery.order_id);
+      if (delErr || !updated) {
+        showToast('Corrida já foi aceita por outro motoboy.', 'warning');
+        setDeliveryState('none');
+        setActiveDelivery(null);
+        return;
+      }
+
+      const { error: ordErr } = await supabase
+        .from('orders')
+        .update({ courier_id: courier!.id })
+        .eq('id', activeDelivery.order_id);
+
       if (ordErr) throw ordErr;
 
       setDeliveryState('going_to_store');
       showToast('Corrida aceita! Siga para a loja.');
-    } catch (e: any) { 
-      showToast("Erro ao aceitar corrida.", 'error');
-    } finally { 
-      setActionLoading(false); 
+    } catch (e: any) {
+      showToast('Erro ao aceitar corrida.', 'error');
+    } finally {
+      setActionLoading(false);
     }
   };
 
   const handleReject = () => {
     setDeliveryState('none');
     setActiveDelivery(null);
+    setDeliveryCodeInput('');
+    setDeliveryCodeError(false);
+    // Não atualiza banco — oferta continua disponível para outros motoboys
   };
 
   const handleArrivedStore = async () => {
@@ -346,22 +378,34 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   };
 
   const handleDelivered = async () => {
+    // Valida o código apenas se o pedido tiver um código (pedidos novos)
+    if (activeDelivery.order.delivery_code && deliveryCodeInput.trim() !== activeDelivery.order.delivery_code) {
+      setDeliveryCodeError(true);
+      showToast('Código incorreto. Peça ao cliente o código de 4 dígitos.', 'error');
+      return;
+    }
+    
+    setDeliveryCodeError(false);
     setActionLoading(true);
     try {
       await supabase.from('deliveries').update({ status: 'delivered', delivered_at: new Date().toISOString() }).eq('id', activeDelivery.id);
       await supabase.from('orders').update({ status: 'delivered', delivered_at: new Date().toISOString() }).eq('id', activeDelivery.order_id);
-      
-      // Update courier balance and total deliveries
+
       const newBalance = (courier.available_balance || 0) + activeDelivery.courier_earning;
       const newTotal = (courier.total_deliveries || 0) + 1;
       await supabase.from('couriers').update({ available_balance: newBalance, total_deliveries: newTotal }).eq('id', courier.id);
       setCourier({ ...courier, available_balance: newBalance, total_deliveries: newTotal });
 
+      setDeliveryCodeInput('');
       setDeliveryState('none');
       setActiveDelivery(null);
       setActiveTab('earnings');
-      showToast('Entrega finalizada com sucesso!', 'success');
-    } catch (e) { showToast('Erro ao finalizar entrega', 'error'); } finally { setActionLoading(false); }
+      showToast('Entrega confirmada com sucesso! 🎉', 'success');
+    } catch (e) {
+      showToast('Erro ao finalizar entrega', 'error');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const isDeliveryActive = deliveryState !== 'none';
@@ -415,7 +459,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
               <h2 className="font-bold text-sm">{courier.users?.name || 'Motoboy'}</h2>
               {courier.is_online && (
                 <p className={`text-[10px] font-bold ${gpsError ? 'text-yellow-500' : 'text-brand-primary'}`}>
-                  {gpsError ? '⚠️ GPS com problema' : '● GPS Ativo'}
+                  {gpsError ? '⚠️ Sinal GPS fraco' : '● GPS Ativo'}
                 </p>
               )}
             </div>
@@ -530,7 +574,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
               )}
 
               {activeDelivery.order.payment_method === 'cash' ? (
-                <div className="bg-green-900/40 border border-green-500/50 p-5 rounded-2xl">
+                <div className="bg-green-900/40 border border-green-500/50 p-5 rounded-2xl mb-4">
                   <div className="flex items-center text-green-400 font-bold mb-2"><Banknote size={20} className="mr-2"/> COBRAR EM DINHEIRO</div>
                   <p className="text-3xl font-black text-white">R$ {activeDelivery.order.total.toFixed(2)}</p>
                   {activeDelivery.order.change_for && (
@@ -538,16 +582,55 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
                   )}
                 </div>
               ) : (
-                <div className="bg-blue-900/40 border border-blue-500/50 p-5 rounded-2xl">
+                <div className="bg-blue-900/40 border border-blue-500/50 p-5 rounded-2xl mb-4">
                   <div className="flex items-center text-blue-400 font-bold mb-1"><CreditCard size={20} className="mr-2"/> PAGAMENTO PIX</div>
                   <p className="text-blue-200 text-sm">O cliente já escolheu pagar via PIX. Combine a chave na entrega. Valor: R$ {activeDelivery.order.total.toFixed(2)}</p>
                 </div>
               )}
             </div>
 
-            <button onClick={handleDelivered} disabled={actionLoading} className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-brand-primary/20">
-              {actionLoading ? <Loader2 className="animate-spin" size={24}/> : <><CheckCircle size={20} className="mr-2" /> Finalizar Entrega</>}
-            </button>
+            {/* Input de código de confirmação */}
+            <div className="space-y-3">
+              {activeDelivery.order.delivery_code ? (
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2 text-center">
+                    Digite o código do cliente para confirmar a entrega
+                  </p>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={4}
+                    value={deliveryCodeInput}
+                    onChange={e => {
+                      setDeliveryCodeError(false);
+                      setDeliveryCodeInput(e.target.value.slice(0, 4));
+                    }}
+                    placeholder="0000"
+                    className={`w-full text-center text-4xl font-black tracking-[0.4em] bg-gray-800 border-2 ${
+                      deliveryCodeError ? 'border-red-500 text-red-400' : 'border-gray-600 text-white'
+                    } rounded-2xl py-5 focus:border-brand-primary focus:outline-none transition-colors`}
+                  />
+                  {deliveryCodeError && (
+                    <p className="text-red-400 text-xs text-center mt-2 font-medium">
+                      Código incorreto. Verifique com o cliente.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-yellow-900/30 border border-yellow-600/50 p-4 rounded-2xl text-center">
+                  <p className="text-yellow-500 text-sm font-bold">Pedido Legado</p>
+                  <p className="text-yellow-100 text-xs mt-1">Este pedido não possui código de confirmação. Confirme a entrega diretamente.</p>
+                </div>
+              )}
+              <button
+                onClick={handleDelivered}
+                disabled={actionLoading || (activeDelivery.order.delivery_code && deliveryCodeInput.length !== 4)}
+                className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-brand-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {actionLoading ? <Loader2 className="animate-spin" size={24}/> : <><CheckCircle size={20} className="mr-2"/> Confirmar Entrega</>}
+              </button>
+            </div>
           </div>
         )}
 

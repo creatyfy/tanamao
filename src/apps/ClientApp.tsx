@@ -6,6 +6,78 @@ import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { Search, MapPin, Star, Clock, Bike, ChevronLeft, Plus, Minus, ShoppingBag, CheckCircle, History, Home, User, CreditCard, Loader2, X, Store as StoreIcon, LogOut, MessageSquare, Trash2, Ticket, BellRing } from 'lucide-react';
 
+// Função auxiliar para normalizar strings (remove acentos, espaços e deixa minúsculo)
+const normalizeString = (str?: string) => {
+  if (!str) return '';
+  return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+};
+
+// Mapa ao vivo sem flicker — usa Leaflet via CDN, atualiza marcador sem recarregar
+function LiveMap({ lat, lng }: { lat: number; lng: number }) {
+  const mapRef = React.useRef<HTMLDivElement>(null);
+  const leafletMapRef = React.useRef<any>(null);
+  const markerRef = React.useRef<any>(null);
+
+  useEffect(() => {
+    // Carrega Leaflet CSS e JS via CDN uma única vez
+    if (!document.getElementById('leaflet-css')) {
+      const link = document.createElement('link');
+      link.id = 'leaflet-css';
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+    }
+
+    const initMap = () => {
+      if (!mapRef.current || leafletMapRef.current) return;
+      const L = (window as any).L;
+      if (!L) return;
+
+      const map = L.map(mapRef.current, { zoomControl: false, attributionControl: false }).setView([lat, lng], 16);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+      const icon = L.divIcon({
+        html: '🏍️',
+        className: '',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16]
+      });
+
+      markerRef.current = L.marker([lat, lng], { icon }).addTo(map);
+      leafletMapRef.current = map;
+    };
+
+    if ((window as any).L) {
+      initMap();
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      script.onload = initMap;
+      document.head.appendChild(script);
+    }
+
+    return () => {
+      if (leafletMapRef.current) {
+        leafletMapRef.current.remove();
+        leafletMapRef.current = null;
+        markerRef.current = null;
+      }
+    };
+  }, []); // inicializa apenas uma vez
+
+  // Atualiza apenas a posição do marcador — sem recarregar o mapa
+  useEffect(() => {
+    if (markerRef.current && leafletMapRef.current) {
+      markerRef.current.setLatLng([lat, lng]);
+      leafletMapRef.current.panTo([lat, lng], { animate: true, duration: 1 });
+    }
+  }, [lat, lng]);
+
+  return (
+    <div ref={mapRef} style={{ width: '100%', height: '208px', zIndex: 0 }} />
+  );
+}
+
 export default function ClientApp({ onExit }: { onExit: () => void }) {
   const { user, profile } = useAuth();
   const { permission: notifPermission, requestPermission, sendNotification } = usePushNotifications();
@@ -72,6 +144,22 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     if (user) fetchHomeData();
   }, [user]);
 
+  // Realtime listener para atualizar status de aberto/fechado das lojas instantaneamente
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase.channel('public:stores_client')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'stores' }, (payload) => {
+        setStores(prevStores => prevStores.map(store => 
+          store.id === payload.new.id ? { ...store, is_open: payload.new.is_open } : store
+        ));
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   useEffect(() => {
     if (currentScreen === 'history') fetchHistory();
     if (currentScreen === 'profile') fetchAddresses();
@@ -88,7 +176,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     try {
       const [catRes, storeRes, addrRes, orderRes] = await Promise.all([
         supabase.from('store_categories').select('*').eq('is_active', true).order('sort_order'),
-        supabase.from('stores').select('*').eq('is_approved', true).eq('status', 'active'),
+        supabase.from('stores').select('*, addresses!inner(city, state, neighborhood)').eq('is_approved', true).eq('status', 'active'),
         supabase.from('addresses').select('*').eq('user_id', user!.id).limit(1).maybeSingle(),
         supabase.from('orders').select('*, order_items(*)').eq('client_id', user!.id).not('status', 'in', '("delivered","cancelled")').order('created_at', { ascending: false }).limit(1).maybeSingle()
       ]);
@@ -101,7 +189,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         setActiveOrder(orderRes.data);
         subscribeToOrder(orderRes.data.id);
         
-        if (orderRes.data.status === 'delivering' && orderRes.data.courier_id) {
+        if (orderRes.data.status === 'delivering' && orderRes.data.courier_id && !orderRes.data.own_delivery) {
           subscribeToCourierLocation(orderRes.data.courier_id);
         }
       }
@@ -365,6 +453,12 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const handleCheckout = async () => {
     if (!user || !selectedStore || !userAddress) return;
     
+    // Bloqueia se a loja fechou depois que o cliente abriu o cardápio
+    if (!selectedStore.is_open) {
+      showToast('Esta loja fechou. Não é possível finalizar o pedido.', 'error');
+      return;
+    }
+    
     if (paymentMethod === 'cash' && changeFor) {
       const changeValue = parseFloat(changeFor);
       if (changeValue < finalTotal) {
@@ -375,6 +469,9 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
 
     setActionLoading(true);
     try {
+      // Gera código de 4 dígitos aleatório
+      const deliveryCode = String(Math.floor(1000 + Math.random() * 9000));
+
       const { data: order, error: orderError } = await supabase.from('orders').insert({
         client_id: user.id,
         store_id: selectedStore.id,
@@ -387,7 +484,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         change_for: paymentMethod === 'cash' && changeFor ? parseFloat(changeFor) : null,
         coupon_id: appliedCoupon?.id || null,
         client_notes: clientNotes ? clientNotes : null,
-        status: 'pending'
+        status: 'pending',
+        delivery_code: deliveryCode
       }).select().single();
       
       if (orderError) throw orderError;
@@ -558,7 +656,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           sendNotification('🎉 Pedido Entregue!', { body: 'Bom apetite! Não esqueça de avaliar a loja.' });
         }
 
-        if (updatedOrder.status === 'delivering' && updatedOrder.courier_id) {
+        if (updatedOrder.status === 'delivering' && updatedOrder.courier_id && !updatedOrder.own_delivery) {
           subscribeToCourierLocation(updatedOrder.courier_id);
         }
 
@@ -574,10 +672,29 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   };
 
   const filteredStores = stores.filter(store => {
+    // Filtro por categoria
     const matchCat = selectedCategory ? store.global_category_id === selectedCategory : true;
-    const matchSearch = searchQuery ? store.name.toLowerCase().includes(searchQuery.toLowerCase()) : true;
-    return matchCat && matchSearch;
+    
+    // Filtro por busca
+    const matchSearch = searchQuery
+      ? store.name.toLowerCase().includes(searchQuery.toLowerCase())
+      : true;
+
+    // Filtro por cidade inteligente (ignora acentos e maiúsculas)
+    const clientCity = normalizeString(userAddress?.city);
+    const storeCity = normalizeString(store.addresses?.city);
+    
+    const matchCity = (clientCity && storeCity)
+      ? clientCity === storeCity
+      : true;
+
+    return matchCat && matchSearch && matchCity;
   });
+
+  // Separar abertas e fechadas para mostrar fechadas por último
+  const openStores = filteredStores.filter(s => s.is_open);
+  const closedStores = filteredStores.filter(s => !s.is_open);
+  const sortedStores = [...openStores, ...closedStores];
 
   const getTimelineSteps = (status: string) => {
     const steps = [
@@ -739,25 +856,63 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
 
             <h2 className="font-bold text-brand-dark text-lg mb-4">Lojas Disponíveis</h2>
             <div className="space-y-4">
-              {filteredStores.map(store => (
-                <div key={store.id} onClick={() => openStore(store)} className="bg-white p-3 rounded-2xl shadow-sm flex items-center cursor-pointer active:scale-95 transition-transform">
-                  <img src={store.logo_url || 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?w=200&h=200&fit=crop'} alt={store.name} className="w-16 h-16 rounded-xl object-cover" />
+              {sortedStores.map(store => (
+                <div
+                  key={store.id}
+                  onClick={() => store.is_open ? openStore(store) : showToast('Esta loja está fechada no momento.', 'warning')}
+                  className={`bg-white p-3 rounded-2xl shadow-sm flex items-center transition-transform ${store.is_open ? 'cursor-pointer active:scale-95' : 'cursor-not-allowed opacity-60'}`}
+                >
+                  <div className="relative">
+                    <img
+                      src={store.logo_url || 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?w=200&h=200&fit=crop'}
+                      alt={store.name}
+                      className={`w-16 h-16 rounded-xl object-cover ${!store.is_open ? 'grayscale' : ''}`}
+                    />
+                    {!store.is_open && (
+                      <div className="absolute inset-0 bg-black/50 rounded-xl flex items-center justify-center">
+                        <span className="text-white text-[9px] font-black uppercase tracking-wider">Fechada</span>
+                      </div>
+                    )}
+                  </div>
                   <div className="ml-3 flex-1">
-                    <h3 className="font-bold text-brand-dark">{store.name}</h3>
+                    <div className="flex items-center justify-between">
+                      <h3 className={`font-bold ${store.is_open ? 'text-brand-dark' : 'text-gray-400'}`}>{store.name}</h3>
+                      {!store.is_open && (
+                        <span className="text-[10px] font-bold bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">Fechada</span>
+                      )}
+                    </div>
                     <div className="flex items-center text-xs text-gray-500 mt-1 space-x-2">
-                      <span className="flex items-center text-brand-secondary font-bold"><Star size={12} className="mr-1 fill-current" /> {store.avg_rating}</span>
-                      <span>•</span><span>{store.avg_prep_time_min} min</span>
+                      <span className="flex items-center text-brand-secondary font-bold">
+                        <Star size={12} className="mr-1 fill-current" /> {store.avg_rating}
+                      </span>
+                      <span>•</span>
+                      <span>{store.avg_prep_time_min} min</span>
                     </div>
                     <div className="text-xs text-gray-500 mt-1">
-                      {store.delivery_fee === 0 ? <span className="text-brand-primary font-semibold">Entrega Grátis</span> : `Taxa R$ ${store.delivery_fee.toFixed(2)}`}
+                      {store.delivery_fee === 0
+                        ? <span className="text-brand-primary font-semibold">Entrega Grátis</span>
+                        : `Taxa R$ ${store.delivery_fee.toFixed(2)}`}
                     </div>
                   </div>
                 </div>
               ))}
-              {filteredStores.length === 0 && !loading && (
+              {sortedStores.length === 0 && !loading && (
                 <div className="text-center py-10">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400"><StoreIcon size={32}/></div>
-                  <p className="text-gray-500 font-medium">Nenhuma loja encontrada.</p>
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-400">
+                    <StoreIcon size={32}/>
+                  </div>
+                  {userAddress ? (
+                    <>
+                      <p className="text-gray-500 font-medium">Nenhuma loja em {userAddress.city}</p>
+                      <p className="text-gray-400 text-sm mt-1">O Tá Na Mão ainda não chegou na sua cidade.</p>
+                      <p className="text-xs text-gray-400 mt-4 italic">Aviso: A loja precisa ser aprovada pelo administrador para aparecer aqui.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-gray-500 font-medium">Nenhuma loja encontrada.</p>
+                      <p className="text-gray-400 text-sm mt-1">Cadastre um endereço para ver lojas disponíveis.</p>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -1147,8 +1302,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       )}
 
       {currentScreen === 'tracking' && activeOrder && (
-        <div className="flex-1 flex flex-col bg-gray-50">
-          <div className="bg-white p-4 flex justify-between items-center border-b border-gray-100">
+        <div className="flex-1 flex flex-col bg-gray-50 min-h-0">
+          <div className="bg-white p-4 flex justify-between items-center border-b border-gray-100 shrink-0">
             <h1 className="text-lg font-bold text-brand-dark">Pedido #{activeOrder.id}</h1>
             <div className="flex space-x-2">
               {['pending', 'accepted', 'preparing'].includes(activeOrder.status) && (
@@ -1163,7 +1318,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             </div>
           </div>
           
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-12">
             {/* Payment Banner */}
             <div className={`p-4 rounded-2xl shadow-sm ${activeOrder.payment_method === 'cash' ? 'bg-green-100 border border-green-200' : 'bg-blue-100 border border-blue-200'}`}>
               <h3 className={`font-black text-lg ${activeOrder.payment_method === 'cash' ? 'text-green-800' : 'text-blue-800'}`}>
@@ -1176,28 +1331,44 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
               </p>
             </div>
 
+            {/* CÓDIGO DE CONFIRMAÇÃO DE ENTREGA */}
+            {activeOrder.status === 'delivering' && activeOrder.delivery_code && (
+              <div className="bg-brand-primary/10 border-2 border-brand-primary rounded-2xl p-5 text-center mb-4">
+                <p className="text-brand-primary text-xs font-black uppercase tracking-widest mb-2">
+                  🔐 Código de Confirmação
+                </p>
+                <p className="text-5xl font-black text-brand-dark tracking-[0.3em]">
+                  {activeOrder.delivery_code}
+                </p>
+                <p className="text-gray-500 text-xs mt-3 font-medium">
+                  Informe este código ao motoboy na entrega
+                </p>
+              </div>
+            )}
+
+            {/* ENTREGA PRÓPRIA UI */}
+            {activeOrder.status === 'delivering' && activeOrder.own_delivery && (
+              <div className="bg-purple-50 border border-purple-200 rounded-2xl p-4 flex items-center mb-4 shrink-0">
+                <div className="w-10 h-10 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mr-3 shrink-0">
+                  <User size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-purple-900 text-sm">Entrega Própria da Loja</h3>
+                  <p className="text-xs text-purple-700 mt-0.5">O pedido está a caminho com o entregador da própria loja.</p>
+                </div>
+              </div>
+            )}
+
             {/* MAP UI */}
-            {activeOrder.status === 'delivering' && courierLocation && (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            {activeOrder.status === 'delivering' && courierLocation && !activeOrder.own_delivery && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4 shrink-0">
                 <div className="p-4 border-b border-gray-100 flex items-center">
                   <div className="w-2.5 h-2.5 bg-brand-primary rounded-full animate-ping mr-2"></div>
                   <div className="w-2.5 h-2.5 bg-brand-primary rounded-full absolute mr-2 ml-0"></div>
                   <span className="font-bold text-brand-dark text-sm ml-1">🏍️ Motoboy a caminho</span>
                   <span className="ml-auto text-xs text-gray-400 font-medium">Ao vivo</span>
                 </div>
-                <div className="relative w-full h-52">
-                  <iframe
-                    key={`${courierLocation.lat}-${courierLocation.lng}`}
-                    width="100%"
-                    height="100%"
-                    style={{ border: 'none' }}
-                    src={`https://www.openstreetmap.org/export/embed.html?bbox=${courierLocation.lng - 0.008},${courierLocation.lat - 0.008},${courierLocation.lng + 0.008},${courierLocation.lat + 0.008}&layer=mapnik&marker=${courierLocation.lat},${courierLocation.lng}`}
-                    title="Localização do motoboy"
-                  />
-                  <div className="absolute bottom-2 right-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-[10px] text-gray-500 font-medium shadow-sm">
-                    © OpenStreetMap
-                  </div>
-                </div>
+                <LiveMap lat={courierLocation.lat} lng={courierLocation.lng} />
               </div>
             )}
 
@@ -1212,7 +1383,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                     </div>
                     <div className={`ml-4 md:ml-0 md:w-[calc(50%-2.5rem)] ${step.isCurrent ? 'font-black text-brand-primary' : step.isPast ? 'font-bold text-gray-700' : 'font-medium text-gray-500'}`}>
                       {step.label}
-                      {step.id === 'delivering' && step.isCurrent && (
+                      {step.id === 'delivering' && step.isCurrent && !activeOrder.own_delivery && (
                         <p className="text-xs text-brand-primary mt-1 font-medium animate-pulse">
                           Acompanhe no mapa acima ↑
                         </p>
