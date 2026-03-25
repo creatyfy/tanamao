@@ -1,29 +1,19 @@
 /*
-  # Auto Confirm Email Trigger
-  Automaticamente confirma os e-mails de novos usuários para burlar a exigência de confirmação durante os testes.
+  # Configuração de Auto Confirmação de Email
+  Cria uma trigger para confirmar automaticamente os emails dos novos usuários registrados.
 
   ## Query Description:
-  Esta operação cria uma trigger na tabela auth.users que define a coluna email_confirmed_at com o timestamp atual no momento da criação do usuário. Isso permite que as contas de teste façam login imediatamente.
-  
+  Esta operação adiciona uma função e uma trigger na tabela auth.users para preencher automaticamente o campo email_confirmed_at. Isso permite que os usuários façam login imediatamente após o registro sem precisar confirmar o email.
+
   ## Metadata:
-  - Schema-Category: "Safe"
+  - Schema-Category: "Structural"
   - Impact-Level: "Low"
   - Requires-Backup: false
   - Reversible: true
-  
+
   ## Structure Details:
-  - Função: public.auto_confirm_email_fn()
-  - Trigger: auto_confirm_email na tabela auth.users
-  
-  ## Security Implications:
-  - RLS Status: N/A
-  - Policy Changes: Nenhuma
-  - Auth Requirements: Nenhuma
-  
-  ## Performance Impact:
-  - Indexes: Nenhum
-  - Triggers: Adicionada auto_confirm_email
-  - Estimated Impact: Nenhum
+  - Function: public.auto_confirm_email_fn()
+  - Trigger: auto_confirm_email on auth.users
 */
 
 CREATE OR REPLACE FUNCTION public.auto_confirm_email_fn()

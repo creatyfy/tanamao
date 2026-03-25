@@ -3,7 +3,45 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, List, Bell, Star, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing } from 'lucide-react';
+import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, List, Bell, Star, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing, Map } from 'lucide-react';
+
+// Componente auxiliar para renderizar o mapa e os botões de navegação
+const AddressMap = ({ address }: { address: string }) => {
+  if (!address) return null;
+  const encodedAddress = encodeURIComponent(address);
+  
+  return (
+    <div className="mt-4 mb-6 shrink-0">
+      {/* Mapa Embutido */}
+      <div className="w-full h-48 rounded-2xl overflow-hidden border-2 border-gray-700 mb-3 shadow-inner relative bg-gray-800">
+        <iframe
+          width="100%"
+          height="100%"
+          frameBorder="0"
+          style={{ border: 0, filter: 'contrast(0.9) opacity(0.9)' }}
+          src={`https://maps.google.com/maps?q=${encodedAddress}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+          allowFullScreen
+        ></iframe>
+      </div>
+      
+      {/* Botões de Navegação Externa */}
+      <div className="flex gap-3">
+        <button 
+          onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodedAddress}`, '_blank')}
+          className="flex-1 bg-gray-100 hover:bg-white text-gray-900 py-3 rounded-xl font-bold text-sm flex justify-center items-center transition-colors shadow-sm"
+        >
+          <Map size={16} className="mr-2" /> Google Maps
+        </button>
+        <button 
+          onClick={() => window.open(`https://waze.com/ul?q=${encodedAddress}`, '_blank')}
+          className="flex-1 bg-[#33ccff] hover:bg-[#2eb8e6] text-white py-3 rounded-xl font-bold text-sm flex justify-center items-center transition-colors shadow-sm"
+        >
+          <Navigation size={16} className="mr-2" /> Waze
+        </button>
+      </div>
+    </div>
+  );
+};
 
 export default function CourierApp({ onExit }: { onExit: () => void }) {
   const { user } = useAuth();
@@ -82,13 +120,27 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     }
   };
 
-  const subscribeToDeliveries = (courierId: number) => {
-    const channel = supabase.channel(`broadcast_offers_${courierId}`)
-      // Escuta INSERT de qualquer oferta (sem filtro de courier_id)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'deliveries' }, async (payload) => {
-        const delivery = payload.new;
-        if (delivery.status !== 'offered') return;
-        if (deliveryStateRef.current !== 'none') return; // já está em corrida, ignorar
+  // POLING DE CORRIDAS PENDENTES
+  const checkPendingOffers = async () => {
+    if (deliveryStateRef.current !== 'none') return;
+    
+    try {
+      // Busca a oferta MAIS RECENTE
+      const { data: delivery } = await supabase
+        .from('deliveries')
+        .select('*')
+        .eq('status', 'offered')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (delivery) {
+        // FIX: Se a corrida for muito antiga (mais de 65 segundos), nós a ignoramos
+        // Isso impede o "looping infinito" de corridas fantasmas
+        const elapsed = Date.now() - new Date(delivery.created_at).getTime();
+        if (elapsed > 65000) {
+          return;
+        }
 
         const { data: order } = await supabase
           .from('orders')
@@ -96,18 +148,46 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           .eq('id', delivery.order_id)
           .maybeSingle();
 
-        if (!order) return;
+        if (order && deliveryStateRef.current === 'none') {
+          setActiveDelivery({ ...delivery, order });
+          setDeliveryState('offered');
+          
+          let timeLeft = 60 - Math.floor(elapsed / 1000);
+          
+          // Se o relógio do celular estiver muito adiantado ou atrasado, forçamos 60s
+          if (timeLeft < 1 || timeLeft > 60) {
+            timeLeft = 60;
+          }
+          
+          setAcceptTimer(timeLeft);
 
-        sendNotification('🏍️ Nova Corrida Disponível!', {
-          body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${order.stores?.name}. Aceite rápido!`,
-        });
-        navigator.vibrate?.([300, 100, 300, 100, 300]);
+          sendNotification('🏍️ Nova Corrida Disponível!', {
+            body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${order.stores?.name}. Aceite rápido!`,
+          });
+          navigator.vibrate?.([300, 100, 300, 100, 300]);
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao buscar ofertas:', err);
+    }
+  };
 
-        setActiveDelivery({ ...delivery, order });
-        setDeliveryState('offered');
-        setAcceptTimer(15);
+  // Checa a cada 5 segundos se há corridas pendentes (Fallback robusto para o Realtime)
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (courier?.is_online && deliveryState === 'none') {
+      interval = setInterval(() => {
+        checkPendingOffers();
+      }, 5000);
+    }
+    return () => clearInterval(interval);
+  }, [courier?.is_online, deliveryState]);
+
+  const subscribeToDeliveries = (courierId: number) => {
+    const channel = supabase.channel(`broadcast_offers_${courierId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'deliveries' }, () => {
+        setTimeout(checkPendingOffers, 500);
       })
-      // Escuta UPDATE para detectar quando oferta que está vendo foi aceita por outro
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'deliveries' }, (payload) => {
         const updated = payload.new;
         if (
@@ -116,7 +196,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           updated.status !== 'offered' &&
           updated.courier_id !== courierId
         ) {
-          showToast('Corrida aceita por outro motoboy.', 'warning');
+          showToast('Corrida aceita por outro motoboy ou cancelada pela loja.', 'warning');
           setDeliveryState('none');
           setActiveDelivery(null);
           setDeliveryCodeInput('');
@@ -166,6 +246,9 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
             
             setCourier({ ...courier, is_online: newStatus });
             showToast('Você está online!', 'success');
+            
+            // Verifica imediatamente se já tem alguma corrida esperando
+            setTimeout(checkPendingOffers, 1000);
           } catch (error) {
             showToast('Erro ao ficar online.', 'error');
           } finally {
@@ -175,7 +258,6 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         async (error) => {
           console.warn("Erro de localização:", error);
           setGpsError(true);
-          // Bloqueia o motoboy de ficar online se o GPS falhar
           showToast('Ative o GPS do celular e dê permissão para ficar online.', 'error');
           setLoading(false);
         },
@@ -255,7 +337,6 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
       if (error) throw error;
 
-      // Atualizar estado local
       setCourier((prev: any) => ({
         ...prev,
         users: { ...prev.users, name: profileForm.name, phone: profileForm.phone }
@@ -273,7 +354,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     let interval: NodeJS.Timeout;
     if (deliveryState === 'offered' && acceptTimer > 0) {
       interval = setInterval(() => setAcceptTimer(prev => prev - 1), 1000);
-    } else if (deliveryState === 'offered' && acceptTimer === 0) {
+    } else if (deliveryState === 'offered' && acceptTimer <= 0) {
       showToast('Tempo esgotado.', 'warning');
       setDeliveryState('none');
       setActiveDelivery(null);
@@ -286,11 +367,10 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     let watchId: number;
 
-    // RASTREAMENTO CONTÍNUO REAL
     if (courier?.is_online && navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition(
         async (pos) => {
-          setGpsError(false); // GPS voltou / está funcionando
+          setGpsError(false);
           await supabase.from('couriers').update({
             last_lat: pos.coords.latitude,
             last_lng: pos.coords.longitude,
@@ -299,7 +379,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         },
         (err) => {
           console.warn("Sinal de GPS perdido:", err);
-          setGpsError(true); // Mostra o ícone amarelo de alerta
+          setGpsError(true);
         },
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
       );
@@ -315,7 +395,6 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   const handleAccept = async () => {
     setActionLoading(true);
     try {
-      // UPDATE atômico: só passa se status ainda for 'offered'
       const { data: updated, error: delErr } = await supabase
         .from('deliveries')
         .update({
@@ -324,7 +403,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           accepted_at: new Date().toISOString()
         })
         .eq('id', activeDelivery.id)
-        .eq('status', 'offered') // proteção: falha se outro motoboy chegou primeiro
+        .eq('status', 'offered')
         .select()
         .maybeSingle();
 
@@ -356,7 +435,6 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     setActiveDelivery(null);
     setDeliveryCodeInput('');
     setDeliveryCodeError(false);
-    // Não atualiza banco — oferta continua disponível para outros motoboys
   };
 
   const handleArrivedStore = async () => {
@@ -378,7 +456,6 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   };
 
   const handleDelivered = async () => {
-    // Valida o código apenas se o pedido tiver um código (pedidos novos)
     if (activeDelivery.order.delivery_code && deliveryCodeInput.trim() !== activeDelivery.order.delivery_code) {
       setDeliveryCodeError(true);
       showToast('Código incorreto. Peça ao cliente o código de 4 dígitos.', 'error');
@@ -503,10 +580,10 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
               </div>
 
               <div className="flex justify-between items-end mb-8">
-                <div><p className="text-gray-400 text-sm mb-1">Seu Ganho</p><p className="text-5xl font-black text-brand-primary">R$ {activeDelivery.courier_earning?.toFixed(2) || '8.50'}</p></div>
+                <div><p className="text-gray-400 text-sm mb-1">Seu Ganho</p><p className="text-5xl font-black text-brand-primary">R$ {activeDelivery.courier_earning?.toFixed(2) || '0.00'}</p></div>
               </div>
               <div className="w-full bg-gray-700 rounded-full h-2 mb-6 overflow-hidden">
-                <div className="bg-brand-secondary h-2 rounded-full transition-all duration-1000 ease-linear" style={{ width: `${(acceptTimer / 15) * 100}%` }}></div>
+                <div className="bg-brand-secondary h-2 rounded-full transition-all duration-1000 ease-linear" style={{ width: `${(acceptTimer / 60) * 100}%` }}></div>
               </div>
               <div className="flex space-x-3">
                 <button onClick={handleReject} disabled={actionLoading} className="flex-1 py-4 rounded-xl font-bold text-gray-300 bg-gray-700">Recusar ({acceptTimer}s)</button>
@@ -519,15 +596,20 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         )}
 
         {deliveryState === 'going_to_store' && activeDelivery && (
-          <div className="flex-1 flex flex-col bg-gray-900 p-6 justify-between">
-            <div className="mt-8">
+          <div className="flex-1 flex flex-col bg-gray-900 p-6 overflow-y-auto">
+            <div className="mt-4 mb-auto">
               <h2 className="text-gray-400 text-sm font-bold uppercase tracking-widest mb-2">Coleta na Loja</h2>
               <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 mb-4">
                 <h3 className="text-2xl font-black text-white mb-1">{activeDelivery.order.stores?.name}</h3>
                 <p className="text-gray-400 text-sm flex items-start mt-2"><MapPin size={16} className="mr-2 shrink-0 mt-0.5"/> {activeDelivery.order.stores?.addresses?.street}, {activeDelivery.order.stores?.addresses?.number} - {activeDelivery.order.stores?.addresses?.neighborhood}</p>
               </div>
               
-              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700">
+              {/* MAPA E NAVEGAÇÃO PARA A LOJA */}
+              <AddressMap 
+                address={activeDelivery.order.stores?.addresses ? `${activeDelivery.order.stores.addresses.street}, ${activeDelivery.order.stores.addresses.number} - ${activeDelivery.order.stores.addresses.neighborhood}, ${activeDelivery.order.stores.addresses.city}` : ''} 
+              />
+              
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 mb-4">
                 <p className="text-gray-400 text-xs mb-2">Pedido #{activeDelivery.order_id}</p>
                 <div className="space-y-1">
                   {activeDelivery.order.order_items?.map((item:any) => (
@@ -537,7 +619,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
               </div>
             </div>
             
-            <button onClick={handleArrivedStore} disabled={actionLoading} className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-brand-primary/20">
+            <button onClick={handleArrivedStore} disabled={actionLoading} className="w-full mt-4 bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-brand-primary/20 shrink-0">
               {actionLoading ? <Loader2 className="animate-spin" size={24}/> : 'Cheguei na Loja'}
             </button>
           </div>
@@ -556,14 +638,19 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         )}
 
         {deliveryState === 'going_to_client' && activeDelivery && (
-          <div className="flex-1 flex flex-col bg-gray-900 p-6 justify-between">
-            <div className="mt-8">
+          <div className="flex-1 flex flex-col bg-gray-900 p-6 overflow-y-auto">
+            <div className="mt-4 mb-auto">
               <h2 className="text-gray-400 text-sm font-bold uppercase tracking-widest mb-2">Entrega no Cliente</h2>
               <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 mb-4">
                 <h3 className="text-xl font-bold text-white mb-1">{activeDelivery.order.users?.name}</h3>
                 <p className="text-gray-400 text-sm flex items-start mt-2"><MapPin size={16} className="mr-2 shrink-0 mt-0.5"/> {activeDelivery.order.addresses?.street}, {activeDelivery.order.addresses?.number} {activeDelivery.order.addresses?.complement ? `- ${activeDelivery.order.addresses?.complement}` : ''}</p>
                 <p className="text-gray-400 text-sm ml-6">{activeDelivery.order.addresses?.neighborhood}</p>
               </div>
+
+              {/* MAPA E NAVEGAÇÃO PARA O CLIENTE */}
+              <AddressMap 
+                address={activeDelivery.order.addresses ? `${activeDelivery.order.addresses.street}, ${activeDelivery.order.addresses.number} - ${activeDelivery.order.addresses.neighborhood}, ${activeDelivery.order.addresses.city}` : ''} 
+              />
 
               {/* OBSERVAÇÕES DO CLIENTE */}
               {activeDelivery.order.client_notes && (
@@ -590,7 +677,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
             </div>
 
             {/* Input de código de confirmação */}
-            <div className="space-y-3">
+            <div className="space-y-3 mt-4 shrink-0">
               {activeDelivery.order.delivery_code ? (
                 <div>
                   <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2 text-center">

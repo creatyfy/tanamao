@@ -76,6 +76,10 @@ export interface Order {
   own_delivery?: boolean;
   created_at: string;
   order_items?: any[];
+  stores?: any;
+  users?: any;
+  addresses?: any;
+  couriers?: any;
 }
 
 export interface Delivery {
@@ -105,5 +109,14 @@ export interface Review {
   target_id: number;
   rating: number;
   comment: string | null;
+  created_at: string;
+}
+
+export interface OrderChat {
+  id: number;
+  order_id: number;
+  sender_id: string;
+  message: string;
+  is_system_message: boolean;
   created_at: string;
 }

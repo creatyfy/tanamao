@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Store, StoreCategory, Product, Order, Coupon } from '../types';
+import { Store, StoreCategory, Product, Order, Coupon, OrderChat } from '../types';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { Search, MapPin, Star, Clock, Bike, ChevronLeft, Plus, Minus, ShoppingBag, CheckCircle, History, Home, User, CreditCard, Loader2, X, Store as StoreIcon, LogOut, MessageSquare, Trash2, Ticket, BellRing } from 'lucide-react';
+import { Search, MapPin, Star, Clock, Bike, ChevronLeft, Plus, Minus, ShoppingBag, CheckCircle, History, Home, User, CreditCard, Loader2, X, Store as StoreIcon, LogOut, MessageSquare, Trash2, Ticket, BellRing, Send, Heart } from 'lucide-react';
 
 // Função auxiliar para normalizar strings (remove acentos, espaços e deixa minúsculo)
 const normalizeString = (str?: string) => {
@@ -91,10 +91,12 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   // Data
   const [categories, setCategories] = useState<StoreCategory[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
+  const [allProducts, setAllProducts] = useState<any[]>([]); // Adicionado para busca global de produtos
   const [selectedStore, setSelectedStore] = useState<Store | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [storeCategories, setStoreCategories] = useState<any[]>([]); // Categorias internas da loja
   const [cart, setCart] = useState<any[]>([]);
+  const [favoriteStoreIds, setFavoriteStoreIds] = useState<number[]>([]); // Lojas Favoritas
   
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -108,7 +110,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const [cepLoading, setCepLoading] = useState(false);
 
   // Payment, Notes & Coupons
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pix'>('cash');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'pix' | 'card'>('cash');
   const [changeFor, setChangeFor] = useState('');
   const [clientNotes, setClientNotes] = useState('');
   const [couponCode, setCouponCode] = useState('');
@@ -132,6 +134,14 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const [cancelReason, setCancelReason] = useState('');
   const [cancelLoading, setCancelLoading] = useState(false);
 
+  // Chat States
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<OrderChat[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const isChatOpenRef = useRef(isChatOpen);
+
   // Review States
   const [showReviewModal, setShowReviewModal] = useState(false);
   const [reviewingOrder, setReviewingOrder] = useState<any>(null);
@@ -143,6 +153,38 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     if (user) fetchHomeData();
   }, [user]);
+
+  useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
+
+  useEffect(() => {
+    if (isChatOpen) chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages, isChatOpen]);
+
+  useEffect(() => {
+    if (!activeOrder) return;
+    supabase.from('order_chats').select('*').eq('order_id', activeOrder.id).order('created_at', { ascending: true })
+      .then(({ data }) => { if (data) setChatMessages(data); });
+    const channel = supabase.channel(`client_chat_${activeOrder.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'order_chats', filter: `order_id=eq.${activeOrder.id}` }, (payload) => {
+        const msg = payload.new as OrderChat;
+        setChatMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
+        if (msg.sender_id !== user?.id && !isChatOpenRef.current) showToast('Nova mensagem da loja!', 'success');
+      }).subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [activeOrder?.id, user?.id]);
+
+  // Auto-selecionar o primeiro método de pagamento disponível se o atual não for aceito
+  useEffect(() => {
+    if (currentScreen === 'checkout' && selectedStore) {
+      if (paymentMethod === 'cash' && !selectedStore.accepts_cash) {
+        setPaymentMethod(selectedStore.accepts_pix ? 'pix' : (selectedStore.accepts_card ? 'card' : 'cash'));
+      } else if (paymentMethod === 'pix' && !selectedStore.accepts_pix) {
+        setPaymentMethod(selectedStore.accepts_cash ? 'cash' : (selectedStore.accepts_card ? 'card' : 'pix'));
+      } else if (paymentMethod === 'card' && !selectedStore.accepts_card) {
+        setPaymentMethod(selectedStore.accepts_cash ? 'cash' : (selectedStore.accepts_pix ? 'pix' : 'card'));
+      }
+    }
+  }, [currentScreen, selectedStore, paymentMethod]);
 
   // Realtime listener para atualizar status de aberto/fechado das lojas instantaneamente
   useEffect(() => {
@@ -174,16 +216,89 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const fetchHomeData = async () => {
     setLoading(true);
     try {
-      const [catRes, storeRes, addrRes, orderRes] = await Promise.all([
+      const [catRes, storeRes, addrRes, orderRes, prodRes, favRes] = await Promise.all([
         supabase.from('store_categories').select('*').eq('is_active', true).order('sort_order'),
         supabase.from('stores').select('*, addresses!inner(city, state, neighborhood)').eq('is_approved', true).eq('status', 'active'),
         supabase.from('addresses').select('*').eq('user_id', user!.id).limit(1).maybeSingle(),
-        supabase.from('orders').select('*, order_items(*)').eq('client_id', user!.id).not('status', 'in', '("delivered","cancelled")').order('created_at', { ascending: false }).limit(1).maybeSingle()
+        supabase.from('orders').select('*, order_items(*), stores(name, logo_url, avg_prep_time_min)').eq('client_id', user!.id).not('status', 'in', '("delivered","cancelled")').order('created_at', { ascending: false }).limit(1).maybeSingle(),
+        supabase.from('products').select('store_id, name, description').eq('is_available', true),
+        supabase.from('favorite_stores').select('store_id').eq('user_id', user!.id)
       ]);
       
-      if (catRes.data) setCategories(catRes.data);
+      if (catRes.data) {
+        const updatedCategories = catRes.data.map(cat => {
+          // Busca de forma flexível ignorando maiúsculas/minúsculas e espaços
+          const name = cat.name.trim().toLowerCase();
+          
+          if (name.includes('lanche') || name.includes('hamburguer') || name.includes('burger')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/asset-4016aec0-01a3-4b43-bb3c-ed91d84dfd66.webp'
+            };
+          } else if (name.includes('pizza')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_172608-17e245a4-f2df-44b0-8aa5-1968a34e2217.webp'
+            };
+          } else if (name.includes('japonesa') || name.includes('sushi') || name.includes('oriental')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_172638-e4b3b10c-e1dd-4279-b4c3-011a69c31c42.webp'
+            };
+          } else if (name.includes('brasileira') || name.includes('feijoada') || name.includes('refeição') || name.includes('refeicao')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_174643-4d9c3a1a-98c1-4e90-bb5f-e34365992a46.webp'
+            };
+          } else if (name.includes('doce') || name.includes('sobremesa') || name.includes('pudim')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_174715-bce8cbe3-68b1-4819-8bc3-09aa55845925.webp'
+            };
+          } else if (name.includes('bebida')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082727-8dab3a55-37ad-47b1-94f8-6575bc4cab4e.webp'
+            };
+          } else if (name.includes('saudavel') || name.includes('saudável') || name.includes('salada')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082738-4e538ac2-8141-4e78-a36a-b143ae3782b3.webp'
+            };
+          } else if (name.includes('açai') || name.includes('acai')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082747-02c1a18b-7dd5-494e-bccb-182e716e9def.webp'
+            };
+          } else if (name.includes('mercado') || name.includes('conveniencia') || name.includes('conveniência')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082758-4fcbaf4a-23da-4818-8cb9-3085448e3384.webp'
+            };
+          } else if (name.includes('farmacia') || name.includes('farmácia')) {
+            return {
+              ...cat,
+              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082807-3be4bad4-c450-4dcf-ba72-28286d27ef53.webp'
+            };
+          } else if (name.includes('salgado')) {
+            return {
+              ...cat,
+              icon: 'https://images.unsplash.com/photo-1628840042765-356cda07504e?w=200&h=200&fit=crop' // Imagem provisória de salgados
+            };
+          } else if (name.includes('padaria') || name.includes('pão') || name.includes('pao')) {
+            return {
+              ...cat,
+              icon: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200&h=200&fit=crop' // Imagem provisória de padaria
+            };
+          }
+          return cat;
+        });
+        setCategories(updatedCategories);
+      }
       if (storeRes.data) setStores(storeRes.data);
       if (addrRes.data) setUserAddress(addrRes.data);
+      if (prodRes.data) setAllProducts(prodRes.data);
+      if (favRes.data) setFavoriteStoreIds(favRes.data.map(f => f.store_id));
       
       if (orderRes.data) {
         setActiveOrder(orderRes.data);
@@ -322,6 +437,21 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     });
   };
 
+  const toggleFavorite = async (e: React.MouseEvent, storeId: number) => {
+    e.stopPropagation();
+    if (!user) return;
+
+    const isFav = favoriteStoreIds.includes(storeId);
+    
+    if (isFav) {
+      setFavoriteStoreIds(prev => prev.filter(id => id !== storeId));
+      await supabase.from('favorite_stores').delete().eq('user_id', user.id).eq('store_id', storeId);
+    } else {
+      setFavoriteStoreIds(prev => [...prev, storeId]);
+      await supabase.from('favorite_stores').insert({ user_id: user.id, store_id: storeId });
+    }
+  };
+
   const openStore = async (store: Store) => {
     setSelectedStore(store);
     setLoading(true);
@@ -365,19 +495,29 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   };
 
   const updateQuantity = (productId: number, delta: number) => {
-    setCart(prev => prev.map(item => item.id === productId ? { ...item, quantity: item.quantity + delta } : item).filter(item => item.quantity > 0));
+    setCart(prev => {
+      const newCart = prev.map(item => {
+        if (item.id === productId) {
+          return { ...item, quantity: item.quantity + delta };
+        }
+        return item;
+      }).filter(item => item.quantity > 0);
+      return newCart;
+    });
   };
 
-  const cartTotal = cart.reduce((acc, item) => acc + (item.price * item.quantity), 0);
-  const deliveryFee = selectedStore?.delivery_fee || 0;
+  // FIX: Conversão rigorosa para Number para evitar concatenação de strings com valores do banco
+  const cartTotal = cart.reduce((acc, item) => acc + (Number(item.price || 0) * Number(item.quantity || 1)), 0);
+  const deliveryFee = Number(selectedStore?.delivery_fee || 0);
   
   // Coupon Logic
   const discountAmount = appliedCoupon 
     ? (appliedCoupon.type === 'percentage' 
-        ? Math.min(cartTotal, cartTotal * (appliedCoupon.value / 100)) 
-        : Math.min(cartTotal, appliedCoupon.value))
+        ? Math.min(cartTotal, cartTotal * (Number(appliedCoupon.value) / 100)) 
+        : Math.min(cartTotal, Number(appliedCoupon.value)))
     : 0;
     
+  // FIX: Cálculo seguro com valores convertidos
   const finalTotal = Math.max(0, cartTotal - discountAmount) + deliveryFee;
 
   // Revalidate coupon if cart total changes
@@ -495,8 +635,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         product_id: item.id,
         product_name: item.name,
         quantity: item.quantity,
-        unit_price: item.price,
-        total_price: item.price * item.quantity
+        unit_price: Number(item.price),
+        total_price: Number(item.price) * item.quantity
       }));
       
       const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
@@ -515,7 +655,18 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       setClientNotes('');
       setCouponCode('');
       setAppliedCoupon(null);
-      setActiveOrder({ ...order, order_items: orderItems });
+      
+      // Atualiza o estado local com os dados da loja para a tela de tracking
+      setActiveOrder({ 
+        ...order, 
+        order_items: orderItems,
+        stores: {
+          name: selectedStore.name,
+          logo_url: selectedStore.logo_url,
+          avg_prep_time_min: selectedStore.avg_prep_time_min
+        }
+      });
+      
       setCurrentScreen('tracking');
       subscribeToOrder(order.id);
       
@@ -533,31 +684,34 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     }
   };
 
-  const handleCancelOrder = async () => {
+  const handleRequestCancel = async () => {
     if (!activeOrder || !cancelReason) return;
-    setCancelLoading(true);
+    setActionLoading(true);
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          status: 'cancelled',
-          cancelled_by: 'client',
-          cancel_reason: cancelReason
-        })
-        .eq('id', activeOrder.id);
-
+      const { data, error } = await supabase.from('order_chats').insert({
+        order_id: activeOrder.id, sender_id: user!.id,
+        message: `⚠️ Solicitação de Cancelamento: ${cancelReason}`,
+        is_system_message: true
+      }).select().single();
       if (error) throw error;
+      if (data) setChatMessages(prev => prev.find(m => m.id === data.id) ? prev : [...prev, data]);
+      setShowCancelModal(false); setCancelReason(''); setIsChatOpen(true);
+    } catch { showToast('Erro ao enviar solicitação.', 'error'); }
+    finally { setActionLoading(false); }
+  };
 
-      setShowCancelModal(false);
-      setCancelReason('');
-      setActiveOrder(null);
-      setCurrentScreen('home');
-      showToast('Pedido cancelado.', 'warning');
-    } catch (err) {
-      showToast('Erro ao cancelar pedido.', 'error');
-    } finally {
-      setCancelLoading(false);
-    }
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || !activeOrder) return;
+    const text = chatInput.trim(); setChatInput(''); setChatLoading(true);
+    try {
+      const { data, error } = await supabase.from('order_chats').insert({
+        order_id: activeOrder.id, sender_id: user!.id, message: text, is_system_message: false
+      }).select().single();
+      if (error) throw error;
+      if (data) setChatMessages(prev => prev.find(m => m.id === data.id) ? prev : [...prev, data]);
+    } catch { showToast('Erro ao enviar mensagem', 'error'); }
+    finally { setChatLoading(false); }
   };
 
   const handleSubmitReview = async () => {
@@ -647,13 +801,17 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` }, async (payload) => {
         const updatedOrder = payload.new as Order;
         const { data: items } = await supabase.from('order_items').select('*').eq('order_id', orderId);
-        setActiveOrder({ ...updatedOrder, order_items: items || [] });
+        
+        // Mantém as informações da loja que já estavam no activeOrder
+        setActiveOrder(prev => prev ? { ...prev, ...updatedOrder, order_items: items || [], stores: prev.stores } : { ...updatedOrder, order_items: items || [] } as any);
         
         // Push Notifications para o Cliente
         if (updatedOrder.status === 'delivering') {
           sendNotification('🏍️ Pedido a caminho!', { body: 'Seu pedido saiu para entrega. Acompanhe no mapa!' });
         } else if (updatedOrder.status === 'delivered') {
           sendNotification('🎉 Pedido Entregue!', { body: 'Bom apetite! Não esqueça de avaliar a loja.' });
+        } else if (updatedOrder.status === 'cancelled') {
+          sendNotification('❌ Pedido Cancelado', { body: 'Seu pedido foi cancelado pela loja.' });
         }
 
         if (updatedOrder.status === 'delivering' && updatedOrder.courier_id && !updatedOrder.own_delivery) {
@@ -675,9 +833,14 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     // Filtro por categoria
     const matchCat = selectedCategory ? store.global_category_id === selectedCategory : true;
     
-    // Filtro por busca
+    // Filtro por busca (Nome da loja ou Nome/Descrição do produto)
+    const searchNormalized = normalizeString(searchQuery);
     const matchSearch = searchQuery
-      ? store.name.toLowerCase().includes(searchQuery.toLowerCase())
+      ? normalizeString(store.name).includes(searchNormalized) ||
+        allProducts.some(p => p.store_id === store.id && (
+          normalizeString(p.name).includes(searchNormalized) || 
+          normalizeString(p.description).includes(searchNormalized)
+        ))
       : true;
 
     // Filtro por cidade inteligente (ignora acentos e maiúsculas)
@@ -691,9 +854,19 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     return matchCat && matchSearch && matchCity;
   });
 
-  // Separar abertas e fechadas para mostrar fechadas por último
+  // Separar abertas e fechadas para mostrar fechadas por último e ordenar por favoritos
   const openStores = filteredStores.filter(s => s.is_open);
   const closedStores = filteredStores.filter(s => !s.is_open);
+  
+  const sortFavoritesFirst = (a: Store, b: Store) => {
+    const aFav = favoriteStoreIds.includes(a.id) ? 1 : 0;
+    const bFav = favoriteStoreIds.includes(b.id) ? 1 : 0;
+    return bFav - aFav;
+  };
+
+  openStores.sort(sortFavoritesFirst);
+  closedStores.sort(sortFavoritesFirst);
+
   const sortedStores = [...openStores, ...closedStores];
 
   const getTimelineSteps = (status: string) => {
@@ -725,7 +898,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       <div className="flex-1 pr-4">
         <h3 className="font-semibold text-brand-dark">{product.name}</h3>
         <p className="text-xs text-gray-500 mt-1 line-clamp-2">{product.description}</p>
-        <div className="mt-2 font-bold text-brand-dark">R$ {product.price.toFixed(2)}</div>
+        <div className="mt-2 font-bold text-brand-dark">R$ {Number(product.price).toFixed(2)}</div>
       </div>
       <div className="relative shrink-0">
         {product.image_url ? (
@@ -836,21 +1009,41 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           </div>
 
           {activeOrder && (
-            <div onClick={() => setCurrentScreen('tracking')} className="bg-brand-primary text-white p-3 mx-4 mt-4 rounded-xl shadow-md flex justify-between items-center cursor-pointer animate-pulse">
-              <span className="font-bold text-sm flex items-center"><Bike size={18} className="mr-2"/> Pedido em andamento</span>
-              <span className="text-xs bg-white/20 px-3 py-1 rounded-full">Acompanhar</span>
+            <div onClick={() => setCurrentScreen('tracking')} className={`text-white p-3 mx-4 mt-4 rounded-xl shadow-md flex justify-between items-center cursor-pointer transition-colors ${activeOrder.status === 'cancelled' ? 'bg-red-500' : 'bg-brand-primary animate-pulse'}`}>
+              <span className="font-bold text-sm flex items-center">
+                {activeOrder.status === 'cancelled' ? <><XCircle size={18} className="mr-2"/> Pedido Cancelado</> : <><Bike size={18} className="mr-2"/> Pedido em andamento</>}
+              </span>
+              <span className="text-xs bg-white/20 px-3 py-1 rounded-full">Ver</span>
             </div>
           )}
 
           <div className="p-4">
-            <div className="flex space-x-4 overflow-x-auto pb-2 scrollbar-hide mb-6">
+            <div className="flex gap-4 overflow-x-auto pb-4 pt-2 px-2 scrollbar-hide snap-x mb-4">
               {categories.map(cat => (
-                <div key={cat.id} onClick={() => setSelectedCategory(selectedCategory === cat.id ? null : cat.id)} className="flex flex-col items-center min-w-[70px] cursor-pointer">
-                  <div className={`w-16 h-16 rounded-full flex items-center justify-center shadow-sm text-2xl mb-2 transition-all ${selectedCategory === cat.id ? 'bg-brand-light border-2 border-brand-primary' : 'bg-white border-2 border-transparent'}`}>
-                    {cat.icon || '🍔'}
+                <button
+                  key={cat.id}
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setSelectedCategory(selectedCategory === cat.id ? null : cat.id);
+                  }}
+                  className="group flex flex-col items-center min-w-[76px] snap-start cursor-pointer outline-none transition-transform active:scale-95 touch-manipulation select-none"
+                >
+                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-2 shadow-sm border transition-colors overflow-hidden
+                    ${selectedCategory === cat.id ? 'bg-brand-primary border-brand-primary' : 'bg-white border-gray-100'}
+                  `}>
+                    {cat.icon && (cat.icon.startsWith('http') || cat.icon.startsWith('data:')) ? (
+                      <img src={cat.icon} alt={cat.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <span className={`text-3xl ${selectedCategory === cat.id ? 'text-white' : ''}`}>{cat.icon || '🍔'}</span>
+                    )}
                   </div>
-                  <span className={`text-xs font-medium ${selectedCategory === cat.id ? 'text-brand-primary font-bold' : 'text-brand-dark'}`}>{cat.name}</span>
-                </div>
+                  <span className={`text-xs font-bold text-center line-clamp-1 ${
+                    selectedCategory === cat.id ? 'text-brand-primary' : 'text-gray-600'
+                  }`}>
+                    {cat.name}
+                  </span>
+                </button>
               ))}
             </div>
 
@@ -876,10 +1069,18 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                   </div>
                   <div className="ml-3 flex-1">
                     <div className="flex items-center justify-between">
-                      <h3 className={`font-bold ${store.is_open ? 'text-brand-dark' : 'text-gray-400'}`}>{store.name}</h3>
-                      {!store.is_open && (
-                        <span className="text-[10px] font-bold bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">Fechada</span>
-                      )}
+                      <h3 className={`font-bold truncate pr-2 ${store.is_open ? 'text-brand-dark' : 'text-gray-400'}`}>{store.name}</h3>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {!store.is_open && (
+                          <span className="text-[10px] font-bold bg-gray-100 text-gray-400 px-2 py-0.5 rounded-full">Fechada</span>
+                        )}
+                        <button 
+                          onClick={(e) => toggleFavorite(e, store.id)}
+                          className="p-1.5 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors active:scale-90"
+                        >
+                          <Heart size={16} className={favoriteStoreIds.includes(store.id) ? 'fill-red-500 text-red-500' : 'text-gray-300'} />
+                        </button>
+                      </div>
                     </div>
                     <div className="flex items-center text-xs text-gray-500 mt-1 space-x-2">
                       <span className="flex items-center text-brand-secondary font-bold">
@@ -903,9 +1104,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                   </div>
                   {userAddress ? (
                     <>
-                      <p className="text-gray-500 font-medium">Nenhuma loja em {userAddress.city}</p>
-                      <p className="text-gray-400 text-sm mt-1">O Tá Na Mão ainda não chegou na sua cidade.</p>
-                      <p className="text-xs text-gray-400 mt-4 italic">Aviso: A loja precisa ser aprovada pelo administrador para aparecer aqui.</p>
+                      <p className="text-gray-500 font-medium">Nenhuma loja encontrada.</p>
+                      <p className="text-gray-400 text-sm mt-1">Tente buscar por outro item ou categoria.</p>
                     </>
                   ) : (
                     <>
@@ -960,7 +1160,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                     <div>
                       <p className="font-black text-brand-dark">R$ {order.total.toFixed(2)}</p>
                       <div className="flex items-center space-x-2 mt-0.5">
-                        <p className="text-[10px] text-gray-500 uppercase font-bold">{order.payment_method === 'cash' ? '💵 Dinheiro' : '📱 PIX'}</p>
+                        <p className="text-[10px] text-gray-500 uppercase font-bold">{order.payment_method === 'cash' ? '💵 Dinheiro' : order.payment_method === 'pix' ? '📱 PIX' : '💳 Cartão'}</p>
                         {order.discount_amount > 0 && (
                           <span className="text-[10px] text-brand-primary font-bold bg-brand-light px-1.5 rounded flex items-center"><Ticket size={8} className="mr-0.5"/> Desconto</span>
                         )}
@@ -1046,18 +1246,32 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       )}
 
       {currentScreen === 'store' && selectedStore && (
-        <div className="flex-1 overflow-y-auto bg-white pb-24 relative">
+        <div className={`flex-1 overflow-y-auto bg-white relative ${cart.length > 0 ? 'pb-36' : 'pb-12'}`}>
           <div className="relative h-40 bg-gray-200 shrink-0">
-            <img src={selectedStore.banner_url || 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?w=800&h=400&fit=crop'} className="w-full h-full object-cover" alt="Banner" />
+            {selectedStore.banner_url ? (
+              <img src={selectedStore.banner_url} className="w-full h-full object-cover" alt="Banner da Loja" />
+            ) : (
+              <div className="w-full h-full bg-gray-200 flex items-center justify-center text-gray-400">
+                <StoreIcon size={48} />
+              </div>
+            )}
             <button onClick={() => setCurrentScreen('home')} className="absolute top-4 left-4 bg-white p-2 rounded-full shadow-md text-brand-dark"><ChevronLeft size={20} /></button>
           </div>
           <div className="px-4 pb-4 pt-2 relative">
             <div className="bg-white rounded-2xl shadow-md p-4 -mt-8 relative z-10 border border-gray-100 mb-4">
-              <h1 className="text-2xl font-bold text-brand-dark">{selectedStore.name}</h1>
+              <div className="flex justify-between items-start">
+                <h1 className="text-2xl font-bold text-brand-dark">{selectedStore.name}</h1>
+                <button 
+                  onClick={(e) => toggleFavorite(e, selectedStore.id)}
+                  className="p-1.5 bg-gray-50 rounded-full hover:bg-gray-100 transition-colors active:scale-90"
+                >
+                  <Heart size={20} className={favoriteStoreIds.includes(selectedStore.id) ? 'fill-red-500 text-red-500' : 'text-gray-300'} />
+                </button>
+              </div>
               <div className="flex items-center text-sm text-gray-600 mt-2 space-x-4">
                 <span className="flex items-center text-brand-secondary font-bold"><Star size={16} className="mr-1 fill-current" /> {selectedStore.avg_rating}</span>
                 <span className="flex items-center"><Clock size={16} className="mr-1" /> {selectedStore.avg_prep_time_min} min</span>
-                <span className="flex items-center"><Bike size={16} className="mr-1" /> R$ {selectedStore.delivery_fee.toFixed(2)}</span>
+                <span className="flex items-center"><Bike size={16} className="mr-1" /> {selectedStore.delivery_fee === 0 ? 'Grátis' : `R$ ${selectedStore.delivery_fee.toFixed(2)}`}</span>
               </div>
             </div>
 
@@ -1137,8 +1351,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           </div>
           
           {cart.length > 0 && (
-            <div className="fixed sm:absolute bottom-4 left-4 right-4 z-40 max-w-md mx-auto">
-              <button onClick={() => setCurrentScreen('cart')} className="w-full bg-brand-primary text-white rounded-full py-4 px-6 flex justify-between items-center shadow-lg font-bold">
+            <div className="fixed sm:absolute bottom-6 left-4 right-4 z-40 max-w-md mx-auto">
+              <button onClick={() => setCurrentScreen('cart')} className="w-full bg-brand-primary text-white rounded-full py-4 px-6 flex justify-between items-center shadow-xl font-bold transition-transform active:scale-95">
                 <div className="flex items-center"><span className="bg-white text-brand-primary rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">{cart.reduce((acc, item) => acc + item.quantity, 0)}</span> Ver carrinho</div>
                 <span>R$ {cartTotal.toFixed(2)}</span>
               </button>
@@ -1156,7 +1370,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           <div className="flex-1 overflow-y-auto p-6">
             <div className="space-y-6">
               {cart.map((item, idx) => (
-                <div key={idx} className="flex items-center justify-between">
+                <div key={item.id || idx} className="flex items-center justify-between">
                   <div className="flex items-center flex-1">
                     <div className="flex items-center border border-gray-200 rounded-full px-2 py-1 mr-3 bg-white shrink-0">
                       <button onClick={() => updateQuantity(item.id, -1)} className="p-1 text-gray-400"><Minus size={14} strokeWidth={3} /></button>
@@ -1172,14 +1386,14 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                     )}
                     <span className="text-sm font-bold text-brand-dark line-clamp-2 pr-2">{item.name}</span>
                   </div>
-                  <span className="text-sm font-bold text-brand-dark shrink-0">R$ {(item.price * item.quantity).toFixed(2)}</span>
+                  <span className="text-sm font-bold text-brand-dark shrink-0">R$ {(Number(item.price) * item.quantity).toFixed(2)}</span>
                 </div>
               ))}
             </div>
             {cart.length > 0 && (
               <div className="mt-8 pt-6 border-t border-gray-100 space-y-3">
                 <div className="flex justify-between text-sm text-gray-500"><span>Subtotal</span><span>R$ {cartTotal.toFixed(2)}</span></div>
-                <div className="flex justify-between text-sm text-gray-500"><span>Taxa de entrega</span><span>R$ {deliveryFee.toFixed(2)}</span></div>
+                <div className="flex justify-between text-sm text-gray-500"><span>Taxa de entrega</span><span>{deliveryFee === 0 ? 'Grátis' : `R$ ${deliveryFee.toFixed(2)}`}</span></div>
                 <div className="flex justify-between font-black text-xl pt-2"><span className="text-brand-dark">Total</span><span className="text-brand-secondary">R$ {(cartTotal + deliveryFee).toFixed(2)}</span></div>
               </div>
             )}
@@ -1255,35 +1469,50 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             <div className="bg-white p-4 rounded-2xl shadow-sm">
               <h2 className="font-bold text-brand-dark mb-3 flex items-center"><CreditCard size={18} className="mr-2 text-brand-primary"/> Pagamento</h2>
               <div className="space-y-3">
-                <label className={`flex flex-col p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === 'cash' ? 'border-brand-primary bg-brand-light' : 'border-gray-200'}`}>
-                  <div className="flex items-center">
-                    <input type="radio" name="payment" checked={paymentMethod === 'cash'} onChange={() => setPaymentMethod('cash')} className="text-brand-primary mr-3" />
-                    <span className="text-sm font-bold text-brand-dark">💵 Dinheiro na entrega</span>
-                  </div>
-                  {paymentMethod === 'cash' && (
-                    <div className="mt-3 ml-6">
-                      <input 
-                        type="number" 
-                        placeholder="Troco para R$ (opcional)" 
-                        value={changeFor}
-                        onChange={e => setChangeFor(e.target.value)}
-                        className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-primary"
-                      />
+                {selectedStore?.accepts_cash && (
+                  <label className={`flex flex-col p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === 'cash' ? 'border-brand-primary bg-brand-light' : 'border-gray-200'}`}>
+                    <div className="flex items-center">
+                      <input type="radio" name="payment" checked={paymentMethod === 'cash'} onChange={() => setPaymentMethod('cash')} className="text-brand-primary mr-3" />
+                      <span className="text-sm font-bold text-brand-dark">💵 Dinheiro na entrega</span>
                     </div>
-                  )}
-                </label>
+                    {paymentMethod === 'cash' && (
+                      <div className="mt-3 ml-6">
+                        <input 
+                          type="number" 
+                          placeholder="Troco para R$ (opcional)" 
+                          value={changeFor}
+                          onChange={e => setChangeFor(e.target.value)}
+                          className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-primary"
+                        />
+                      </div>
+                    )}
+                  </label>
+                )}
                 
-                <label className={`flex items-center p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === 'pix' ? 'border-brand-primary bg-brand-light' : 'border-gray-200'}`}>
-                  <input type="radio" name="payment" checked={paymentMethod === 'pix'} onChange={() => setPaymentMethod('pix')} className="text-brand-primary mr-3" />
-                  <span className="text-sm font-bold text-brand-dark">📱 PIX (Pague ao motoboy)</span>
-                </label>
+                {selectedStore?.accepts_pix && (
+                  <label className={`flex items-center p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === 'pix' ? 'border-brand-primary bg-brand-light' : 'border-gray-200'}`}>
+                    <input type="radio" name="payment" checked={paymentMethod === 'pix'} onChange={() => setPaymentMethod('pix')} className="text-brand-primary mr-3" />
+                    <span className="text-sm font-bold text-brand-dark">📱 PIX (Pague ao motoboy)</span>
+                  </label>
+                )}
+
+                {selectedStore?.accepts_card && (
+                  <label className={`flex items-center p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === 'card' ? 'border-brand-primary bg-brand-light' : 'border-gray-200'}`}>
+                    <input type="radio" name="payment" checked={paymentMethod === 'card'} onChange={() => setPaymentMethod('card')} className="text-brand-primary mr-3" />
+                    <span className="text-sm font-bold text-brand-dark">💳 Cartão (Maquininha na entrega)</span>
+                  </label>
+                )}
+
+                {!selectedStore?.accepts_cash && !selectedStore?.accepts_pix && !selectedStore?.accepts_card && (
+                  <p className="text-sm text-red-500 italic">Esta loja não configurou nenhuma forma de pagamento.</p>
+                )}
               </div>
             </div>
 
             {/* RESUMO DE VALORES */}
             <div className="bg-white p-4 rounded-2xl shadow-sm space-y-2">
               <div className="flex justify-between text-sm text-gray-500"><span>Subtotal</span><span>R$ {cartTotal.toFixed(2)}</span></div>
-              <div className="flex justify-between text-sm text-gray-500"><span>Taxa de entrega</span><span>R$ {deliveryFee.toFixed(2)}</span></div>
+              <div className="flex justify-between text-sm text-gray-500"><span>Taxa de entrega</span><span>{deliveryFee === 0 ? 'Grátis' : `R$ ${deliveryFee.toFixed(2)}`}</span></div>
               {discountAmount > 0 && (
                 <div className="flex justify-between text-sm font-bold text-green-600"><span>Desconto ({appliedCoupon?.code})</span><span>- R$ {discountAmount.toFixed(2)}</span></div>
               )}
@@ -1294,7 +1523,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             
           </div>
           <div className="p-4 bg-white border-t border-gray-100 shrink-0">
-            <button onClick={handleCheckout} disabled={actionLoading} className="w-full bg-brand-primary text-white rounded-full py-4 font-bold text-lg shadow-md flex justify-center items-center">
+            <button onClick={handleCheckout} disabled={actionLoading || (!selectedStore?.accepts_cash && !selectedStore?.accepts_pix && !selectedStore?.accepts_card)} className="w-full bg-brand-primary text-white rounded-full py-4 font-bold text-lg shadow-md flex justify-center items-center disabled:opacity-50">
               {actionLoading ? <Loader2 className="animate-spin" size={24}/> : `Fazer Pedido • R$ ${finalTotal.toFixed(2)}`}
             </button>
           </div>
@@ -1306,30 +1535,74 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           <div className="bg-white p-4 flex justify-between items-center border-b border-gray-100 shrink-0">
             <h1 className="text-lg font-bold text-brand-dark">Pedido #{activeOrder.id}</h1>
             <div className="flex space-x-2">
-              {['pending', 'accepted', 'preparing'].includes(activeOrder.status) && (
-                <button
-                  onClick={() => setShowCancelModal(true)}
-                  className="text-sm text-red-500 font-bold bg-red-50 px-4 py-1.5 rounded-full hover:bg-red-100 transition-colors"
-                >
-                  Cancelar
-                </button>
-              )}
               <button onClick={() => setCurrentScreen('home')} className="text-sm text-brand-primary font-bold bg-brand-light px-4 py-1.5 rounded-full">Início</button>
             </div>
           </div>
           
           <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-12">
+            
+            {/* AVISO DE CANCELAMENTO */}
+            {activeOrder.status === 'cancelled' && (
+              <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center mb-4 animate-in fade-in zoom-in duration-300">
+                <div className="w-16 h-16 bg-red-100 text-red-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <X size={32} />
+                </div>
+                <h2 className="text-xl font-black text-red-700 mb-1">Pedido Cancelado</h2>
+                <p className="text-sm text-red-600">Este pedido foi cancelado pela loja.</p>
+                {activeOrder.cancel_reason && (
+                  <p className="text-xs text-red-500 font-bold mt-2 bg-red-100/50 p-2 rounded-lg">Motivo: {activeOrder.cancel_reason}</p>
+                )}
+                <button onClick={() => setCurrentScreen('home')} className="mt-5 bg-red-600 text-white px-6 py-2.5 rounded-full font-bold text-sm shadow-md hover:bg-red-700 transition-colors">
+                  Voltar ao Início
+                </button>
+              </div>
+            )}
+
+            {/* PREVISÃO DE ENTREGA */}
+            {activeOrder.status !== 'cancelled' && activeOrder.status !== 'delivered' && activeOrder.stores && (
+              <div className="bg-white p-4 rounded-2xl shadow-sm border border-brand-primary/20 flex items-center mb-4 animate-in fade-in slide-in-from-bottom-4">
+                <div className="w-12 h-12 bg-brand-light text-brand-primary rounded-full flex items-center justify-center mr-4 shrink-0">
+                  <Clock size={24} />
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-0.5">Previsão de Chegada</p>
+                  <p className="text-xl font-black text-brand-dark">
+                    {(() => {
+                      // Usa o horário de criação do pedido como base
+                      const orderDate = new Date(activeOrder.created_at);
+                      // Tempo de preparo da loja ou 30 min por padrão
+                      const prepTime = activeOrder.stores.avg_prep_time_min || 30;
+                      // Tempo de entrega estimado (15 min)
+                      const deliveryTime = 15;
+                      const totalMinutes = prepTime + deliveryTime;
+                      
+                      // Calcula a janela de tempo (ex: de 45 a 55 minutos após o pedido)
+                      const minTime = new Date(orderDate.getTime() + totalMinutes * 60000);
+                      const maxTime = new Date(orderDate.getTime() + (totalMinutes + 10) * 60000);
+                      
+                      const formatTime = (d: Date) => d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                      return `${formatTime(minTime)} - ${formatTime(maxTime)}`;
+                    })()}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Payment Banner */}
-            <div className={`p-4 rounded-2xl shadow-sm ${activeOrder.payment_method === 'cash' ? 'bg-green-100 border border-green-200' : 'bg-blue-100 border border-blue-200'}`}>
-              <h3 className={`font-black text-lg ${activeOrder.payment_method === 'cash' ? 'text-green-800' : 'text-blue-800'}`}>
-                {activeOrder.payment_method === 'cash' ? '💵 Pagamento em Dinheiro' : '📱 Pagamento via PIX'}
-              </h3>
-              <p className={`text-sm mt-1 ${activeOrder.payment_method === 'cash' ? 'text-green-700' : 'text-blue-700'}`}>
-                {activeOrder.payment_method === 'cash' 
-                  ? `Prepare R$ ${activeOrder.total.toFixed(2)} para o motoboy.${activeOrder.change_for ? ` Troco para R$ ${activeOrder.change_for.toFixed(2)}.` : ''}`
-                  : `Combine a chave PIX com o motoboy na entrega. Valor: R$ ${activeOrder.total.toFixed(2)}`}
-              </p>
-            </div>
+            {activeOrder.status !== 'cancelled' && (
+              <div className={`p-4 rounded-2xl shadow-sm ${activeOrder.payment_method === 'cash' ? 'bg-green-100 border border-green-200' : activeOrder.payment_method === 'pix' ? 'bg-blue-100 border border-blue-200' : 'bg-orange-100 border border-orange-200'}`}>
+                <h3 className={`font-black text-lg ${activeOrder.payment_method === 'cash' ? 'text-green-800' : activeOrder.payment_method === 'pix' ? 'text-blue-800' : 'text-orange-800'}`}>
+                  {activeOrder.payment_method === 'cash' ? '💵 Pagamento em Dinheiro' : activeOrder.payment_method === 'pix' ? '📱 Pagamento via PIX' : '💳 Pagamento no Cartão'}
+                </h3>
+                <p className={`text-sm mt-1 ${activeOrder.payment_method === 'cash' ? 'text-green-700' : activeOrder.payment_method === 'pix' ? 'text-blue-700' : 'text-orange-700'}`}>
+                  {activeOrder.payment_method === 'cash' 
+                    ? `Prepare R$ ${activeOrder.total.toFixed(2)} para o motoboy.${activeOrder.change_for ? ` Troco para R$ ${activeOrder.change_for.toFixed(2)}.` : ''}`
+                    : activeOrder.payment_method === 'pix' 
+                      ? `Combine a chave PIX com o motoboy na entrega. Valor: R$ ${activeOrder.total.toFixed(2)}`
+                      : `Prepare seu cartão para pagar R$ ${activeOrder.total.toFixed(2)} na maquininha do motoboy.`}
+                </p>
+              </div>
+            )}
 
             {/* CÓDIGO DE CONFIRMAÇÃO DE ENTREGA */}
             {activeOrder.status === 'delivering' && activeOrder.delivery_code && (
@@ -1373,34 +1646,36 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             )}
 
             {/* Timeline */}
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-              <h2 className="font-bold text-brand-dark mb-6">Acompanhe seu pedido</h2>
-              <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-gray-200 before:to-transparent">
-                {getTimelineSteps(activeOrder.status).map((step, idx) => (
-                  <div key={step.id} className={`relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active ${step.isFuture ? 'opacity-40' : ''}`}>
-                    <div className={`flex items-center justify-center w-10 h-10 rounded-full border-4 border-white z-10 ${step.isCurrent ? 'bg-brand-primary text-white shadow-lg scale-110' : step.isPast ? 'bg-brand-primary text-white' : 'bg-gray-200 text-gray-500'}`}>
-                      {step.icon}
+            {activeOrder.status !== 'cancelled' && (
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h2 className="font-bold text-brand-dark mb-6">Acompanhe seu pedido</h2>
+                <div className="space-y-6 relative before:absolute before:inset-0 before:ml-5 before:-translate-x-px before:h-full before:w-0.5 before:bg-gradient-to-b before:from-transparent before:via-gray-200 before:to-transparent">
+                  {getTimelineSteps(activeOrder.status).map((step, idx) => (
+                    <div key={step.id} className={`relative flex items-center justify-start group is-active ${step.isFuture ? 'opacity-40' : ''}`}>
+                      <div className={`flex items-center justify-center w-10 h-10 rounded-full border-4 border-white z-10 shrink-0 ${step.isCurrent ? 'bg-brand-primary text-white shadow-lg scale-110' : step.isPast ? 'bg-brand-primary text-white' : 'bg-gray-200 text-gray-500'}`}>
+                        {step.icon}
+                      </div>
+                      <div className={`ml-4 ${step.isCurrent ? 'font-black text-brand-primary' : step.isPast ? 'font-bold text-gray-700' : 'font-medium text-gray-500'}`}>
+                        {step.label}
+                        {step.id === 'delivering' && step.isCurrent && !activeOrder.own_delivery && (
+                          <p className="text-xs text-brand-primary mt-1 font-medium animate-pulse">
+                            Acompanhe no mapa acima ↑
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <div className={`ml-4 md:ml-0 md:w-[calc(50%-2.5rem)] ${step.isCurrent ? 'font-black text-brand-primary' : step.isPast ? 'font-bold text-gray-700' : 'font-medium text-gray-500'}`}>
-                      {step.label}
-                      {step.id === 'delivering' && step.isCurrent && !activeOrder.own_delivery && (
-                        <p className="text-xs text-brand-primary mt-1 font-medium animate-pulse">
-                          Acompanhe no mapa acima ↑
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Order Items */}
             {activeOrder.order_items && (
               <div className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
                 <h3 className="font-bold text-brand-dark mb-3">Resumo do Pedido</h3>
                 <div className="space-y-2">
-                  {activeOrder.order_items.map((item: any) => (
-                    <div key={item.id} className="flex justify-between text-sm text-gray-600 border-b border-gray-50 pb-2">
+                  {activeOrder.order_items.map((item: any, idx: number) => (
+                    <div key={item.id || idx} className="flex justify-between text-sm text-gray-600 border-b border-gray-50 pb-2">
                       <span>{item.quantity}x {item.product_name}</span>
                       <span className="font-medium">R$ {item.total_price.toFixed(2)}</span>
                     </div>
@@ -1412,7 +1687,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                   )}
                   <div className="flex justify-between text-sm text-gray-600 pt-1">
                     <span>Taxa de entrega</span>
-                    <span className="font-medium">R$ {activeOrder.delivery_fee.toFixed(2)}</span>
+                    <span className="font-medium">{activeOrder.delivery_fee === 0 ? 'Grátis' : `R$ ${activeOrder.delivery_fee.toFixed(2)}`}</span>
                   </div>
                   {activeOrder.discount_amount > 0 && (
                     <div className="flex justify-between text-sm font-bold text-green-600">
@@ -1428,6 +1703,21 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
               </div>
             )}
           </div>
+          
+          <div className="bg-white p-4 border-t border-gray-100 shrink-0 z-20">
+            <div className="flex gap-3">
+              <button onClick={() => setIsChatOpen(true)}
+                className="flex-[1.5] bg-[#f0f5ff] border border-[#dbeafe] text-[#1d4ed8] py-3.5 rounded-2xl font-bold flex justify-center items-center text-sm">
+                <MessageSquare size={18} className="mr-2" /> Chat com a Loja
+              </button>
+              {['pending', 'accepted', 'preparing'].includes(activeOrder.status) && (
+                <button onClick={() => setShowCancelModal(true)}
+                  className="flex-1 text-sm text-red-600 font-bold bg-red-50 py-3.5 rounded-2xl border border-red-100 flex justify-center items-center">
+                  Cancelar
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1439,48 +1729,72 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         </div>
       )}
 
+      {/* CHAT MODAL */}
+      {isChatOpen && activeOrder && (
+        <div className="fixed inset-0 bg-white z-[100] flex flex-col overflow-hidden">
+          <div className="bg-white border-b p-4 flex items-center shrink-0">
+            <button onClick={() => setIsChatOpen(false)} className="p-2 -ml-2"><ChevronLeft size={24} /></button>
+            <img src={activeOrder.stores?.logo_url || 'https://images.unsplash.com/photo-1571091718767-18b5b1457add?w=100&h=100&fit=crop'} alt={activeOrder.stores?.name || 'Loja'} className="w-10 h-10 rounded-full object-cover ml-2 mr-3" />
+            <div>
+              <h2 className="font-bold text-brand-dark">{activeOrder.stores?.name || 'Loja'}</h2>
+              <p className="text-xs text-gray-500">Pedido #{activeOrder.id}</p>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+            {chatMessages.length === 0 && (
+              <div className="h-full flex flex-col items-center justify-center text-gray-400">
+                <MessageSquare size={40} className="mb-2 opacity-50" />
+                <p className="text-sm">Envie uma mensagem para a loja.</p>
+              </div>
+            )}
+            {chatMessages.map(msg => {
+              if (msg.is_system_message) return (
+                <div key={msg.id} className="flex justify-center">
+                  <span className="bg-yellow-50 text-yellow-800 text-[11px] font-bold px-3 py-1.5 rounded-full border border-yellow-200 text-center max-w-[85%]">{msg.message}</span>
+                </div>
+              );
+              const isMine = msg.sender_id === user?.id;
+              return (
+                <div key={msg.id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                  <div className={`max-w-[80%] p-3 text-sm ${isMine ? 'bg-brand-primary text-white rounded-2xl rounded-tr-sm' : 'bg-white text-gray-800 rounded-2xl rounded-tl-sm border border-gray-100'}`}>{msg.message}</div>
+                  <span className="text-[10px] text-gray-400 mt-1">{new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+              );
+            })}
+            <div ref={chatEndRef} />
+          </div>
+          <div className="p-4 bg-white border-t shrink-0">
+            <form onSubmit={handleSendMessage} className="flex items-center gap-2">
+              <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Digite sua mensagem..."
+                className="flex-1 bg-gray-100 rounded-full px-4 py-3 text-sm outline-none" />
+              <button type="submit" disabled={!chatInput.trim() || chatLoading}
+                className="w-12 h-12 bg-brand-primary text-white rounded-full flex items-center justify-center disabled:opacity-50">
+                {chatLoading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} className="ml-1" />}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* CANCEL MODAL */}
       {showCancelModal && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-end justify-center p-4 pb-8">
-          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in slide-in-from-bottom-full">
-            <h2 className="text-xl font-black text-brand-dark mb-1">Cancelar Pedido</h2>
-            <p className="text-sm text-gray-500 mb-5">Selecione o motivo do cancelamento:</p>
-
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl">
+            <h2 className="text-xl font-black text-brand-dark mb-1">Solicitar Cancelamento</h2>
+            <p className="text-sm text-gray-500 mb-5">Selecione o motivo e enviamos para a loja:</p>
             <div className="space-y-2 mb-6">
-              {[
-                'Errei o pedido',
-                'Demorou demais',
-                'Vou buscar pessoalmente',
-                'Endereço incorreto',
-                'Outro motivo'
-              ].map(reason => (
-                <button
-                  key={reason}
-                  onClick={() => setCancelReason(reason)}
-                  className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium border-2 transition-all ${
-                    cancelReason === reason
-                      ? 'border-red-400 bg-red-50 text-red-700 font-bold'
-                      : 'border-gray-200 text-gray-700 hover:border-gray-300'
-                  }`}
-                >
+              {['Errei o pedido','Demorou demais','Vou buscar pessoalmente','Endereço incorreto','Outro motivo'].map(reason => (
+                <button key={reason} onClick={() => setCancelReason(reason)}
+                  className={`w-full text-left px-4 py-3 rounded-xl text-sm font-medium border-2 transition-all ${cancelReason === reason ? 'border-red-400 bg-red-50 text-red-700 font-bold' : 'border-gray-200 text-gray-700'}`}>
                   {reason}
                 </button>
               ))}
             </div>
-
-            <div className="flex space-x-3">
-              <button
-                onClick={() => { setShowCancelModal(false); setCancelReason(''); }}
-                className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold"
-              >
-                Voltar
-              </button>
-              <button
-                onClick={handleCancelOrder}
-                disabled={!cancelReason || cancelLoading}
-                className="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold disabled:opacity-40 flex justify-center items-center transition-colors"
-              >
-                {cancelLoading ? <Loader2 size={18} className="animate-spin" /> : 'Confirmar'}
+            <div className="flex gap-3">
+              <button onClick={() => { setShowCancelModal(false); setCancelReason(''); }} className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold">Voltar</button>
+              <button onClick={handleRequestCancel} disabled={!cancelReason || actionLoading}
+                className="flex-[1.5] py-3 bg-red-500 text-white rounded-xl font-bold disabled:opacity-40 flex justify-center items-center gap-2">
+                {actionLoading ? <Loader2 size={18} className="animate-spin" /> : <><MessageSquare size={18} /> Enviar no Chat</>}
               </button>
             </div>
           </div>
@@ -1541,7 +1855,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                 disabled={reviewRating === 0 || reviewLoading}
                 className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold disabled:opacity-40 flex justify-center items-center transition-colors"
               >
-                {reviewLoading ? <Loader2 size={18} className="animate-spin" /> : 'Enviar Avaliação'}
+                {reviewLoading ? <Loader2 className="animate-spin" /> : 'Enviar Avaliação'}
               </button>
             </div>
           </div>

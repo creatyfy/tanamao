@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { LayoutDashboard, Store, Bike, LogOut, CheckCircle, XCircle, Loader2, Users, Eye, X, MapPin, FileText, DollarSign, Clock, CreditCard, User, ShoppingBag, Package, MessageSquare, Ticket, Star, Trash2 } from 'lucide-react';
+import { LayoutDashboard, Store, Bike, LogOut, CheckCircle, XCircle, Loader2, Users, Eye, X, MapPin, FileText, DollarSign, Clock, CreditCard, User, ShoppingBag, Package, MessageSquare, Ticket, Star, Trash2, Search, Percent, BarChart3 } from 'lucide-react';
 import { Toast } from '../components/Toast';
 
 export default function AdminApp({ onExit }: { onExit: () => void }) {
@@ -14,15 +14,24 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   const [couriers, setCouriers] = useState<any[]>([]);
   const [clients, setClients] = useState<any[]>([]);
   
-  // Dashboard Metrics
+  // Dashboard Metrics & Filters (Global)
+  const [dashboardFilter, setDashboardFilter] = useState<'today' | '7days' | '15days' | '30days' | 'custom'>('today');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [dashboardStoreFilter, setDashboardStoreFilter] = useState('all');
+  
   const [dashboardMetrics, setDashboardMetrics] = useState({
-    pedidosHoje: 0,
-    entreguesHoje: 0,
-    faturamentoHoje: 0,
+    pedidos: 0,
+    entregues: 0,
+    faturamento: 0,
+    comissao: 0,
     motoboysOnline: 0,
     lojasAbertas: 0
   });
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+
+  // Store Analysis Section (Bottom)
+  const [analysisOrders, setAnalysisOrders] = useState<any[]>([]);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
 
   // Orders Tab
   const [adminOrders, setAdminOrders] = useState<any[]>([]);
@@ -58,6 +67,13 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   }, []);
 
   useEffect(() => {
+    if (activeTab === 'dashboard') {
+      fetchDashboardMetrics();
+      fetchAnalysisData();
+    }
+  }, [activeTab, dashboardFilter, customStartDate, customEndDate, dashboardStoreFilter]);
+
+  useEffect(() => {
     if (activeTab === 'orders') {
       setOrdersPage(0);
       setAdminOrders([]);
@@ -71,40 +87,154 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const [storesRes, couriersRes, clientsRes, ordersRes, onlineCouriersRes, openStoresRes, recentOrdersRes] = await Promise.all([
+      const [storesRes, couriersRes, clientsRes] = await Promise.all([
         supabase.from('stores').select('*, users:owner_id(name, email, phone), addresses(*)').limit(200),
         supabase.from('couriers').select('*, users:user_id(name, email, phone, avatar_url)').limit(200),
-        supabase.from('users').select('*').eq('role', 'client'),
-        supabase.from('orders').select('total, status').gte('created_at', today.toISOString()),
-        supabase.from('couriers').select('id').eq('is_online', true),
-        supabase.from('stores').select('id').eq('is_open', true).eq('is_approved', true),
-        supabase.from('orders').select('*, users:client_id(name), stores(name)').order('created_at', { ascending: false }).limit(10)
+        supabase.from('users').select('*').eq('role', 'client')
       ]);
       
       if (storesRes.data) setStores(storesRes.data);
       if (couriersRes.data) setCouriers(couriersRes.data);
       if (clientsRes.data) setClients(clientsRes.data);
-      
-      if (ordersRes.data) {
-        const entregues = ordersRes.data.filter(o => o.status === 'delivered');
-        setDashboardMetrics({
-          pedidosHoje: ordersRes.data.length,
-          entreguesHoje: entregues.length,
-          faturamentoHoje: entregues.reduce((acc, o) => acc + o.total, 0),
-          motoboysOnline: onlineCouriersRes.data?.length || 0,
-          lojasAbertas: openStoresRes.data?.length || 0
-        });
-      }
-
-      if (recentOrdersRes.data) setRecentOrders(recentOrdersRes.data);
     } catch (error) {
       console.error(error);
-      showToast('Erro ao carregar dados do dashboard', 'error');
+      showToast('Erro ao carregar dados iniciais', 'error');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchDashboardMetrics = async () => {
+    setLoading(true);
+    try {
+      let startDate = new Date();
+      let endDate = new Date();
+
+      if (dashboardFilter === 'today') {
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === '7days') {
+        startDate.setDate(startDate.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === '15days') {
+        startDate.setDate(startDate.getDate() - 15);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === '30days') {
+        startDate.setDate(startDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === 'custom') {
+        if (!customStartDate || !customEndDate) {
+          setLoading(false);
+          return;
+        }
+        const startParts = customStartDate.split('-');
+        startDate = new Date(Number(startParts[0]), Number(startParts[1]) - 1, Number(startParts[2]));
+        startDate.setHours(0, 0, 0, 0);
+        const endParts = customEndDate.split('-');
+        endDate = new Date(Number(endParts[0]), Number(endParts[1]) - 1, Number(endParts[2]));
+        endDate.setHours(23, 59, 59, 999);
+      }
+
+      let query = supabase
+        .from('orders')
+        .select('total, delivery_fee, status, stores(commission_rate)')
+        .gte('created_at', startDate.toISOString())
+        .lte('created_at', endDate.toISOString());
+
+      if (dashboardStoreFilter !== 'all') {
+        query = query.eq('store_id', dashboardStoreFilter);
+      }
+
+      const [ordersRes, onlineCouriersRes, openStoresRes] = await Promise.all([
+        query,
+        supabase.from('couriers').select('id', { count: 'exact' }).eq('is_online', true),
+        supabase.from('stores').select('id', { count: 'exact' }).eq('is_open', true).eq('is_approved', true)
+      ]);
+
+      if (ordersRes.data) {
+        const entregues = ordersRes.data.filter(o => o.status === 'delivered');
+        let faturamentoTotal = 0;
+        let comissaoTotal = 0;
+
+        entregues.forEach(o => {
+          faturamentoTotal += o.total;
+          const baseValue = Math.max(0, o.total - (o.delivery_fee || 0));
+          const rate = o.stores?.commission_rate ?? 4;
+          comissaoTotal += baseValue * (rate / 100);
+        });
+
+        setDashboardMetrics({
+          pedidos: ordersRes.data.length,
+          entregues: entregues.length,
+          faturamento: faturamentoTotal,
+          comissao: comissaoTotal,
+          motoboysOnline: onlineCouriersRes.count || 0,
+          lojasAbertas: openStoresRes.count || 0
+        });
+      }
+    } catch (error) {
+      console.error(error);
+      showToast('Erro ao carregar métricas do dashboard', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAnalysisData = async () => {
+    setAnalysisLoading(true);
+    try {
+      let startDate = new Date();
+      let endDate = new Date();
+
+      if (dashboardFilter === 'today') {
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === '7days') {
+        startDate.setDate(startDate.getDate() - 7);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === '15days') {
+        startDate.setDate(startDate.getDate() - 15);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === '30days') {
+        startDate.setDate(startDate.getDate() - 30);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setHours(23, 59, 59, 999);
+      } else if (dashboardFilter === 'custom') {
+        if (!customStartDate || !customEndDate) {
+          setAnalysisLoading(false);
+          return;
+        }
+        const startParts = customStartDate.split('-');
+        startDate = new Date(Number(startParts[0]), Number(startParts[1]) - 1, Number(startParts[2]));
+        startDate.setHours(0, 0, 0, 0);
+        const endParts = customEndDate.split('-');
+        endDate = new Date(Number(endParts[0]), Number(endParts[1]) - 1, Number(endParts[2]));
+        endDate.setHours(23, 59, 59, 999);
+      }
+
+      let query = supabase
+        .from('orders')
+        .select('id, total, delivery_fee, status, payment_method, cancel_reason, created_at, users:client_id(name), stores(name, commission_rate)')
+        .gte('created_at', startDate.toISOString())
+        .lte('created_at', endDate.toISOString())
+        .order('created_at', { ascending: false });
+
+      if (dashboardStoreFilter !== 'all') {
+        query = query.eq('store_id', dashboardStoreFilter);
+      }
+
+      const { data } = await query;
+      if (data) setAnalysisOrders(data);
+    } catch (error) {
+      console.error(error);
+      showToast('Erro ao carregar dados de análise', 'error');
+    } finally {
+      setAnalysisLoading(false);
     }
   };
 
@@ -351,6 +481,15 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     return map[status] || status;
   };
 
+  // Cálculos para a seção de Análise de Loja
+  const analysisEntregues = analysisOrders.filter(o => o.status === 'delivered');
+  const analysisFaturamento = analysisEntregues.reduce((acc, o) => acc + o.total, 0);
+  const analysisComissao = analysisEntregues.reduce((acc, o) => {
+    const baseValue = Math.max(0, o.total - (o.delivery_fee || 0));
+    const rate = o.stores?.commission_rate ?? 4;
+    return acc + (baseValue * (rate / 100));
+  }, 0);
+
   return (
     <div className="flex h-screen bg-gray-50 w-full font-sans">
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
@@ -382,72 +521,166 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
         {/* DASHBOARD */}
         {activeTab === 'dashboard' && (
           <div className="max-w-6xl mx-auto">
-            <h2 className="text-3xl font-black text-gray-800 mb-8">Dashboard Global (Hoje)</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
-                <div><h3 className="font-bold text-lg text-gray-800 flex items-center mb-1"><Users size={20} className="mr-2 text-blue-500"/> Clientes</h3><p className="text-sm text-gray-500">Total cadastrados</p></div>
-                <span className="text-4xl font-black text-gray-800">{clients.length}</span>
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+              <h2 className="text-3xl font-black text-gray-800">Visão Geral</h2>
+              <div className="flex flex-col items-end gap-3 w-full md:w-auto">
+                <div className="flex gap-2 w-full md:w-auto">
+                  <select 
+                    value={dashboardStoreFilter} 
+                    onChange={e => setDashboardStoreFilter(e.target.value)}
+                    className="bg-white border border-gray-200 rounded-xl px-4 py-2 text-sm font-bold text-gray-700 outline-none focus:ring-2 focus:ring-brand-primary w-full shadow-sm"
+                  >
+                    <option value="all">Todas as Lojas</option>
+                    {stores.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200 w-full overflow-x-auto scrollbar-hide">
+                  <button onClick={() => setDashboardFilter('today')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === 'today' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hoje</button>
+                  <button onClick={() => setDashboardFilter('7days')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === '7days' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>7 dias</button>
+                  <button onClick={() => setDashboardFilter('15days')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === '15days' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>15 dias</button>
+                  <button onClick={() => setDashboardFilter('30days')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === '30days' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>30 dias</button>
+                  <button onClick={() => setDashboardFilter('custom')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === 'custom' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Personalizado</button>
+                </div>
+                {dashboardFilter === 'custom' && (
+                  <div className="flex gap-2 items-center bg-white p-2 rounded-xl shadow-sm border border-gray-200 w-full md:w-auto justify-between">
+                    <input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent" />
+                    <span className="text-gray-400 text-sm font-medium">até</span>
+                    <input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent" />
+                  </div>
+                )}
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
-                <div><h3 className="font-bold text-lg text-gray-800 flex items-center mb-1"><ShoppingBag size={20} className="mr-2 text-purple-500"/> Pedidos</h3><p className="text-sm text-gray-500">Realizados hoje</p></div>
-                <span className="text-4xl font-black text-gray-800">{dashboardMetrics.pedidosHoje}</span>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-8">
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center">
+                <div className="flex items-center mb-2">
+                  <div className="p-2 bg-purple-50 rounded-lg text-purple-500 mr-3"><ShoppingBag size={20}/></div>
+                  <h3 className="font-bold text-gray-500 text-sm">Pedidos</h3>
+                </div>
+                <span className="text-3xl font-black text-gray-800">{dashboardMetrics.pedidos}</span>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
-                <div><h3 className="font-bold text-lg text-gray-800 flex items-center mb-1"><CheckCircle size={20} className="mr-2 text-green-500"/> Entregues</h3><p className="text-sm text-gray-500">Finalizados hoje</p></div>
-                <span className="text-4xl font-black text-gray-800">{dashboardMetrics.entreguesHoje}</span>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center">
+                <div className="flex items-center mb-2">
+                  <div className="p-2 bg-green-50 rounded-lg text-green-500 mr-3"><CheckCircle size={20}/></div>
+                  <h3 className="font-bold text-gray-500 text-sm">Entregues</h3>
+                </div>
+                <span className="text-3xl font-black text-gray-800">{dashboardMetrics.entregues}</span>
               </div>
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
-                <div><h3 className="font-bold text-lg text-gray-800 flex items-center mb-1"><DollarSign size={20} className="mr-2 text-brand-primary"/> Faturamento</h3><p className="text-sm text-gray-500">Movimentado hoje</p></div>
-                <span className="text-3xl font-black text-gray-800">R$ {dashboardMetrics.faturamentoHoje.toFixed(2)}</span>
+
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center">
+                <div className="flex items-center mb-2">
+                  <div className="p-2 bg-blue-50 rounded-lg text-blue-500 mr-3"><DollarSign size={20}/></div>
+                  <h3 className="font-bold text-gray-500 text-sm">Faturamento</h3>
+                </div>
+                <span className="text-2xl font-black text-gray-800">R$ {dashboardMetrics.faturamento.toFixed(2)}</span>
               </div>
+
+              <div className="bg-gradient-to-br from-brand-primary to-emerald-600 p-6 rounded-2xl shadow-md border border-brand-primary flex flex-col justify-center relative overflow-hidden">
+                <div className="absolute -right-4 -top-4 opacity-10"><Percent size={100} /></div>
+                <div className="flex items-center mb-2 relative z-10">
+                  <div className="p-2 bg-white/20 rounded-lg text-white mr-3"><Percent size={20}/></div>
+                  <h3 className="font-bold text-emerald-50 text-sm">Comissão do App</h3>
+                </div>
+                <span className="text-2xl font-black text-white relative z-10">R$ {dashboardMetrics.comissao.toFixed(2)}</span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
-                <div><h3 className="font-bold text-lg text-gray-800 flex items-center mb-1"><Bike size={20} className="mr-2 text-brand-secondary"/> Motoboys</h3><p className="text-sm text-gray-500">Online agora</p></div>
+                <div><h3 className="font-bold text-lg text-gray-800 flex items-center mb-1"><Bike size={20} className="mr-2 text-brand-secondary"/> Motoboys</h3><p className="text-sm text-gray-500">Online agora na plataforma</p></div>
                 <span className="text-4xl font-black text-gray-800">{dashboardMetrics.motoboysOnline}</span>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between">
-                <div><h3 className="font-bold text-lg text-gray-800 flex items-center mb-1"><Store size={20} className="mr-2 text-orange-500"/> Lojas</h3><p className="text-sm text-gray-500">Abertas agora</p></div>
+                <div><h3 className="font-bold text-lg text-gray-800 flex items-center mb-1"><Store size={20} className="mr-2 text-orange-500"/> Lojas</h3><p className="text-sm text-gray-500">Abertas no momento</p></div>
                 <span className="text-4xl font-black text-gray-800">{dashboardMetrics.lojasAbertas}</span>
               </div>
             </div>
 
-            <h3 className="text-xl font-bold text-gray-800 mb-4">Pedidos Recentes</h3>
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
-                    <th className="p-4 font-medium">#ID</th>
-                    <th className="p-4 font-medium">Cliente</th>
-                    <th className="p-4 font-medium">Loja</th>
-                    <th className="p-4 font-medium">Total</th>
-                    <th className="p-4 font-medium">Pagamento</th>
-                    <th className="p-4 font-medium">Status</th>
-                    <th className="p-4 font-medium">Horário</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {recentOrders.map(order => (
-                    <tr key={order.id} className="hover:bg-gray-50">
-                      <td className="p-4 font-bold text-gray-400">#{order.id}</td>
-                      <td className="p-4 font-bold text-gray-800">{order.users?.name}</td>
-                      <td className="p-4 text-gray-600">{order.stores?.name}</td>
-                      <td className="p-4 font-bold text-gray-800">R$ {order.total.toFixed(2)}</td>
-                      <td className="p-4">
-                        {order.payment_method === 'cash' ? <span className="text-[10px] font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Dinheiro</span> : <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded">PIX</span>}
-                      </td>
-                      <td className="p-4">
-                        <span className={`text-sm font-medium ${order.status === 'cancelled' ? 'text-red-500' : 'text-gray-600'}`}>
-                          {translateStatus(order.status)}
-                        </span>
-                        {order.status === 'cancelled' && order.cancel_reason && (
-                          <p className="text-[10px] text-red-400 mt-0.5 leading-tight">Motivo: {order.cancel_reason}</p>
-                        )}
-                      </td>
-                      <td className="p-4 text-sm text-gray-500">{formatTime(order.created_at)}</td>
-                    </tr>
-                  ))}
-                  {recentOrders.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-gray-500">Nenhum pedido recente.</td></tr>}
-                </tbody>
-              </table>
+            {/* SEÇÃO: ANÁLISE DE DESEMPENHO POR LOJA */}
+            <div className="mt-12 pt-8 border-t border-gray-200">
+              <div className="mb-6">
+                <h3 className="text-2xl font-black text-gray-800 flex items-center"><BarChart3 className="mr-2 text-brand-primary" /> Desempenho por Loja</h3>
+                <p className="text-sm text-gray-500 mt-1">Analise o faturamento e comissões detalhadas com base nos filtros selecionados acima.</p>
+              </div>
+
+              {analysisLoading ? (
+                <div className="flex justify-center py-12"><Loader2 className="animate-spin text-brand-primary" size={32}/></div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                      <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1 flex items-center"><ShoppingBag size={14} className="mr-1"/> Pedidos Totais</p>
+                      <p className="text-2xl font-black text-gray-800">{analysisOrders.length}</p>
+                    </div>
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                      <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1 flex items-center"><CheckCircle size={14} className="mr-1"/> Entregues</p>
+                      <p className="text-2xl font-black text-green-600">{analysisEntregues.length}</p>
+                    </div>
+                    <div className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
+                      <p className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1 flex items-center"><DollarSign size={14} className="mr-1"/> Faturamento</p>
+                      <p className="text-2xl font-black text-gray-800">R$ {analysisFaturamento.toFixed(2)}</p>
+                    </div>
+                    <div className="bg-brand-light p-5 rounded-2xl shadow-sm border border-brand-primary/20">
+                      <p className="text-xs text-brand-dark font-bold uppercase tracking-wider mb-1 flex items-center"><Percent size={14} className="mr-1"/> Comissão Gerada</p>
+                      <p className="text-2xl font-black text-brand-primary">R$ {analysisComissao.toFixed(2)}</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
+                      <h4 className="font-bold text-gray-700">Lista de Pedidos do Período</h4>
+                      <span className="text-xs text-gray-500 font-medium">Mostrando {Math.min(analysisOrders.length, 50)} de {analysisOrders.length}</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
+                            <th className="p-4 font-medium">#ID</th>
+                            <th className="p-4 font-medium">Cliente</th>
+                            <th className="p-4 font-medium">Loja</th>
+                            <th className="p-4 font-medium">Total</th>
+                            <th className="p-4 font-medium">Pagamento</th>
+                            <th className="p-4 font-medium">Status</th>
+                            <th className="p-4 font-medium">Horário</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {analysisOrders.slice(0, 50).map(order => (
+                            <tr key={order.id} className="hover:bg-gray-50">
+                              <td className="p-4 font-bold text-gray-400">#{order.id}</td>
+                              <td className="p-4 font-bold text-gray-800">{order.users?.name}</td>
+                              <td className="p-4 text-gray-600">{order.stores?.name}</td>
+                              <td className="p-4 font-bold text-gray-800">R$ {order.total.toFixed(2)}</td>
+                              <td className="p-4">
+                                {order.payment_method === 'cash' ? (
+                                  <span className="text-[10px] font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded">Dinheiro</span>
+                                ) : order.payment_method === 'pix' ? (
+                                  <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded">PIX</span>
+                                ) : (
+                                  <span className="text-[10px] font-bold bg-orange-100 text-orange-800 px-2 py-1 rounded">Cartão</span>
+                                )}
+                              </td>
+                              <td className="p-4">
+                                <span className={`text-sm font-medium ${order.status === 'cancelled' ? 'text-red-500' : 'text-gray-600'}`}>
+                                  {translateStatus(order.status)}
+                                </span>
+                                {order.status === 'cancelled' && order.cancel_reason && (
+                                  <p className="text-[10px] text-red-400 mt-0.5 leading-tight">Motivo: {order.cancel_reason}</p>
+                                )}
+                              </td>
+                              <td className="p-4 text-sm text-gray-500">{formatTime(order.created_at)}</td>
+                            </tr>
+                          ))}
+                          {analysisOrders.length === 0 && (
+                            <tr><td colSpan={7} className="p-8 text-center text-gray-500">Nenhum pedido encontrado para esta seleção.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -505,7 +738,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                       </td>
                       <td className="p-4">
                         <p className="font-bold text-gray-800">R$ {order.total.toFixed(2)}</p>
-                        <p className="text-xs text-gray-500">{order.payment_method === 'cash' ? '💵 Dinheiro' : '📱 PIX'}</p>
+                        <p className="text-xs text-gray-500">{order.payment_method === 'cash' ? '💵 Dinheiro' : order.payment_method === 'pix' ? '📱 PIX' : '💳 Cartão'}</p>
                       </td>
                       <td className="p-4">
                         <span className={`text-sm font-medium ${order.status === 'cancelled' ? 'text-red-500' : 'text-gray-600'}`}>
@@ -903,7 +1136,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <h3 className="font-bold text-gray-800 border-b pb-2 mb-3 flex items-center"><CreditCard size={18} className="mr-2 text-gray-400"/> Pagamento</h3>
-                  <p className="text-sm font-bold text-gray-800">{viewOrder.payment_method === 'cash' ? '💵 Dinheiro' : '📱 PIX'}</p>
+                  <p className="text-sm font-bold text-gray-800">{viewOrder.payment_method === 'cash' ? '💵 Dinheiro' : viewOrder.payment_method === 'pix' ? '📱 PIX' : '💳 Cartão'}</p>
                   {viewOrder.payment_method === 'cash' && viewOrder.change_for && (
                     <p className="text-xs text-gray-500 mt-1">Troco para R$ {viewOrder.change_for.toFixed(2)}</p>
                   )}
@@ -1029,6 +1262,25 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
             </div>
             
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              
+              {/* FOTO DE VERIFICAÇÃO (SELFIE) */}
+              <div className="flex flex-col items-center bg-gray-50 py-6 rounded-2xl border border-gray-100 mb-6">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-4">Selfie de Verificação</p>
+                {viewCourier.users?.avatar_url ? (
+                  <a href={viewCourier.users.avatar_url} target="_blank" rel="noopener noreferrer" className="relative group cursor-pointer block" title="Clique para ampliar">
+                    <img src={viewCourier.users.avatar_url} alt="Selfie do Motoboy" className="w-48 h-48 rounded-2xl object-cover border-4 border-white shadow-lg group-hover:scale-105 transition-transform duration-300" />
+                    <div className="absolute inset-0 bg-black/40 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <span className="text-white font-bold text-sm flex items-center"><Search size={16} className="mr-2"/> Ampliar</span>
+                    </div>
+                  </a>
+                ) : (
+                  <div className="w-48 h-48 rounded-2xl bg-white border-2 border-dashed border-gray-300 flex flex-col items-center justify-center text-gray-400 shadow-sm">
+                    <User size={48} className="mb-3 opacity-50" />
+                    <span className="text-sm font-medium">Foto não enviada</span>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
                   <h3 className="font-bold text-gray-800 border-b pb-2 flex items-center"><FileText size={18} className="mr-2 text-gray-400"/> Dados Pessoais</h3>

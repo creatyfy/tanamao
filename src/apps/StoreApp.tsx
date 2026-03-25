@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Store, Order, Product, Coupon } from '../types';
@@ -9,7 +9,7 @@ import {
   Check, X, Clock, Plus, Bell, Star, BarChart3, Tag, 
   FolderTree, Bike, Settings, ChevronRight, Edit2, Trash2, 
   Image as ImageIcon, Search, MapPin, MessageSquare, Loader2, History, Ticket, Percent, UploadCloud, BellRing,
-  User, CheckCircle, Printer
+  User, CheckCircle, Printer, XCircle, Send, AlertTriangle, Phone, Lock, CreditCard, Store as StoreIcon
 } from 'lucide-react';
 
 export default function StoreApp({ onExit }: { onExit: () => void }) {
@@ -27,10 +27,10 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [productCategories, setProductCategories] = useState<any[]>([]);
-  const [reviews, setReviews] = useState<any[]>([]); // Novo estado para avaliações
+  const [reviews, setReviews] = useState<any[]>([]); 
   
   // Dashboard Metrics & Filters
-  const [dashboardMetrics, setDashboardMetrics] = useState({ totalOrders: 0, deliveredOrders: 0, revenue: 0 });
+  const [dashboardMetrics, setDashboardMetrics] = useState({ totalOrders: 0, deliveredOrders: 0, cancelledOrders: 0, revenue: 0 });
   const [dashboardFilter, setDashboardFilter] = useState<'today' | '7days' | '15days' | '30days' | 'custom'>('today');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -59,14 +59,49 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [showCouponModal, setShowCouponModal] = useState(false);
   const [couponForm, setCouponForm] = useState({ code: '', type: 'percentage', value: '', min_order_value: '0', expires_at: '', is_active: true });
 
+  // Settings Form State
+  const [settingsForm, setSettingsForm] = useState({
+    name: '',
+    phone: '',
+    logo_url: '',
+    banner_url: '', // New banner_url field
+    delivery_fee: '',
+    min_order_value: '',
+    avg_prep_time_min: '',
+    accepts_pix: false,
+    accepts_card: false,
+    accepts_cash: false,
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [bannerFile, setBannerFile] = useState<File | null>(null); // New bannerFile state
+  const [bannerPreview, setBannerPreview] = useState<string | null>(null); // New bannerPreview state
+  const [settingsLoading, setSettingsLoading] = useState(false);
+
   // Confirm Modal
   const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void} | null>(null);
 
+  // Chat States
+  const [activeChatOrderId, setActiveChatOrderId] = useState<number | null>(null);
+  const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Timer para busca de motoboys
+  const [now, setNow] = useState(Date.now());
+  
   useEffect(() => {
-    if (user) fetchStoreData();
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      fetchStoreData();
+    }
   }, [user]);
 
-  // Efeito para buscar métricas do Dashboard com base no filtro
   useEffect(() => {
     const fetchDashboardMetrics = async () => {
       if (!store) return;
@@ -90,7 +125,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         startDate.setHours(0, 0, 0, 0);
         endDate.setHours(23, 59, 59, 999);
       } else if (dashboardFilter === 'custom') {
-        if (!customStartDate || !customEndDate) return; // Aguarda preencher as duas datas
+        if (!customStartDate || !customEndDate) return; 
         
         const startParts = customStartDate.split('-');
         startDate = new Date(Number(startParts[0]), Number(startParts[1]) - 1, Number(startParts[2]));
@@ -111,8 +146,9 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       if (periodOrders) {
         const totalOrders = periodOrders.length;
         const deliveredOrders = periodOrders.filter(o => o.status === 'delivered').length;
+        const cancelledOrders = periodOrders.filter(o => o.status === 'cancelled').length;
         const revenue = periodOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.total, 0);
-        setDashboardMetrics({ totalOrders, deliveredOrders, revenue });
+        setDashboardMetrics({ totalOrders, deliveredOrders, cancelledOrders, revenue });
       }
     };
 
@@ -130,7 +166,60 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     }
     if (activeTab === 'coupons' && store) fetchCoupons(store.id);
     if (activeTab === 'categories' && store) fetchProductCategories(store.id);
+    if (activeTab === 'settings' && store) {
+      setSettingsForm({
+        name: store.name,
+        phone: store.phone || '',
+        logo_url: store.logo_url || '',
+        banner_url: store.banner_url || '', // Set banner_url
+        delivery_fee: store.delivery_fee?.toString() || '0',
+        min_order_value: store.min_order_value?.toString() || '0',
+        avg_prep_time_min: store.avg_prep_time_min?.toString() || '30',
+        accepts_pix: store.accepts_pix,
+        accepts_card: store.accepts_card,
+        accepts_cash: store.accepts_cash,
+        newPassword: '',
+        confirmPassword: ''
+      });
+      setLogoPreview(store.logo_url || null);
+      setBannerPreview(store.banner_url || null); // Set bannerPreview
+    }
   }, [activeTab, historyFilter, store, lastUpdate]);
+
+  useEffect(() => {
+    if (activeTab === 'chats' && activeChatOrderId)
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [orders, activeChatOrderId, activeTab]);
+
+  const handleCourierTimeout = async (orderId: number, deliveryId: number) => {
+    if (actionLoading === orderId) return;
+    setActionLoading(orderId);
+    try {
+      await supabase.from('deliveries').update({ status: 'cancelled' }).eq('id', deliveryId);
+      await supabase.from('orders').update({ status: 'preparing' }).eq('id', orderId);
+      showToast(`Pedido #${orderId}: Nenhum motoboy aceitou.`, 'warning');
+      fetchOrders(store!.id);
+      setLastUpdate(Date.now());
+    } catch (error) {
+      console.error('Erro no timeout do motoboy', error);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  useEffect(() => {
+    orders.forEach(order => {
+      if (order.status === 'ready' && !order.courier_id && order.deliveries) {
+        const offer = order.deliveries.find((d: any) => d.status === 'offered');
+        if (offer) {
+          const elapsed = Date.now() - new Date(offer.created_at).getTime();
+          if (elapsed > 60000 && actionLoading !== order.id) {
+            handleCourierTimeout(order.id, offer.id);
+          }
+        }
+      }
+    });
+  }, [now, orders, actionLoading]);
 
   const fetchStoreData = async () => {
     setLoading(true);
@@ -138,8 +227,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       const { data: storeData } = await supabase.from('stores').select('*').eq('owner_id', user!.id).maybeSingle();
       if (storeData) {
         
-        // SELF-HEALING: Buscar avaliações reais e sincronizar a média da loja
-        // Isso resolve o problema do cliente não ter permissão (RLS) para atualizar a média da loja
         const { data: storeReviews } = await supabase
           .from('reviews')
           .select('*, users:reviewer_id(name)')
@@ -156,7 +243,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           setReviews([]);
         }
         
-        // Se a média no banco estiver desatualizada, o dono da loja atualiza (ele tem permissão)
         if (storeData.avg_rating !== trueAvg) {
           await supabase.from('stores').update({ avg_rating: trueAvg }).eq('id', storeData.id);
           storeData.avg_rating = trueAvg;
@@ -167,10 +253,9 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         fetchProducts(storeData.id);
         fetchProductCategories(storeData.id);
         
-        const channel = supabase.channel(`store_orders_${storeData.id}`)
+        const channelOrders = supabase.channel(`store_orders_${storeData.id}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `store_id=eq.${storeData.id}` }, (payload) => {
             
-            // Dispara notificação se for um NOVO pedido
             if (payload.eventType === 'INSERT' && payload.new.status === 'pending') {
               sendNotification('🔔 Novo Pedido Recebido!', {
                 body: `Pedido #${payload.new.id} no valor de R$ ${payload.new.total.toFixed(2)}. Acesse o painel para aceitar.`,
@@ -178,9 +263,29 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             }
 
             fetchOrders(storeData.id);
-            setLastUpdate(Date.now()); // Trigger history and dashboard refresh if active
+            setLastUpdate(Date.now());
           }).subscribe();
-        return () => { supabase.removeChannel(channel); };
+
+        const channelChats = supabase.channel(`store_chats_${storeData.id}`)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'order_chats' }, (payload) => {
+            const newMsg = payload.new;
+            setOrders(prev => {
+              const idx = prev.findIndex(o => o.id === newMsg.order_id);
+              if (idx === -1) return prev;
+              if (newMsg.sender_id !== user!.id) showToast(`Nova mensagem no pedido #${newMsg.order_id}`, 'success');
+              const updated = [...prev];
+              const order = { ...updated[idx] };
+              if (!order.order_chats?.find((m: any) => m.id === newMsg.id))
+                order.order_chats = [...(order.order_chats || []), newMsg];
+              updated[idx] = order;
+              return updated;
+            });
+          }).subscribe();
+
+        return () => { 
+          supabase.removeChannel(channelOrders); 
+          supabase.removeChannel(channelChats);
+        };
       }
     } catch (error) {
       console.error('Erro ao carregar loja:', error);
@@ -237,7 +342,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
   const fetchOrders = async (storeId: number) => {
     const { data } = await supabase.from('orders')
-      .select(`*, users:client_id(name), order_items(*), addresses:delivery_address_id(*)`)
+      .select(`*, users:client_id(name), order_items(*), addresses:delivery_address_id(*), order_chats(*), couriers(users(name, phone), vehicle_type, license_plate), deliveries(id, status, created_at)`)
       .eq('store_id', storeId)
       .in('status', ['pending', 'preparing', 'ready', 'delivering'])
       .order('created_at', { ascending: false });
@@ -380,7 +485,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         </table>
 
         <div style="margin-top:6px">
-          <span class="tag">${order.payment_method === 'cash' ? '💵 DINHEIRO' : '📱 PIX'}</span>
+          <span class="tag">${order.payment_method === 'cash' ? '💵 DINHEIRO' : order.payment_method === 'pix' ? '📱 PIX' : '💳 CARTÃO'}</span>
           ${order.payment_method === 'cash' && order.change_for ? `
             <p style="margin-top:3px;font-size:11px">Troco para: R$ ${order.change_for.toFixed(2)}</p>
           ` : ''}
@@ -418,18 +523,20 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       if (updateErr) throw updateErr;
 
       if (status === 'ready') {
-        // Broadcast para todos os motoboys (sem courier_id)
+        // Garante que o motoboy receba no mínimo R$ 2.00, mesmo que a taxa da loja seja zero
+        const courierFee = Math.max(Number(store?.delivery_fee) || 0, 2.00);
+        
         const { error: deliveryErr } = await supabase.from('deliveries').insert({
           order_id: orderId,
           status: 'offered',
-          courier_earning: store?.delivery_fee || 8.50
+          courier_earning: courierFee
         });
         
         if (deliveryErr) {
           console.error("Erro RLS ao despachar:", deliveryErr);
           showToast("Erro ao chamar motoboy. Verifique as permissões.", 'error');
         } else {
-          showToast("Procurando motoboys disponíveis...");
+          showToast(`Procurando motoboys... (Ganho: R$ ${courierFee.toFixed(2)})`);
         }
       } else {
         showToast('Status do pedido atualizado!');
@@ -447,7 +554,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const handleOwnDelivery = async (orderId: number) => {
     setActionLoading(orderId);
     try {
-      // Marca entrega própria e já coloca em rota — sem acionar motoboys
       const { error } = await supabase
         .from('orders')
         .update({
@@ -491,6 +597,26 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     }
   };
 
+  const handleSendStoreMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || !activeChatOrderId || !user) return;
+    const msg = chatInput.trim(); setChatInput('');
+    try {
+      const { data, error } = await supabase.from('order_chats').insert({
+        order_id: activeChatOrderId, sender_id: user.id, message: msg, is_system_message: false
+      }).select().single();
+      if (error) throw error;
+      if (data) setOrders(prev => {
+        const idx = prev.findIndex(o => o.id === activeChatOrderId);
+        if (idx === -1) return prev;
+        const updated = [...prev]; const order = { ...updated[idx] };
+        if (!order.order_chats?.find((m: any) => m.id === data.id))
+          order.order_chats = [...(order.order_chats || []), data];
+        updated[idx] = order; return updated;
+      });
+    } catch { showToast('Erro ao enviar mensagem', 'error'); }
+  };
+
   // --- CATEGORY ACTIONS ---
   const handleSaveCategory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -528,7 +654,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       onConfirm: async () => {
         setConfirmModal(null);
         try {
-          // Remover a categoria dos produtos antes de excluir
           await supabase.from('products').update({ category_id: null }).eq('category_id', id);
           await supabase.from('product_categories').delete().eq('id', id);
           showToast('Categoria excluída');
@@ -566,7 +691,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const handleProductImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      if (file.size > 5 * 1024 * 1024) { 
         showToast('A imagem deve ter no máximo 5MB', 'warning');
         return;
       }
@@ -740,6 +865,149 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     });
   };
 
+  // --- SETTINGS ACTIONS ---
+  const handleSettingsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type, checked } = e.target;
+    setSettingsForm(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (file.size > 2 * 1024 * 1024) { // Max 2MB
+        showToast('A imagem deve ter no máximo 2MB', 'warning');
+        return;
+      }
+      setLogoFile(file);
+      setLogoPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleBannerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (file.size > 5 * 1024 * 1024) { // Max 5MB
+        showToast('A imagem do banner deve ter no máximo 5MB', 'warning');
+        return;
+      }
+      setBannerFile(file);
+      setBannerPreview(URL.createObjectURL(file));
+    }
+  };
+
+  const handleUpdateStoreSettings = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!store || !user) return;
+    setSettingsLoading(true);
+
+    try {
+      let updatedLogoUrl = settingsForm.logo_url;
+      let updatedBannerUrl = settingsForm.banner_url; // Initialize with current banner_url
+
+      if (logoFile) {
+        const fileExt = logoFile.name.split('.').pop();
+        const fileName = `store_logo_${store.id}_${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('stores')
+          .upload(fileName, logoFile, { cacheControl: '3600', upsert: true });
+
+        if (uploadError) {
+          console.error("Upload error:", uploadError);
+          throw new Error('Erro ao fazer upload do logo.');
+        }
+
+        const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
+        updatedLogoUrl = publicUrlData.publicUrl;
+      }
+
+      if (bannerFile) { // Handle banner file upload
+        const fileExt = bannerFile.name.split('.').pop();
+        const fileName = `store_banner_${store.id}_${Date.now()}.${fileExt}`;
+        
+        const { error: uploadError } = await supabase.storage
+          .from('stores')
+          .upload(fileName, bannerFile, { cacheControl: '3600', upsert: true });
+
+        if (uploadError) {
+          console.error("Upload banner error:", uploadError);
+          throw new Error('Erro ao fazer upload do banner.');
+        }
+
+        const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
+        updatedBannerUrl = publicUrlData.publicUrl;
+      }
+
+      const storeUpdateData = {
+        name: settingsForm.name,
+        phone: settingsForm.phone,
+        logo_url: updatedLogoUrl,
+        banner_url: updatedBannerUrl, // Include updated banner_url
+        delivery_fee: parseFloat(settingsForm.delivery_fee),
+        min_order_value: parseFloat(settingsForm.min_order_value),
+        avg_prep_time_min: parseInt(settingsForm.avg_prep_time_min),
+        accepts_pix: settingsForm.accepts_pix,
+        accepts_card: settingsForm.accepts_card,
+        accepts_cash: settingsForm.accepts_cash,
+      };
+
+      const { error: storeError } = await supabase
+        .from('stores')
+        .update(storeUpdateData)
+        .eq('id', store.id);
+
+      if (storeError) throw storeError;
+
+      // Update user's phone in users table
+      const { error: userPhoneError } = await supabase
+        .from('users')
+        .update({ phone: settingsForm.phone })
+        .eq('id', user.id);
+      
+      if (userPhoneError) console.warn("Could not update user's phone:", userPhoneError.message);
+
+      setStore(prev => prev ? { ...prev, ...storeUpdateData } : null);
+      showToast('Configurações da loja atualizadas!', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Erro ao atualizar configurações da loja.', 'error');
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    if (settingsForm.newPassword !== settingsForm.confirmPassword) {
+      showToast('As senhas não coincidem.', 'warning');
+      return;
+    }
+    if (settingsForm.newPassword.length < 6) {
+      showToast('A senha deve ter no mínimo 6 caracteres.', 'warning');
+      return;
+    }
+
+    setSettingsLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        password: settingsForm.newPassword
+      });
+
+      if (error) throw error;
+
+      showToast('Senha atualizada com sucesso!', 'success');
+      setSettingsForm(prev => ({ ...prev, newPassword: '', confirmPassword: '' }));
+    } catch (error: any) {
+      showToast(error.message || 'Erro ao atualizar senha.', 'error');
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+
   const formatTime = (dateString: string) => {
     return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(dateString));
   };
@@ -747,11 +1015,13 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const menuItems = [
     { id: 'dashboard', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
     { id: 'orders', icon: <ShoppingBag size={20} />, label: 'Pedidos Ativos' },
+    { id: 'chats', icon: <MessageSquare size={20} />, label: 'Chats' },
     { id: 'history', icon: <History size={20} />, label: 'Histórico' },
     { id: 'categories', icon: <FolderTree size={20} />, label: 'Categorias' },
     { id: 'products', icon: <Package size={20} />, label: 'Cardápio' },
     { id: 'coupons', icon: <Ticket size={20} />, label: 'Cupons' },
     { id: 'reviews', icon: <Star size={20} />, label: 'Avaliações' },
+    { id: 'settings', icon: <Settings size={20} />, label: 'Configurações' },
   ];
 
   if (loading && !store) {
@@ -786,8 +1056,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         </div>
         <nav className="flex-1 overflow-y-auto p-4 space-y-1 scrollbar-hide">
           {menuItems.map(item => (
-            <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === item.id ? 'bg-brand-primary text-white shadow-md shadow-brand-primary/20' : 'text-gray-600 hover:bg-brand-light hover:text-brand-primary'}`}>
+            <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all relative ${activeTab === item.id ? 'bg-brand-primary text-white shadow-md shadow-brand-primary/20' : 'text-gray-600 hover:bg-brand-light hover:text-brand-primary'}`}>
               {item.icon}<span>{item.label}</span>
+              {item.id === 'chats' && orders.some(o => o.order_chats?.length > 0) && (
+                <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse absolute top-3 right-4"></span>
+              )}
             </button>
           ))}
         </nav>
@@ -861,7 +1134,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-blue-50 rounded-xl text-blue-500 w-fit mb-4"><ShoppingBag size={24} /></div>
                   <h3 className="text-3xl font-black text-brand-dark">{dashboardMetrics.totalOrders}</h3>
@@ -873,14 +1146,19 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                   <p className="text-sm text-gray-500 font-medium mt-1">Entregues no período</p>
                 </div>
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                  <div className="p-3 bg-red-50 rounded-xl text-red-500 w-fit mb-4"><X size={24} /></div>
+                  <h3 className="text-3xl font-black text-brand-dark">{dashboardMetrics.cancelledOrders}</h3>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Cancelados no período</p>
+                </div>
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-brand-light rounded-xl text-brand-primary w-fit mb-4"><DollarSign size={24} /></div>
                   <h3 className="text-3xl font-black text-brand-dark">R$ {dashboardMetrics.revenue.toFixed(2)}</h3>
                   <p className="text-sm text-gray-500 font-medium mt-1">Faturamento no período</p>
                 </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 col-span-2 md:col-span-1 lg:col-span-1">
                   <div className="p-3 bg-yellow-50 rounded-xl text-yellow-500 w-fit mb-4"><Star size={24} /></div>
                   <h3 className="text-3xl font-black text-brand-dark">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Avaliação geral da loja</p>
+                  <p className="text-sm text-gray-500 font-medium mt-1">Avaliação geral</p>
                 </div>
               </div>
             </div>
@@ -929,8 +1207,10 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                           <div className="font-black text-brand-dark text-lg">R$ {order.total.toFixed(2)}</div>
                           {order.payment_method === 'cash' ? (
                             <span className="text-[10px] font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded border border-yellow-200">💵 DINHEIRO</span>
-                          ) : (
+                          ) : order.payment_method === 'pix' ? (
                             <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded border border-blue-200">📱 PIX</span>
+                          ) : (
+                            <span className="text-[10px] font-bold bg-orange-100 text-orange-800 px-2 py-1 rounded border border-orange-200">💳 CARTÃO</span>
                           )}
                         </div>
                         <div className="flex space-x-2">
@@ -1058,15 +1338,133 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                             <Bike size={14} className="mr-1"/> Com motoboy
                           </div>
                         ) : (
-                          <div className="mt-3 bg-yellow-50 text-yellow-700 text-xs font-bold p-2 rounded-lg flex items-center border border-yellow-200">
-                            <Loader2 size={14} className="mr-1 animate-spin"/> Aguardando motoboy
-                          </div>
+                          (() => {
+                            const offer = order.deliveries?.find((d: any) => d.status === 'offered');
+                            let timeLeft = 60;
+                            if (offer) {
+                              const elapsed = Math.floor((now - new Date(offer.created_at).getTime()) / 1000);
+                              timeLeft = Math.max(0, Math.min(60, 60 - elapsed));
+                            }
+                            return (
+                              <div className="mt-3 bg-yellow-50 text-yellow-700 text-xs font-bold p-2 rounded-lg flex items-center justify-between border border-yellow-200">
+                                <div className="flex items-center">
+                                  <Loader2 size={14} className="mr-1 animate-spin"/> Aguardando motoboy
+                                </div>
+                                {offer && <span className="font-mono bg-yellow-100 px-1.5 py-0.5 rounded text-[10px]">0:{timeLeft.toString().padStart(2, '0')}</span>}
+                              </div>
+                            );
+                          })()
                         )}
                       </div>
                     ))}
                   </div>
                 </div>
 
+              </div>
+            </div>
+          )}
+
+          {/* CHATS */}
+          {activeTab === 'chats' && (
+            <div className="max-w-6xl mx-auto h-[calc(100vh-8rem)] flex flex-col">
+              <h2 className="text-2xl font-black text-gray-800 mb-6 shrink-0">Chat com Clientes</h2>
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 min-h-0">
+                <div className="md:col-span-1 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-y-auto">
+                  {orders.length === 0 && <p className="p-8 text-center text-gray-500 text-sm">Nenhum pedido ativo.</p>}
+                  {orders.map(order => {
+                    const msgs = order.order_chats || [];
+                    const last = msgs[msgs.length - 1];
+                    return (
+                      <button key={order.id} onClick={() => setActiveChatOrderId(order.id)}
+                        className={`w-full p-4 border-b border-gray-100 text-left hover:bg-gray-50 ${activeChatOrderId === order.id ? 'bg-brand-light border-l-4 border-l-brand-primary' : 'border-l-4 border-l-transparent'}`}>
+                        <div className="flex justify-between mb-1">
+                          <span className="font-bold text-gray-800">Pedido #{order.id}</span>
+                          <span className="text-xs text-gray-500">{order.users?.name}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <p className={`text-xs truncate max-w-[80%] ${last?.is_system_message ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
+                            {last ? last.message : 'Sem mensagens'}
+                          </p>
+                          {msgs.length > 0 && <span className="bg-gray-200 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full">{msgs.length}</span>}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="md:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
+                  {!activeChatOrderId ? (
+                    <div className="h-full flex flex-col items-center justify-center text-gray-400 p-8">
+                      <MessageSquare size={48} className="mb-4 opacity-30" />
+                      <p className="text-sm">Selecione um pedido para ver o chat.</p>
+                    </div>
+                  ) : (() => {
+                    const order = orders.find(o => o.id === activeChatOrderId);
+                    if (!order) return null;
+                    const msgs = (order.order_chats || []).sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+                    return (
+                      <>
+                        <div className="p-4 border-b bg-gray-50 shrink-0 flex justify-between items-center">
+                          <div>
+                            <h3 className="font-bold text-gray-800">Pedido #{order.id}</h3>
+                            <p className="text-xs text-gray-500">Cliente: {order.users?.name}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="bg-white px-3 py-1 rounded-full text-xs font-bold border border-gray-200 text-gray-600 hidden sm:inline-block">
+                              {order.status === 'pending' ? 'Novo' : order.status === 'preparing' ? 'Em Preparo' : 'Pronto/Rota'}
+                            </span>
+                            {['pending', 'preparing', 'ready', 'delivering'].includes(order.status) && (
+                              <button 
+                                onClick={() => {
+                                  setConfirmModal({
+                                    isOpen: true,
+                                    title: 'Cancelar Pedido',
+                                    message: 'Tem certeza que deseja cancelar este pedido? O cliente será notificado.',
+                                    onConfirm: () => {
+                                      updateOrderStatus(order.id, 'cancelled');
+                                      setActiveChatOrderId(null);
+                                      setConfirmModal(null);
+                                    }
+                                  });
+                                }}
+                                className="bg-red-500 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-red-600 transition-colors flex items-center shadow-sm"
+                              >
+                                <XCircle size={14} className="mr-1.5" /> Cancelar Pedido
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+                          {msgs.length === 0 && <div className="h-full flex flex-col items-center justify-center text-gray-400"><MessageSquare size={48} className="mb-4 opacity-50" /><p className="text-sm">Sem mensagens.</p></div>}
+                          {msgs.map((msg: any) => {
+                            if (msg.is_system_message) return (
+                              <div key={msg.id} className="flex justify-center">
+                                <span className="bg-red-100 text-red-800 text-xs font-bold px-4 py-2 rounded-xl border border-red-200 text-center max-w-[85%]">{msg.message}</span>
+                              </div>
+                            );
+                            const isStore = msg.sender_id === user?.id;
+                            return (
+                              <div key={msg.id} className={`flex flex-col ${isStore ? 'items-end' : 'items-start'}`}>
+                                <div className={`max-w-[80%] p-3 text-sm ${isStore ? 'bg-brand-primary text-white rounded-2xl rounded-tr-sm' : 'bg-green-100 text-green-900 border border-green-200 rounded-2xl rounded-tl-sm'}`}>{msg.message}</div>
+                                <span className="text-[10px] text-gray-400 mt-1">{new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                              </div>
+                            );
+                          })}
+                          <div ref={chatEndRef} />
+                        </div>
+                        <div className="p-4 bg-white border-t shrink-0">
+                          <form onSubmit={handleSendStoreMessage} className="flex items-center gap-2">
+                            <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Digite sua mensagem..."
+                              className="flex-1 bg-gray-100 rounded-full px-4 py-3 text-sm outline-none" />
+                            <button type="submit" disabled={!chatInput.trim()}
+                              className="w-12 h-12 bg-brand-primary text-white rounded-full flex items-center justify-center disabled:opacity-50">
+                              <Send size={18} className="ml-1" />
+                            </button>
+                          </form>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
               </div>
             </div>
           )}
@@ -1107,9 +1505,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                         <td className="p-4 font-bold text-brand-dark">R$ {order.total.toFixed(2)}</td>
                         <td className="p-4">
                           {order.payment_method === 'cash' ? (
-                            <span className="text-[10px] font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded">💵 Dinheiro</span>
-                          ) : (
+                            <span className="text-[10px] font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded">💵 DINHEIRO</span>
+                          ) : order.payment_method === 'pix' ? (
                             <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded">📱 PIX</span>
+                          ) : (
+                            <span className="text-[10px] font-bold bg-orange-100 text-orange-800 px-2 py-1 rounded">💳 CARTÃO</span>
                           )}
                         </td>
                         <td className="p-4">
@@ -1333,7 +1733,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                         <td colSpan={6} className="p-12 text-center text-gray-500">
                           <div className="flex flex-col items-center justify-center">
                             <Ticket size={48} className="text-gray-300 mb-4" />
-                            <p className="font-medium">Nenhum cupom criado ainda.</p>
+                            <p className="font-medium">Nenhuma cupom criado ainda.</p>
                             <p className="text-sm mt-1">Crie promoções para atrair mais clientes!</p>
                           </div>
                         </td>
@@ -1390,6 +1790,154 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                   <p className="text-gray-400 text-sm mt-1">Continue prestando um ótimo serviço para receber 5 estrelas!</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* SETTINGS */}
+          {activeTab === 'settings' && (
+            <div className="max-w-4xl mx-auto space-y-8">
+              <h2 className="text-3xl font-black text-brand-dark">Configurações da Loja</h2>
+
+              {/* Store Profile Settings */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><StoreIcon size={20} className="mr-2 text-brand-primary"/> Perfil da Loja</h3>
+                <form onSubmit={handleUpdateStoreSettings} className="space-y-5">
+                  <div className="flex flex-col items-center justify-center mb-4">
+                    <label htmlFor="logo-upload" className="w-32 h-32 rounded-full bg-gray-100 border-4 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative shadow-inner cursor-pointer hover:bg-gray-200 transition-colors group">
+                      {logoPreview ? (
+                        <>
+                          <img src={logoPreview} alt="Logo Preview" className="w-full h-full object-cover" />
+                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-full">
+                            <span className="text-white font-bold text-sm flex items-center"><UploadCloud size={18} className="mr-2"/> Trocar</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-col items-center text-gray-400">
+                          <ImageIcon size={32} className="mb-1" />
+                          <span className="text-[10px] font-bold uppercase text-center leading-tight px-2">Adicionar<br/>Logo</span>
+                        </div>
+                      )}
+                    </label>
+                    <input
+                      id="logo-upload"
+                      type="file"
+                      accept="image/*"
+                      onChange={handleLogoFileChange}
+                      className="hidden"
+                    />
+                    <p className="text-xs text-gray-500 mt-3 text-center">
+                      Envie o logo da sua loja (JPG, PNG, max 2MB).
+                    </p>
+                  </div>
+
+                  {/* Banner Upload */}
+                  <div className="mb-4">
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Banner da Loja</label>
+                    <div className="flex flex-col items-center justify-center">
+                      <label htmlFor="banner-upload" className="w-full h-32 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative cursor-pointer hover:bg-gray-100 transition-colors group">
+                        {bannerPreview ? (
+                          <>
+                            <img src={bannerPreview} alt="Banner Preview" className="w-full h-full object-cover" />
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <span className="text-white font-bold text-sm flex items-center"><UploadCloud size={18} className="mr-2"/> Trocar Banner</span>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="flex flex-col items-center text-gray-400">
+                            <ImageIcon size={32} className="mb-2" />
+                            <span className="text-sm font-bold">Clique para enviar banner</span>
+                            <span className="text-xs mt-1">Max: 5MB</span>
+                          </div>
+                        )}
+                      </label>
+                      <input
+                        id="banner-upload"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleBannerFileChange}
+                        className="hidden"
+                      />
+                      <p className="text-xs text-gray-500 mt-3 text-center">
+                        Envie uma imagem de banner para sua loja (JPG, PNG, max 5MB).
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label htmlFor="name" className="block text-sm font-bold text-gray-700 mb-1">Nome da Loja</label>
+                    <input type="text" id="name" name="name" value={settingsForm.name} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
+                  </div>
+                  <div>
+                    <label htmlFor="phone" className="block text-sm font-bold text-gray-700 mb-1">Telefone / WhatsApp</label>
+                    <input type="tel" id="phone" name="phone" value={settingsForm.phone} onChange={handleSettingsChange} className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
+                  </div>
+                  <button type="submit" disabled={settingsLoading} className="w-full bg-brand-primary text-white py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
+                    {settingsLoading ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Perfil da Loja'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Delivery Settings */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><Bike size={20} className="mr-2 text-brand-primary"/> Configurações de Entrega</h3>
+                <form onSubmit={handleUpdateStoreSettings} className="space-y-5">
+                  <div>
+                    <label htmlFor="delivery_fee" className="block text-sm font-bold text-gray-700 mb-1">Taxa de Entrega Padrão (R$)</label>
+                    <input type="number" step="0.01" id="delivery_fee" name="delivery_fee" value={settingsForm.delivery_fee} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
+                  </div>
+                  <div>
+                    <label htmlFor="min_order_value" className="block text-sm font-bold text-gray-700 mb-1">Valor Mínimo do Pedido (R$)</label>
+                    <input type="number" step="0.01" id="min_order_value" name="min_order_value" value={settingsForm.min_order_value} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
+                  </div>
+                  <div>
+                    <label htmlFor="avg_prep_time_min" className="block text-sm font-bold text-gray-700 mb-1">Tempo Médio de Preparo (minutos)</label>
+                    <input type="number" id="avg_prep_time_min" name="avg_prep_time_min" value={settingsForm.avg_prep_time_min} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
+                  </div>
+                  <button type="submit" disabled={settingsLoading} className="w-full bg-brand-primary text-white py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
+                    {settingsLoading ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Configurações de Entrega'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Payment Methods */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><CreditCard size={20} className="mr-2 text-brand-primary"/> Formas de Pagamento</h3>
+                <form onSubmit={handleUpdateStoreSettings} className="space-y-4">
+                  <label className="flex items-center text-gray-700 font-medium">
+                    <input type="checkbox" name="accepts_pix" checked={settingsForm.accepts_pix} onChange={handleSettingsChange} className="mr-3 w-5 h-5 accent-brand-primary" />
+                    Aceita PIX
+                  </label>
+                  <label className="flex items-center text-gray-700 font-medium">
+                    <input type="checkbox" name="accepts_card" checked={settingsForm.accepts_card} onChange={handleSettingsChange} className="mr-3 w-5 h-5 accent-brand-primary" />
+                    Aceita Cartão (Débito/Crédito)
+                  </label>
+                  <label className="flex items-center text-gray-700 font-medium">
+                    <input type="checkbox" name="accepts_cash" checked={settingsForm.accepts_cash} onChange={handleSettingsChange} className="mr-3 w-5 h-5 accent-brand-primary" />
+                    Aceita Dinheiro
+                  </label>
+                  <button type="submit" disabled={settingsLoading} className="w-full bg-brand-primary text-white py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors mt-5">
+                    {settingsLoading ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Formas de Pagamento'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Password Change */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><Lock size={20} className="mr-2 text-brand-primary"/> Alterar Senha</h3>
+                <form onSubmit={handleChangePassword} className="space-y-5">
+                  <div>
+                    <label htmlFor="newPassword" className="block text-sm font-bold text-gray-700 mb-1">Nova Senha</label>
+                    <input type="password" id="newPassword" name="newPassword" value={settingsForm.newPassword} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
+                  </div>
+                  <div>
+                    <label htmlFor="confirmPassword" className="block text-sm font-bold text-gray-700 mb-1">Confirmar Nova Senha</label>
+                    <input type="password" id="confirmPassword" name="confirmPassword" value={settingsForm.confirmPassword} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
+                  </div>
+                  <button type="submit" disabled={settingsLoading || !settingsForm.newPassword || !settingsForm.confirmPassword} className="w-full bg-brand-primary text-white py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
+                    {settingsLoading ? <Loader2 size={20} className="animate-spin"/> : 'Alterar Senha'}
+                  </button>
+                </form>
+              </div>
             </div>
           )}
         </main>

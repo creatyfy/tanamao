@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+import { User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { UserProfile } from '../types';
 
@@ -22,35 +22,70 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Função auxiliar para limpar a sessão local em caso de erro
+  const clearSession = () => {
+    Object.keys(localStorage).forEach(key => {
+      if (key.startsWith('sb-') && key.endsWith('-auth-token')) {
+        localStorage.removeItem(key);
+      }
+    });
+    setUser(null);
+    setProfile(null);
+    setLoading(false);
+  };
+
   const fetchProfile = async (userId: string) => {
     try {
       const { data, error } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
-        .maybeSingle(); // CORREÇÃO: Usar maybeSingle para evitar erro se o perfil ainda estiver sendo criado
-      
+        .maybeSingle();
       if (error) throw error;
       setProfile(data);
-    } catch (error) {
-      console.error('Erro ao buscar perfil:', error);
-      setProfile(null);
+    } catch (error: any) {
+      const isNetworkError = error?.message?.includes('Failed to fetch') ||
+                             error instanceof TypeError;
+      if (isNetworkError) {
+        console.warn('Aviso: Falha de conexão com o Supabase.');
+        clearSession();
+      } else {
+        console.error('Erro ao buscar perfil:', error);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Tenta recuperar a sessão atual
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      // Se houver erro (ex: Refresh Token Inválido), limpa a sessão
+      if (error) {
+        console.error("Erro na sessão:", error.message);
+        clearSession();
+        return;
+      }
+      
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
       } else {
         setLoading(false);
       }
+    }).catch((err) => {
+      console.error("Erro crítico ao obter sessão:", err);
+      clearSession();
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    // Escuta mudanças de estado da autenticação
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // Se o token falhar ao atualizar ou o usuário sair, limpa tudo
+      if (event === 'TOKEN_REFRESH_FAILED' || event === 'SIGNED_OUT') {
+        clearSession();
+        return;
+      }
+
       setTimeout(async () => {
         setUser(session?.user ?? null);
         if (session?.user) {
@@ -66,8 +101,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const signOut = async () => {
-    setLoading(true);
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.warn('Erro de rede ao sair:', error);
+    } finally {
+      clearSession();
+    }
   };
 
   return (

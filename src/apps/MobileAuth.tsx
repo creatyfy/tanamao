@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { 
   Mail, Lock, User, ArrowRight, Store, Bike, 
   FileText, CheckCircle, Loader2, Phone, MapPin, DollarSign,
-  Clock, Map, CreditCard, Calendar, Camera
+  Clock, Map, CreditCard, Calendar, Camera, Image as ImageIcon, UploadCloud
 } from 'lucide-react';
 
 const InputField = ({ icon: Icon, placeholder, type = "text", required = false, name, value, onChange, maxLength }: any) => (
@@ -39,6 +39,9 @@ export default function MobileAuth() {
   
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [bannerPreview, setBannerPreview] = useState<string | null>(null);
   
   const [formData, setFormData] = useState({
     email: '', password: '', phone: '',
@@ -89,6 +92,18 @@ export default function MobileAuth() {
     }
   };
 
+  const handleBannerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      if (file.size > 5 * 1024 * 1024) { // Max 5MB
+        setErrorMsg('A imagem do banner deve ter no máximo 5MB.');
+        return;
+      }
+      setBannerFile(file);
+      setBannerPreview(URL.createObjectURL(file));
+    }
+  };
+
   const handleAuthError = (err: any) => {
     console.log("Auth Error Debug:", err);
     let msg = err.message || 'Ocorreu um erro inesperado.';
@@ -128,6 +143,9 @@ export default function MobileAuth() {
           await supabase.auth.signOut();
           throw new Error('Seu cadastro ficou incompleto. Por favor, vá em "Cadastre-se agora", preencha os dados e use a MESMA SENHA para finalizar.');
         }
+
+        // FIX: Força o reload da página após o login para evitar a tela branca (limpa o cache de estado do React)
+        window.location.reload();
 
       } else {
         const roleMap: Record<string, string> = { client: 'client', store: 'store_owner', courier: 'courier' };
@@ -179,6 +197,27 @@ export default function MobileAuth() {
           }
         }
 
+        let finalBannerUrl = null;
+        if (bannerFile && userId && registerRole === 'store') {
+          try {
+            const fileExt = bannerFile.name ? bannerFile.name.split('.').pop() : 'jpg';
+            const fileName = `store_banner_${userId}_${Date.now()}.${fileExt}`;
+            
+            const { error: uploadError } = await supabase.storage
+              .from('stores')
+              .upload(fileName, bannerFile, { cacheControl: '3600', upsert: false });
+
+            if (!uploadError) {
+              const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
+              finalBannerUrl = publicUrlData.publicUrl;
+            } else {
+              console.warn('Aviso: Falha ao fazer upload do banner. O bucket "stores" pode não existir.', uploadError);
+            }
+          } catch (err) {
+            console.warn('Erro ao processar banner:', err);
+          }
+        }
+
         const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : null;
         const cleanCep = formData.cep ? formData.cep.replace(/\D/g, '') : '00000000';
         const cleanCnpj = formData.cnpj ? formData.cnpj.replace(/\D/g, '') : null;
@@ -226,7 +265,7 @@ export default function MobileAuth() {
         }
 
         if (registerRole === 'store') {
-          const storeData = {
+          const storeData: any = {
             owner_id: userId,
             name: formData.storeName || 'Nova Loja',
             slug: `loja-${userId.substring(0,8)}`,
@@ -244,6 +283,8 @@ export default function MobileAuth() {
             is_approved: false,
             commission_rate: 4 // Taxa do app definida para 4%
           };
+
+          if (finalBannerUrl) storeData.banner_url = finalBannerUrl;
 
           const { data: existingStore } = await supabase.from('stores').select('id').eq('owner_id', userId).maybeSingle();
           if (existingStore) {
@@ -340,6 +381,39 @@ export default function MobileAuth() {
                     <FormSection title="Informações da Loja">
                       <InputField icon={Store} name="category" placeholder="Categoria (ex: Pizza, Lanches)" value={formData.category} onChange={handleChange} />
                       <InputField icon={FileText} name="description" placeholder="Descrição curta da loja" value={formData.description} onChange={handleChange} />
+                      
+                      {/* Banner Upload */}
+                      <div className="mt-4">
+                        <label className="block text-sm font-bold text-gray-700 mb-2">Banner da Loja</label>
+                        <div className="flex flex-col items-center justify-center">
+                          <label htmlFor="banner-upload" className="w-full h-32 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative cursor-pointer hover:bg-gray-100 transition-colors group">
+                            {bannerPreview ? (
+                              <>
+                                <img src={bannerPreview} alt="Banner Preview" className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <span className="text-white font-bold text-sm flex items-center"><UploadCloud size={18} className="mr-2"/> Trocar Banner</span>
+                                </div>
+                              </>
+                            ) : (
+                              <div className="flex flex-col items-center text-gray-400">
+                                <ImageIcon size={32} className="mb-2" />
+                                <span className="text-sm font-bold">Clique para enviar banner</span>
+                                <span className="text-xs mt-1">Max: 5MB</span>
+                              </div>
+                            )}
+                          </label>
+                          <input
+                            id="banner-upload"
+                            type="file"
+                            accept="image/*"
+                            onChange={handleBannerChange}
+                            className="hidden"
+                          />
+                          <p className="text-xs text-gray-500 mt-3 text-center">
+                            Envie uma imagem de banner para sua loja (JPG, PNG, max 5MB).
+                          </p>
+                        </div>
+                      </div>
                     </FormSection>
                     <FormSection title="Endereço da Loja">
                       <InputField icon={MapPin} name="cep" placeholder="CEP" required value={formData.cep} onChange={handleChange} />
