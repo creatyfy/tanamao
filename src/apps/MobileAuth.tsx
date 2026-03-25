@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { 
   Mail, Lock, User, ArrowRight, Store, Bike, 
@@ -43,6 +43,8 @@ export default function MobileAuth() {
   const [bannerFile, setBannerFile] = useState<File | null>(null);
   const [bannerPreview, setBannerPreview] = useState<string | null>(null);
   
+  const [globalCategories, setGlobalCategories] = useState<any[]>([]);
+
   const [formData, setFormData] = useState({
     email: '', password: '', phone: '',
     cep: '', street: '', number: '', complement: '', neighborhood: '', city: '', state: '',
@@ -51,6 +53,23 @@ export default function MobileAuth() {
     acceptsPix: true, acceptsCard: true, acceptsCash: false,
     fullName: '', cpf: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', pixKey: '', operationCity: ''
   });
+
+  // Busca as categorias globais para o cadastro de lojas
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const { data } = await supabase
+          .from('store_categories')
+          .select('*')
+          .eq('is_active', true)
+          .order('sort_order');
+        if (data) setGlobalCategories(data);
+      } catch (error) {
+        console.error("Erro ao buscar categorias:", error);
+      }
+    };
+    fetchCategories();
+  }, []);
 
   const handleChange = async (e: any) => {
     const { name, value, type, checked } = e.target;
@@ -272,6 +291,7 @@ export default function MobileAuth() {
             cnpj: cleanCnpj,
             phone: cleanPhone,
             description: formData.description || null,
+            global_category_id: formData.category ? parseInt(formData.category) : null, // Vínculo com a categoria global
             avg_prep_time_min: formData.prepTime ? parseInt(formData.prepTime) : 30,
             min_order_value: formData.minOrder ? parseFloat(formData.minOrder) : 0,
             delivery_fee: formData.deliveryFee ? parseFloat(formData.deliveryFee) : 0,
@@ -379,7 +399,24 @@ export default function MobileAuth() {
                       <InputField icon={Lock} name="password" placeholder="Senha de acesso" type="password" required value={formData.password} onChange={handleChange} />
                     </FormSection>
                     <FormSection title="Informações da Loja">
-                      <InputField icon={Store} name="category" placeholder="Categoria (ex: Pizza, Lanches)" value={formData.category} onChange={handleChange} />
+                      
+                      {/* Categoria Dropdown */}
+                      <div className="relative mb-3">
+                        <Store className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                        <select 
+                          name="category" 
+                          required 
+                          value={formData.category} 
+                          onChange={handleChange} 
+                          className="w-full bg-white border border-gray-200 rounded-xl py-3 pl-11 pr-4 focus:outline-none focus:ring-2 focus:ring-brand-primary text-sm font-medium text-brand-dark appearance-none"
+                        >
+                          <option value="" disabled>Selecione a Categoria Principal</option>
+                          {globalCategories.map(cat => (
+                            <option key={cat.id} value={cat.id}>{cat.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
                       <InputField icon={FileText} name="description" placeholder="Descrição curta da loja" value={formData.description} onChange={handleChange} />
                       
                       {/* Banner Upload */}

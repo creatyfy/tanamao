@@ -227,8 +227,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       
       if (catRes.data) {
         const updatedCategories = catRes.data.map(cat => {
-          // Busca de forma flexível ignorando maiúsculas/minúsculas e espaços
-          const name = cat.name.trim().toLowerCase();
+          // Busca de forma flexível ignorando maiúsculas/minúsculas e acentos
+          const name = normalizeString(cat.name);
           
           if (name.includes('lanche') || name.includes('hamburguer') || name.includes('burger')) {
             return {
@@ -245,7 +245,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
               ...cat,
               icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_172638-e4b3b10c-e1dd-4279-b4c3-011a69c31c42.webp'
             };
-          } else if (name.includes('brasileira') || name.includes('feijoada') || name.includes('refeição') || name.includes('refeicao')) {
+          } else if (name.includes('brasileira') || name.includes('feijoada') || name.includes('refeicao')) {
             return {
               ...cat,
               icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_174643-4d9c3a1a-98c1-4e90-bb5f-e34365992a46.webp'
@@ -260,22 +260,22 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
               ...cat,
               icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082727-8dab3a55-37ad-47b1-94f8-6575bc4cab4e.webp'
             };
-          } else if (name.includes('saudavel') || name.includes('saudável') || name.includes('salada')) {
+          } else if (name.includes('saudavel') || name.includes('salada')) {
             return {
               ...cat,
               icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082738-4e538ac2-8141-4e78-a36a-b143ae3782b3.webp'
             };
-          } else if (name.includes('açai') || name.includes('acai')) {
+          } else if (name.includes('acai')) {
             return {
               ...cat,
               icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082747-02c1a18b-7dd5-494e-bccb-182e716e9def.webp'
             };
-          } else if (name.includes('mercado') || name.includes('conveniencia') || name.includes('conveniência')) {
+          } else if (name.includes('mercado') || name.includes('conveniencia')) {
             return {
               ...cat,
               icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082758-4fcbaf4a-23da-4818-8cb9-3085448e3384.webp'
             };
-          } else if (name.includes('farmacia') || name.includes('farmácia')) {
+          } else if (name.includes('farmacia')) {
             return {
               ...cat,
               icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082807-3be4bad4-c450-4dcf-ba72-28286d27ef53.webp'
@@ -283,12 +283,12 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           } else if (name.includes('salgado')) {
             return {
               ...cat,
-              icon: 'https://images.unsplash.com/photo-1628840042765-356cda07504e?w=200&h=200&fit=crop' // Imagem provisória de salgados
+              icon: 'https://images.unsplash.com/photo-1628840042765-356cda07504e?w=200&h=200&fit=crop'
             };
-          } else if (name.includes('padaria') || name.includes('pão') || name.includes('pao')) {
+          } else if (name.includes('padaria') || name.includes('pao')) {
             return {
               ...cat,
-              icon: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200&h=200&fit=crop' // Imagem provisória de padaria
+              icon: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200&h=200&fit=crop'
             };
           }
           return cat;
