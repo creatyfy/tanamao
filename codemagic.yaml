@@ -10,7 +10,7 @@ workflows:
     environment:
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: com.tanamao.delivery
+        bundle_identifier: com.tanamaoc.delivery
 
       node: 22.13.0
 
