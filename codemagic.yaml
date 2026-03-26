@@ -3,56 +3,48 @@ workflows:
     name: iOS Release Build
     max_build_duration: 120
     instance_type: mac_mini_m2
-
-    integrations:
-      app_store_connect: Apple Codemagic
-
     environment:
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.tanamaoc.delivery
-
+      vars:
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
       node: 22.13.0
-
     scripts:
       - name: Install dependencies
         script: |
           yarn install
-
       - name: Build web assets
         script: |
           yarn build
-
       - name: Add iOS platform if missing
         script: |
           if [ ! -d "ios" ]; then
             yarn add @capacitor/ios
             npx cap add ios
           fi
-
       - name: Sync Capacitor
         script: |
           npx cap sync ios
-
-      - name: Install CocoaPods
+      - name: Install CocoaPods dependencies
         script: |
           cd ios/App
           pod install
-
-      - name: Set code signing
+      - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles
-
-      - name: Build IPA
+      - name: Build ipa for distribution
         script: |
           xcode-project build-ipa \
-            --workspace ios/App/App.xcworkspace \
-            --scheme App
-
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
     artifacts:
       - build/ios/ipa/*.ipa
-
+      - /tmp/xcodebuild_logs/*.log
     publishing:
       app_store_connect:
         auth: integration
         submit_to_testflight: true
+        beta_groups:
+          - Internal Testers
