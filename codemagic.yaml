@@ -1,0 +1,216 @@
+
+
+Colaborar
+
+Compartilhar
+Arquivos APK, AAB e keystore foram copiados, compactados em ZIP para entrega. Próximo passo: verificar ajustes de layout para suporte a safe area insets do Android.
+
+Arquivos corrigidos e prontos! Aqui está um resumo de todas as correções aplicadas:
+Problema identificado: A barra de navegação do Android (botões voltar/home/recentes) estava sobrepondo o conteúdo porque o app não usava env(safe-area-inset-bottom).
+Correções aplicadas:
+Arquivo
+O que foi corrigido
+index.html
+Adicionado viewport-fit=cover para ativar suporte a safe area
+src/index.css
+Adicionados utilitários CSS para env(safe-area-inset-*)
+MobileAuth.tsx
+Container e rodapé (link "Cadastre-se agora") com padding safe area
+ClientApp.tsx
+Tab bar, todas as telas de scroll, botão flutuante do carrinho e botão de finalizar pedido
+CourierApp.tsx
+Container principal e tab bar com safe area
+StoreApp.tsx
+Container principal com safe area
+AdminApp.tsx
+Container principal com safe area
+android/res/values/styles.xml
+Habilitado edge-to-edge com barras de status/navegação transparentes
+MainActivity.java
+Chamada a WindowCompat.setDecorFitsSystemWindows(false) para edge-to-edge nativo
+capacitor.config.ts
+Configurações de splash screen e cor de fundo
+O app agora respeita automaticamente a altura da barra de navegação em qualquer dispositivo Android, independente do tamanho da tela.
+tanamao_release_v2_responsive.zip
+Arquivar · 9.81 MB
+tanamao-v1.0-release.aab
+Arquivo · 5.02 MB
+tanamao-v1.0-release.apk
+Arquivo · 5.18 MB
+tanamao-release.keystore
+Arquivo · 2.67 KB
+Ver todos os arquivos nesta tarefa
+Como foi este resultado?
+preciso criar o arquivo
+codemagic.yaml
+para publicação no ios 
+Vou criar o arquivo codemagic.yaml completo para publicação do app Tá Na Mão na App Store (iOS) via Codemagic CI/CD. Deixa eu analisar o projeto primeiro para configurar corretamente.
+Verifiquei que o projeto usa Capacitor com `webDir` em `dist` e sem pasta `ios`. Para o CI/CD do iOS, criarei o `codemagic.yaml` considerando essa estrutura e o ambiente do projeto.
+
+Verifiquei a versão do Capacitor (8.2.0). Criei o arquivo YAML para build iOS considerando a estrutura do projeto com `webDir` em `dist` e sem pasta `ios`, e também o arquivo de instruções para o usuário.
+
+Arquivo codemagic.yaml criado! Coloque-o na raiz do seu repositório GitHub. Veja o resumo do que ele faz:
+Pipeline configurado (codemagic.yaml):
+Etapa
+O que faz
+Install dependencies
+Instala pacotes com yarn install
+Build web assets
+Compila o projeto React/Vite com yarn build
+Add iOS platform
+Adiciona @capacitor/ios e roda cap add ios se a pasta não existir
+Sync Capacitor
+Copia os arquivos web para o projeto iOS com cap sync
+CocoaPods
+Instala as dependências nativas iOS com pod install
+Code signing
+Assina automaticamente com seus certificados da Apple
+Build IPA
+Gera o arquivo .ipa pronto para a App Store
+Publish
+Envia automaticamente para o TestFlight
+Para usar, siga estes passos:
+Faça commit do codemagic.yaml no GitHub:
+Bash
+git add codemagic.yaml && git commit -m "Adiciona Codemagic iOS" && git push
+Acesse codemagic.io, conecte seu GitHub e adicione o repositório creatyfy/tanamao
+Em Teams > Integrations, conecte sua conta do App Store Connect (crie uma chave de API em App Store Connect > Users and Access > Keys)
+Inicie o build selecionando o workflow "iOS Release Build"
+O arquivo de instruções detalhadas está anexado como INSTRUCOES_CODEMAGIC.md.
+codemagic.yaml
+Código · 1.34 KB
+Publicação iOS com Codemagic
+Markdown · 1.69 KB
+Ver todos os arquivos nesta tarefa
+Como foi este resultado?
+nao entendi oque eu preciso fazer no codemagic
+Vou criar um guia visual passo a passo bem detalhado e fácil de entender sobre o que você precisa fazer no Codemagic para publicar o app na App Store!
+Elaborei um guia detalhado para configurar o Codemagic, incluindo o arquivo YAML, etapas de integração e assinatura, facilitando a publicação do app na App Store.
+
+Ainda não há novidades após criar o guia detalhado. O próximo passo é revisar e preparar para entrega ao usuário, garantindo clareza e completude.
+
+Aqui está o guia completo! Em resumo, o processo tem 5 passos:
+O que você precisa fazer:
+Passo
+Onde
+O que fazer
+1
+App Store Connect
+Criar uma chave de API (arquivo .p8) e anotar o Issuer ID e Key ID
+2
+GitHub
+Colocar o arquivo codemagic.yaml na raiz do projeto e fazer git push
+3
+Codemagic
+Fazer login com GitHub e conectar sua conta da Apple em Integrations
+4
+Codemagic
+Adicionar o repositório creatyfy/tanamao
+5
+Codemagic
+Clicar em "Start new build" e aguardar 10-20 minutos
+O guia completo com cada clique explicado está no arquivo anexo. Se tiver dúvida em qualquer um dos passos, é só me perguntar!
+Guia Passo a Passo: Publicando seu App iOS com Codemagic
+O Codemagic é uma plataforma que vai pegar o código do seu GitHub, transformar em um aplicativo iOS (arquivo .ipa) e enviar direto para a Apple (TestFlight/App Store). Como você não tem um Mac para fazer isso manualmente, o Codemagic aluga um "Mac virtual" por alguns minutos para fazer esse trabalho para você.
+Aqui está exatamente o que você precisa fazer, clique a clique:
+Passo 1: Preparar a Apple (App Store Connect)
+Antes do Codemagic fazer a mágica, ele precisa de "permissão" da Apple para enviar o app em seu nome.
+Acesse o App Store Connect e faça login com sua conta de desenvolvedor Apple.
+Vá em Usuários e Acesso (Users and Access).
+Clique na aba Chaves (Keys) e depois em App Store Connect API.
+Clique no botão + para criar uma nova chave.
+Dê um nome (ex: "Codemagic") e dê o acesso de Administrador (Admin) ou Gerenciador de Apps (App Manager).
+Clique em Gerar (Generate).
+MUITO IMPORTANTE: Baixe o arquivo .p8 que foi gerado. Você só pode baixar isso UMA VEZ. Guarde-o com segurança.
+Anote também o Issuer ID (ID do Emissor) e o Key ID (ID da Chave) que aparecem nessa mesma tela.
+Passo 2: Preparar o GitHub
+O Codemagic precisa saber o que fazer. O arquivo codemagic.yaml que eu gerei é a "receita de bolo" para ele.
+Pegue o arquivo codemagic.yaml que eu te enviei na mensagem anterior.
+Coloque ele na pasta principal (raiz) do seu projeto tanamao.
+Envie para o GitHub:
+Bash
+git add codemagic.yaml
+git commit -m "Adiciona configuração do Codemagic"
+git push
+Passo 3: Configurar o Codemagic
+Agora vamos conectar tudo!
+Acesse codemagic.io e faça login usando sua conta do GitHub.
+No menu lateral esquerdo, vá em Teams > Personal Account > Integrations.
+Procure por App Store Connect e clique em Connect.
+Preencha os dados que você pegou no Passo 1:
+Issuer ID
+Key ID
+API Key (Faça upload do arquivo .p8 que você baixou)
+Clique em Save.
+Passo 4: Adicionar seu App no Codemagic
+Volte para a tela inicial do Codemagic (clique na logo no canto superior esquerdo).
+Clique no botão azul Add application.
+Selecione GitHub como provedor.
+Encontre e selecione o seu repositório creatyfy/tanamao.
+Selecione o tipo de projeto. Escolha Other ou Capacitor (não importa muito, pois o Codemagic vai ler o arquivo .yaml automaticamente).
+Clique em Finish: Add application.
+Passo 5: Rodar a Mágica!
+Na tela do seu app no Codemagic, você verá um botão azul escrito Start new build. Clique nele.
+Vai abrir uma janelinha. Em "Workflow", certifique-se de que está selecionado iOS Release Build (esse é o nome que eu coloquei no arquivo .yaml).
+Clique em Start new build.
+E pronto! Agora é só esperar. O Codema
+Tarefa concluída
+Como foi este resultado?
+Sugestões de acompanhamento
+
+
+GitHub
+
+
+codemagic.yaml
+workflows:
+  ios-release:
+    name: iOS Release Build
+    max_build_duration: 120
+    instance_type: mac_mini_m2
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.tanamao.delivery
+      vars:
+        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_SCHEME: "App"
+      node: 22.13.0
+    scripts:
+      - name: Install dependencies
+        script: |
+          yarn install
+      - name: Build web assets
+        script: |
+          yarn build
+      - name: Add iOS platform if missing
+        script: |
+          if [ ! -d "ios" ]; then
+            yarn add @capacitor/ios
+            npx cap add ios
+          fi
+      - name: Sync Capacitor
+        script: |
+          npx cap sync ios
+      - name: Install CocoaPods dependencies
+        script: |
+          cd ios/App
+          pod install
+      - name: Set up code signing settings on Xcode project
+        script: |
+          xcode-project use-profiles
+      - name: Build ipa for distribution
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_groups:
+          - Internal Testers
+Gerar APK e AAB com nova logo para publicação - Manus
