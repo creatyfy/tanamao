@@ -216,18 +216,18 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@capacitor/android@npm:^8.2.0":
-  version: 8.2.0
-  resolution: "@capacitor/android@npm:8.2.0"
+"@capacitor/android@npm:^8.3.0":
+  version: 8.3.0
+  resolution: "@capacitor/android@npm:8.3.0"
   peerDependencies:
-    "@capacitor/core": ^8.2.0
-  checksum: 10c0/ebf23b65fa7217af79ec99236777a464df08cff4887f8ce06a928750ef127a8cd6efdf978bbe34eef091e34b03833f745ac8dbb7ff516cd9185074c9599d297e
+    "@capacitor/core": ^8.3.0
+  checksum: 10c0/1386e13ff3780b94db22547a144130cd3e90741c59dbfcb9294afb402e5cd0a54b257f5456e0536f8c944a92d24f4b409e97697904a35496a14d17d0ffe0434b
   languageName: node
   linkType: hard
 
-"@capacitor/cli@npm:^8.2.0":
-  version: 8.2.0
-  resolution: "@capacitor/cli@npm:8.2.0"
+"@capacitor/cli@npm:^8.3.0":
+  version: 8.3.0
+  resolution: "@capacitor/cli@npm:8.3.0"
   dependencies:
     "@ionic/cli-framework-output": "npm:^2.2.8"
     "@ionic/utils-subprocess": "npm:^3.0.1"
@@ -249,16 +249,25 @@ __metadata:
   bin:
     cap: bin/capacitor
     capacitor: bin/capacitor
-  checksum: 10c0/94d6a4f7c105b84ad78302e3bddb28fe47bcbf95436c435319bb83d19565b4a5082313066ef1eb583d664fe66c81ea07e45bebd4b64dd797bcddd801cd4f22ad
+  checksum: 10c0/423c366340f8afba9c41b2c6c5c4e5e3527aa5a0cf9ee880741c2056817ce83b8ff6facb47528a2f6f2b2d69c0a26c18086d5dab7a1b1504da2082b0121fd446
   languageName: node
   linkType: hard
 
-"@capacitor/core@npm:^8.2.0":
-  version: 8.2.0
-  resolution: "@capacitor/core@npm:8.2.0"
+"@capacitor/core@npm:^8.3.0":
+  version: 8.3.0
+  resolution: "@capacitor/core@npm:8.3.0"
   dependencies:
     tslib: "npm:^2.1.0"
-  checksum: 10c0/9cb050f76adfd300f82a5cf4e8c48d266db2dc70889e5b342b6439aa8f7edcf87e98ff946d98be42aed01ea6cfe8660a6e5a153097c3df898de47554d04ab00b
+  checksum: 10c0/f1aff7c47de3849aa21f20f4caaad11c43a3bb64ddd3872b8c3b3a34d653af7c2e4e338aab62ce44cee4e3f68649c16c22af71b1194f0a251d4dd70c8a8a1530
+  languageName: node
+  linkType: hard
+
+"@capacitor/ios@npm:^8.3.0":
+  version: 8.3.0
+  resolution: "@capacitor/ios@npm:8.3.0"
+  peerDependencies:
+    "@capacitor/core": ^8.3.0
+  checksum: 10c0/cb42fa85086ecc5fea35634f68d92e6f9f241aff36db2b9eb6e77885459e796fa6627872a52ff15d256d905d593e4c0a571ceefcba95c48e790fb0dca2963f09
   languageName: node
   linkType: hard
 
@@ -5183,9 +5192,10 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "vite-react-typescript-starter@workspace:."
   dependencies:
-    "@capacitor/android": "npm:^8.2.0"
-    "@capacitor/cli": "npm:^8.2.0"
-    "@capacitor/core": "npm:^8.2.0"
+    "@capacitor/android": "npm:^8.3.0"
+    "@capacitor/cli": "npm:^8.3.0"
+    "@capacitor/core": "npm:^8.3.0"
+    "@capacitor/ios": "npm:^8.3.0"
     "@eslint/js": "npm:^9.27.0"
     "@rollup/rollup-linux-x64-gnu": "npm:^4.60.0"
     "@supabase/supabase-js": "npm:^2.99.1"

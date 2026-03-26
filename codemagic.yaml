@@ -20,11 +20,21 @@ workflows:
       - name: Build web assets
         script: |
           yarn build
-      - name: Add iOS platform and sync Capacitor
+      - name: Setup iOS platform
         script: |
-          yarn add @capacitor/ios
-          npx cap add ios || true
+          # Remove pasta ios se existir para garantir setup limpo
+          rm -rf ios
+          # Adiciona plataforma iOS via Capacitor
+          npx cap add ios
+          # Sincroniza os assets web com o projeto iOS
           npx cap sync ios
+          # Verifica se o Podfile foi criado
+          if [ ! -f "ios/App/Podfile" ]; then
+            echo "ERRO: Podfile não foi criado pelo cap add ios"
+            ls -la ios/ || echo "Pasta ios não existe"
+            exit 1
+          fi
+          echo "Podfile criado com sucesso em ios/App/Podfile"
       - name: Install CocoaPods dependencies
         script: |
           cd ios/App
