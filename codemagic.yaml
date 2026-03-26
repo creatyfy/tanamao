@@ -20,14 +20,10 @@ workflows:
       - name: Build web assets
         script: |
           yarn build
-      - name: Add iOS platform if missing
+      - name: Add iOS platform and sync Capacitor
         script: |
-          if [ ! -d "ios" ]; then
-            yarn add @capacitor/ios
-            npx cap add ios
-          fi
-      - name: Sync Capacitor
-        script: |
+          yarn add @capacitor/ios
+          npx cap add ios || true
           npx cap sync ios
       - name: Install CocoaPods dependencies
         script: |
