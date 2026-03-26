@@ -10,7 +10,7 @@ workflows:
         distribution_type: app_store
         bundle_identifier: com.tanamaoc.delivery
       vars:
-        XCODE_WORKSPACE: "ios/App/App.xcworkspace"
+        XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
       node: 22.13.0
     scripts:
@@ -28,17 +28,17 @@ workflows:
           npx cap add ios
           # Sincroniza os assets web com o projeto iOS
           npx cap sync ios
-          # Verifica se o workspace foi criado
-          if [ ! -f "$XCODE_WORKSPACE" ]; then
-            echo "ERRO: Workspace Xcode não encontrado em $XCODE_WORKSPACE"
-            find ios -name "*.xcworkspace" 2>/dev/null || echo "Nenhum xcworkspace encontrado"
+          # Verifica se o projeto Xcode foi criado
+          if [ ! -d "$XCODE_PROJECT" ]; then
+            echo "ERRO: Projeto Xcode não encontrado em $XCODE_PROJECT"
+            find ios -name "*.xcodeproj" -o -name "*.xcworkspace" 2>/dev/null
             exit 1
           fi
-          echo "Workspace encontrado: $XCODE_WORKSPACE"
+          echo "Projeto Xcode encontrado: $XCODE_PROJECT"
       - name: Resolve Swift Package Manager dependencies
         script: |
           xcodebuild -resolvePackageDependencies \
-            -workspace "$XCODE_WORKSPACE" \
+            -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "generic/platform=iOS"
       - name: Set up code signing settings on Xcode project
@@ -47,7 +47,7 @@ workflows:
       - name: Build ipa for distribution
         script: |
           xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
+            --project "$XCODE_PROJECT" \
             --scheme "$XCODE_SCHEME"
     artifacts:
       - build/ios/ipa/*.ipa
