@@ -41,6 +41,17 @@ workflows:
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "generic/platform=iOS"
+      - name: Increment iOS build number
+        script: |
+          # Usa o número do build do Codemagic como CFBundleVersion (sempre crescente)
+          # BUILD_NUMBER é incrementado automaticamente pelo Codemagic a cada build
+          PLIST="ios/App/App/Info.plist"
+          # Define CFBundleVersion como o BUILD_NUMBER do Codemagic (ex: 2, 3, 4...)
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
+          # Define CFBundleShortVersionString como 1.0
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$PLIST"
+          echo "CFBundleVersion definido como: $BUILD_NUMBER"
+          echo "CFBundleShortVersionString definido como: 1.0"
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles
