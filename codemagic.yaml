@@ -22,23 +22,25 @@ workflows:
           yarn build
       - name: Setup iOS platform
         script: |
-          # Remove pasta ios se existir para garantir setup limpo
+          # Remove pasta ios para garantir setup limpo
           rm -rf ios
-          # Adiciona plataforma iOS via Capacitor
+          # Adiciona plataforma iOS (Capacitor 8 usa Swift Package Manager, sem Podfile)
           npx cap add ios
           # Sincroniza os assets web com o projeto iOS
           npx cap sync ios
-          # Verifica se o Podfile foi criado
-          if [ ! -f "ios/App/Podfile" ]; then
-            echo "ERRO: Podfile não foi criado pelo cap add ios"
-            ls -la ios/ || echo "Pasta ios não existe"
+          # Verifica se o workspace foi criado
+          if [ ! -f "$XCODE_WORKSPACE" ]; then
+            echo "ERRO: Workspace Xcode não encontrado em $XCODE_WORKSPACE"
+            find ios -name "*.xcworkspace" 2>/dev/null || echo "Nenhum xcworkspace encontrado"
             exit 1
           fi
-          echo "Podfile criado com sucesso em ios/App/Podfile"
-      - name: Install CocoaPods dependencies
+          echo "Workspace encontrado: $XCODE_WORKSPACE"
+      - name: Resolve Swift Package Manager dependencies
         script: |
-          cd ios/App
-          pod install
+          xcodebuild -resolvePackageDependencies \
+            -workspace "$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "generic/platform=iOS"
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles
