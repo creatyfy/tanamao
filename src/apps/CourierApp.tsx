@@ -508,7 +508,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   if (!courier) return null;
 
   return (
-    <div className="w-full max-w-md mx-auto h-screen bg-gray-900 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-800 font-sans">
+    <div className="w-full max-w-md mx-auto h-screen bg-gray-900 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-800 font-sans" style={{paddingTop: 'env(safe-area-inset-top, 0px)'}}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       
       {!isDeliveryActive && (
@@ -949,7 +949,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
       </div>
 
       {!isDeliveryActive && (
-        <div className="bg-gray-900 border-t border-gray-800 flex justify-around py-3 pb-6 shrink-0 z-20">
+        <div className="bg-gray-900 border-t border-gray-800 flex justify-around py-3 shrink-0 z-20" style={{paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))'}}>
           <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center w-16 ${activeTab === 'home' ? 'text-brand-primary' : 'text-gray-500'}`}>
             <Power size={24} /><span className="text-[10px] mt-1 font-medium">Início</span>
           </button>

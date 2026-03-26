@@ -12,7 +12,7 @@ function App() {
 
   if (loading) {
     return (
-      <div className="w-full h-screen flex flex-col items-center justify-center bg-brand-primary text-white">
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-brand-primary text-white" style={{paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)'}}>
         <Loader2 className="animate-spin mb-4" size={48} />
         <h1 className="text-2xl font-black">Tá Na Mão</h1>
         <p className="text-sm opacity-80 mt-2">Carregando...</p>
@@ -27,7 +27,7 @@ function App() {
   // Bloqueia o acesso de usuários não aprovados (is_active: false)
   if (!profile.is_active && profile.role !== 'admin') {
     return (
-      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center">
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center" style={{paddingTop: 'max(1.5rem, env(safe-area-inset-top, 0px))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))'}}>
         <div className="w-24 h-24 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mb-6 shadow-inner">
           <Clock size={48} />
         </div>

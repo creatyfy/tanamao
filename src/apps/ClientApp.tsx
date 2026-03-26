@@ -914,7 +914,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   );
 
   return (
-    <div className="w-full max-w-md mx-auto h-screen bg-gray-50 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-900">
+    <div className="w-full max-w-md mx-auto h-screen bg-gray-50 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-900" style={{paddingTop: 'env(safe-area-inset-top, 0px)'}}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       {loading && <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-brand-primary" size={40}/></div>}
       
@@ -980,7 +980,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       )}
 
       {currentScreen === 'home' && (
-        <div className="flex-1 overflow-y-auto pb-20">
+        <div className="flex-1 overflow-y-auto" style={{paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))'}}>
           <div className="bg-white p-4 rounded-b-3xl shadow-sm relative z-10">
             <div className="flex justify-between items-center mb-4">
               <div className="flex items-center text-brand-dark cursor-pointer" onClick={() => setShowAddressModal(true)}>
@@ -1121,7 +1121,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       )}
 
       {currentScreen === 'history' && (
-        <div className="flex-1 overflow-y-auto pb-20 bg-gray-50">
+        <div className="flex-1 overflow-y-auto bg-gray-50" style={{paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))'}}>
           <div className="bg-white p-4 flex items-center border-b border-gray-100 shadow-sm sticky top-0 z-10">
             <h1 className="text-xl font-black text-brand-dark">Meus Pedidos</h1>
           </div>
@@ -1200,7 +1200,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       )}
 
       {currentScreen === 'profile' && (
-        <div className="flex-1 overflow-y-auto pb-20 bg-gray-50">
+        <div className="flex-1 overflow-y-auto bg-gray-50" style={{paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))'}}>
           <div className="bg-white p-6 border-b border-gray-100 shadow-sm flex flex-col items-center">
             <div className="w-20 h-20 bg-brand-light text-brand-primary rounded-full flex items-center justify-center font-black text-3xl mb-3 shadow-inner">
               {profile?.name?.charAt(0).toUpperCase() || 'U'}
@@ -1246,7 +1246,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       )}
 
       {currentScreen === 'store' && selectedStore && (
-        <div className={`flex-1 overflow-y-auto bg-white relative ${cart.length > 0 ? 'pb-36' : 'pb-12'}`}>
+        <div className="flex-1 overflow-y-auto bg-white relative" style={{paddingBottom: cart.length > 0 ? 'calc(9rem + env(safe-area-inset-bottom, 0px))' : 'calc(3rem + env(safe-area-inset-bottom, 0px))'}}>
           <div className="relative h-40 bg-gray-200 shrink-0">
             {selectedStore.banner_url ? (
               <img src={selectedStore.banner_url} className="w-full h-full object-cover" alt="Banner da Loja" />
@@ -1351,7 +1351,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           </div>
           
           {cart.length > 0 && (
-            <div className="fixed sm:absolute bottom-6 left-4 right-4 z-40 max-w-md mx-auto">
+            <div className="fixed sm:absolute left-4 right-4 z-40 max-w-md mx-auto" style={{bottom: 'max(1.5rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem))'}}>
               <button onClick={() => setCurrentScreen('cart')} className="w-full bg-brand-primary text-white rounded-full py-4 px-6 flex justify-between items-center shadow-xl font-bold transition-transform active:scale-95">
                 <div className="flex items-center"><span className="bg-white text-brand-primary rounded-full w-6 h-6 flex items-center justify-center text-sm mr-3">{cart.reduce((acc, item) => acc + item.quantity, 0)}</span> Ver carrinho</div>
                 <span>R$ {cartTotal.toFixed(2)}</span>
@@ -1410,7 +1410,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             <button onClick={() => setCurrentScreen('cart')} className="p-2 -ml-2 text-brand-dark"><ChevronLeft size={24} /></button>
             <h1 className="text-lg font-bold text-brand-dark ml-2">Finalizar Pedido</h1>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-24">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4" style={{paddingBottom: 'calc(6rem + env(safe-area-inset-bottom, 0px))'}}>
             <div className="bg-white p-4 rounded-2xl shadow-sm">
               <h2 className="font-bold text-brand-dark mb-2 flex items-center"><MapPin size={18} className="mr-2 text-brand-primary"/> Entrega</h2>
               <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-xl border border-gray-100">
@@ -1522,7 +1522,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             </div>
             
           </div>
-          <div className="p-4 bg-white border-t border-gray-100 shrink-0">
+          <div className="bg-white border-t border-gray-100 shrink-0" style={{padding: '1rem', paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))'}}>
             <button onClick={handleCheckout} disabled={actionLoading || (!selectedStore?.accepts_cash && !selectedStore?.accepts_pix && !selectedStore?.accepts_card)} className="w-full bg-brand-primary text-white rounded-full py-4 font-bold text-lg shadow-md flex justify-center items-center disabled:opacity-50">
               {actionLoading ? <Loader2 className="animate-spin" size={24}/> : `Fazer Pedido • R$ ${finalTotal.toFixed(2)}`}
             </button>
@@ -1722,7 +1722,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       )}
 
       {showBottomBar && (
-        <div className="absolute bottom-0 w-full bg-white border-t border-gray-100 flex justify-around py-3 pb-6 px-2 shadow-[0_-10px_20px_rgba(0,0,0,0.05)] z-20">
+        <div className="absolute bottom-0 w-full bg-white border-t border-gray-100 flex justify-around py-3 px-2 shadow-[0_-10px_20px_rgba(0,0,0,0.05)] z-20" style={{paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom, 0px))'}}>
           <button onClick={() => setCurrentScreen('home')} className={`flex flex-col items-center transition-colors ${currentScreen === 'home' ? 'text-brand-primary' : 'text-gray-400 hover:text-gray-600'}`}><Home size={24} /><span className="text-[10px] font-bold mt-1">Início</span></button>
           <button onClick={() => setCurrentScreen('history')} className={`flex flex-col items-center transition-colors ${currentScreen === 'history' ? 'text-brand-primary' : 'text-gray-400 hover:text-gray-600'}`}><History size={24} /><span className="text-[10px] font-bold mt-1">Pedidos</span></button>
           <button onClick={() => setCurrentScreen('profile')} className={`flex flex-col items-center transition-colors ${currentScreen === 'profile' ? 'text-brand-primary' : 'text-gray-400 hover:text-gray-600'}`}><User size={24} /><span className="text-[10px] font-bold mt-1">Perfil</span></button>

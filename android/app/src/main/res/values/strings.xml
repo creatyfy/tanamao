@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Tá Na Mão</string>
+    <string name="title_activity_main">Tá Na Mão</string>
+    <string name="package_name">com.tanamaoc.delivery</string>
+    <string name="custom_url_scheme">com.tanamaoc.delivery</string>
+</resources>

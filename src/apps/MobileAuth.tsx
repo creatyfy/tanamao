@@ -348,7 +348,7 @@ export default function MobileAuth() {
   };
 
   return (
-    <div className="w-full max-w-md mx-auto h-screen bg-white flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-900">
+    <div className="w-full max-w-md mx-auto h-screen bg-white flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-900" style={{paddingBottom: 'env(safe-area-inset-bottom, 0px)', paddingTop: 'env(safe-area-inset-top, 0px)'}}>
       <div className="flex-1 overflow-y-auto flex flex-col scrollbar-hide">
         <div className="pt-12 pb-6 px-6 flex flex-col items-center justify-center bg-brand-light/30 rounded-b-[3rem] shrink-0">
           <img src="https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/width_533-e0f65105-eff1-406d-acc8-d6ec9f3aa0a7.webp" alt="Logo" className="w-36 h-auto object-contain mb-4 drop-shadow-md" />
@@ -577,7 +577,7 @@ export default function MobileAuth() {
             </button>
           </form>
 
-          <div className="mt-auto text-center pt-4 border-t border-gray-100 shrink-0">
+          <div className="mt-auto text-center pt-4 border-t border-gray-100 shrink-0" style={{paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))'}}>
             <p className="text-gray-500 text-sm">{isLogin ? "Ainda não tem uma conta?" : "Já tem uma conta?"}</p>
             <button onClick={() => { setIsLogin(!isLogin); setRegisterRole('client'); setErrorMsg(''); }} className="mt-2 text-brand-dark font-bold text-base hover:text-brand-primary transition-colors">
               {isLogin ? "Cadastre-se agora" : "Faça login"}

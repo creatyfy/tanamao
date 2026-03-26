@@ -491,7 +491,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   }, 0);
 
   return (
-    <div className="flex h-screen bg-gray-50 w-full font-sans">
+    <div className="flex h-screen bg-gray-50 w-full font-sans" style={{paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)', paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)'}}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       
       {/* Menu Lateral */}
