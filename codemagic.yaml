@@ -35,10 +35,47 @@ workflows:
             exit 1
           fi
           echo "Projeto Xcode encontrado: $XCODE_PROJECT"
-          # Gera ícones iOS a partir de resources/icon.png usando @capacitor/assets
-          # Isso garante que a logo correta seja usada, sobrescrevendo o ícone padrão do Capacitor
-          npx @capacitor/assets generate --ios
-          echo "Ícones iOS gerados via @capacitor/assets"
+      - name: Apply app icons
+        script: |
+          # Gera todos os tamanhos de ícone iOS a partir de resources/icon.png
+          # e copia para o xcassets (sobrescreve o ícone padrão do Capacitor)
+          ICON_SRC="resources/icon.png"
+          DEST="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          python3 - <<'PYEOF'
+          from PIL import Image
+          import os
+
+          src = "resources/icon.png"
+          dest = "ios/App/App/Assets.xcassets/AppIcon.appiconset"
+
+          img = Image.open(src).convert("RGB")
+
+          sizes = {
+              "AppIcon-20.png": 20,
+              "AppIcon-20@2x.png": 40,
+              "AppIcon-20@3x.png": 60,
+              "AppIcon-29.png": 29,
+              "AppIcon-29@2x.png": 58,
+              "AppIcon-29@3x.png": 87,
+              "AppIcon-40.png": 40,
+              "AppIcon-40@2x.png": 80,
+              "AppIcon-40@3x.png": 120,
+              "AppIcon-60@2x.png": 120,
+              "AppIcon-60@3x.png": 180,
+              "AppIcon-76.png": 76,
+              "AppIcon-76@2x.png": 152,
+              "AppIcon-83.5@2x.png": 167,
+              "AppIcon-1024.png": 1024,
+          }
+
+          for filename, size in sizes.items():
+              resized = img.resize((size, size), Image.LANCZOS)
+              out = os.path.join(dest, filename)
+              resized.save(out, "PNG")
+              print(f"Gerado: {filename} ({size}x{size})")
+
+          print("Todos os icones iOS gerados com sucesso!")
+          PYEOF
       - name: Resolve Swift Package Manager dependencies
         script: |
           xcodebuild -resolvePackageDependencies \
