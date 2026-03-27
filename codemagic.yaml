@@ -43,15 +43,24 @@ workflows:
             -destination "generic/platform=iOS"
       - name: Increment iOS build number
         script: |
-          # Usa o número do build do Codemagic como CFBundleVersion (sempre crescente)
-          # BUILD_NUMBER é incrementado automaticamente pelo Codemagic a cada build
           PLIST="ios/App/App/Info.plist"
-          # Define CFBundleVersion como o BUILD_NUMBER do Codemagic (ex: 2, 3, 4...)
+
+          # Build number crescente (evita erro de versão duplicada na App Store)
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
-          # Define CFBundleShortVersionString como 1.0
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$PLIST"
-          echo "CFBundleVersion definido como: $BUILD_NUMBER"
-          echo "CFBundleShortVersionString definido como: 1.0"
+
+          # Resolve "Faltam dados de conformidade" — app não usa criptografia não-isenta
+          /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
+
+          # Remove referências ao Capacitor — define nome correto do app
+          /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Tá Na Mão" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Tá Na Mão" "$PLIST"
+
+          echo "CFBundleVersion: $BUILD_NUMBER"
+          echo "CFBundleShortVersionString: 1.0"
+          echo "ITSAppUsesNonExemptEncryption: false"
+          echo "CFBundleDisplayName: Tá Na Mão"
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles
