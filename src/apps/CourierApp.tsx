@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, List, Bell, Star, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing, Map } from 'lucide-react';
+import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, List, Bell, Star, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing, Map, Trash2 } from 'lucide-react';
 
 // Componente auxiliar para renderizar o mapa e os botões de navegação
 const AddressMap = ({ address }: { address: string }) => {
@@ -44,7 +44,9 @@ const AddressMap = ({ address }: { address: string }) => {
 };
 
 export default function CourierApp({ onExit }: { onExit: () => void }) {
-  const { user } = useAuth();
+  const { user, deleteAccount } = useAuth();
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const { permission: notifPermission, requestPermission, sendNotification } = usePushNotifications();
   const [courier, setCourier] = useState<any>(null);
   const [activeTab, setActiveTab] = useState('home');
@@ -508,7 +510,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   if (!courier) return null;
 
   return (
-    <div className="w-full max-w-md mx-auto h-screen bg-gray-900 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-800 font-sans" style={{paddingTop: 'env(safe-area-inset-top, 0px)'}}>
+    <div className="w-full max-w-lg mx-auto h-screen bg-gray-900 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[900px] sm:my-8 md:max-w-2xl md:h-[95vh] border-4 border-gray-800 font-sans" style={{paddingTop: 'env(safe-area-inset-top, 0px)'}}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       
       {!isDeliveryActive && (
@@ -944,9 +946,44 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
             >
               <LogOut size={18} /> Sair do App
             </button>
+            <button
+              onClick={() => setShowDeleteAccountModal(true)}
+              className="mt-2 w-full py-3 bg-gray-900 border border-gray-700 text-gray-500 rounded-xl font-medium hover:bg-gray-800 transition-colors flex items-center justify-center gap-2 text-sm"
+            >
+              <Trash2 size={16} /> Excluir minha conta
+            </button>
           </div>
         )}
       </div>
+      {/* Modal de confirmação de exclusão de conta */}
+      {showDeleteAccountModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="flex flex-col items-center text-center mb-5">
+              <div className="w-16 h-16 bg-red-900/40 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle size={32} className="text-red-400" />
+              </div>
+              <h2 className="text-xl font-black text-white mb-2">Excluir conta?</h2>
+              <p className="text-gray-400 text-sm">Esta ação é permanente. Seus dados serão removidos e você não poderá mais acessar sua conta.</p>
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={async () => {
+                  setDeleteAccountLoading(true);
+                  try { await deleteAccount(); } finally { setDeleteAccountLoading(false); }
+                }}
+                disabled={deleteAccountLoading}
+                className="w-full bg-red-600 text-white py-4 rounded-xl font-bold flex justify-center items-center disabled:opacity-50"
+              >
+                {deleteAccountLoading ? <Loader2 size={20} className="animate-spin" /> : 'Sim, excluir minha conta'}
+              </button>
+              <button onClick={() => setShowDeleteAccountModal(false)} className="w-full bg-gray-800 text-gray-300 py-4 rounded-xl font-bold">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!isDeliveryActive && (
         <div className="bg-gray-900 border-t border-gray-800 flex justify-around py-3 shrink-0 z-20" style={{paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))'}}>

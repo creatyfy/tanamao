@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Store, StoreCategory, Product, Order, Coupon, OrderChat } from '../types';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { Search, MapPin, Star, Clock, Bike, ChevronLeft, Plus, Minus, ShoppingBag, CheckCircle, History, Home, User, CreditCard, Loader2, X, Store as StoreIcon, LogOut, MessageSquare, Trash2, Ticket, BellRing, Send, Heart } from 'lucide-react';
+import { Search, MapPin, Star, Clock, Bike, ChevronLeft, Plus, Minus, ShoppingBag, CheckCircle, History, Home, User, CreditCard, Loader2, X, Store as StoreIcon, LogOut, MessageSquare, Trash2, Ticket, BellRing, Send, Heart, AlertTriangle } from 'lucide-react';
 
 // Função auxiliar para normalizar strings (remove acentos, espaços e deixa minúsculo)
 const normalizeString = (str?: string) => {
@@ -79,7 +79,9 @@ function LiveMap({ lat, lng }: { lat: number; lng: number }) {
 }
 
 export default function ClientApp({ onExit }: { onExit: () => void }) {
-  const { user, profile } = useAuth();
+  const { user, profile, deleteAccount } = useAuth();
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const { permission: notifPermission, requestPermission, sendNotification } = usePushNotifications();
   const [currentScreen, setCurrentScreen] = useState('home');
   const [loading, setLoading] = useState(true);
@@ -914,7 +916,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   );
 
   return (
-    <div className="w-full max-w-md mx-auto h-screen bg-gray-50 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-900" style={{paddingTop: 'env(safe-area-inset-top, 0px)'}}>
+    <div className="w-full max-w-lg mx-auto h-screen bg-gray-50 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[900px] sm:my-8 md:max-w-2xl md:h-[95vh] border-4 border-gray-900" style={{paddingTop: 'env(safe-area-inset-top, 0px)'}}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       {loading && <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-brand-primary" size={40}/></div>}
       
@@ -1241,10 +1243,41 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             <button onClick={onExit} className="w-full bg-white border border-red-100 text-red-500 py-4 rounded-xl font-bold flex justify-center items-center shadow-sm hover:bg-red-50 transition-colors">
               <LogOut size={20} className="mr-2"/> Sair da Conta
             </button>
+            <button onClick={() => setShowDeleteAccountModal(true)} className="w-full bg-white border border-gray-200 text-gray-400 py-3 rounded-xl font-medium flex justify-center items-center shadow-sm hover:bg-gray-50 transition-colors text-sm mt-2">
+              <Trash2 size={16} className="mr-2"/> Excluir minha conta
+            </button>
           </div>
         </div>
       )}
-
+      {/* Modal de confirmação de exclusão de conta */}
+      {showDeleteAccountModal && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="flex flex-col items-center text-center mb-5">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle size={32} className="text-red-500" />
+              </div>
+              <h2 className="text-xl font-black text-gray-900 mb-2">Excluir conta?</h2>
+              <p className="text-gray-500 text-sm">Esta ação é permanente. Seus dados pessoais serão removidos e você não poderá mais acessar sua conta.</p>
+            </div>
+            <div className="space-y-3">
+              <button
+                onClick={async () => {
+                  setDeleteAccountLoading(true);
+                  try { await deleteAccount(); } finally { setDeleteAccountLoading(false); }
+                }}
+                disabled={deleteAccountLoading}
+                className="w-full bg-red-500 text-white py-4 rounded-xl font-bold flex justify-center items-center disabled:opacity-50"
+              >
+                {deleteAccountLoading ? <Loader2 size={20} className="animate-spin" /> : 'Sim, excluir minha conta'}
+              </button>
+              <button onClick={() => setShowDeleteAccountModal(false)} className="w-full bg-gray-100 text-gray-700 py-4 rounded-xl font-bold">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {currentScreen === 'store' && selectedStore && (
         <div className="flex-1 overflow-y-auto bg-white relative" style={{paddingBottom: cart.length > 0 ? 'calc(9rem + env(safe-area-inset-bottom, 0px))' : 'calc(3rem + env(safe-area-inset-bottom, 0px))'}}>
           <div className="relative h-40 bg-gray-200 shrink-0">

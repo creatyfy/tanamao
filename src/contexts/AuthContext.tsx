@@ -8,6 +8,7 @@ interface AuthContextType {
   profile: UserProfile | null;
   loading: boolean;
   signOut: () => Promise<void>;
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -15,6 +16,7 @@ const AuthContext = createContext<AuthContextType>({
   profile: null,
   loading: true,
   signOut: async () => {},
+  deleteAccount: async () => {},
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
@@ -110,8 +112,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const deleteAccount = async () => {
+    if (!user) return;
+    try {
+      // Marca o usuário como inativo e anonimiza os dados pessoais na tabela users
+      await supabase
+        .from('users')
+        .update({
+          is_active: false,
+          name: 'Conta Excluída',
+          phone: null,
+          avatar_url: null,
+        })
+        .eq('id', user.id);
+      // Faz logout após marcar como excluído
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.warn('Erro ao excluir conta:', error);
+    } finally {
+      clearSession();
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signOut }}>
+    <AuthContext.Provider value={{ user, profile, loading, signOut, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

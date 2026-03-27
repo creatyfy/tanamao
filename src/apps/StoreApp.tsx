@@ -691,12 +691,17 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const handleProductImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (file.size > 5 * 1024 * 1024) { 
-        showToast('A imagem deve ter no máximo 5MB', 'warning');
+      if (file.size > 10 * 1024 * 1024) { 
+        showToast('A imagem deve ter no máximo 10MB', 'warning');
         return;
       }
       setProductImageFile(file);
-      setProductImagePreview(URL.createObjectURL(file));
+      try {
+        setProductImagePreview(URL.createObjectURL(file));
+      } catch (err) {
+        console.warn('Preview indisponível para este formato:', err);
+        setProductImagePreview(null);
+      }
     }
   };
 
@@ -877,24 +882,34 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (file.size > 2 * 1024 * 1024) { // Max 2MB
-        showToast('A imagem deve ter no máximo 2MB', 'warning');
+      if (file.size > 5 * 1024 * 1024) { // Max 5MB
+        showToast('A imagem deve ter no máximo 5MB', 'warning');
         return;
       }
       setLogoFile(file);
-      setLogoPreview(URL.createObjectURL(file));
+      try {
+        setLogoPreview(URL.createObjectURL(file));
+      } catch (err) {
+        console.warn('Preview indisponível para este formato:', err);
+        setLogoPreview(null);
+      }
     }
   };
 
   const handleBannerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (file.size > 5 * 1024 * 1024) { // Max 5MB
-        showToast('A imagem do banner deve ter no máximo 5MB', 'warning');
+      if (file.size > 10 * 1024 * 1024) { // Max 10MB
+        showToast('A imagem do banner deve ter no máximo 10MB', 'warning');
         return;
       }
       setBannerFile(file);
-      setBannerPreview(URL.createObjectURL(file));
+      try {
+        setBannerPreview(URL.createObjectURL(file));
+      } catch (err) {
+        console.warn('Preview indisponível para este formato:', err);
+        setBannerPreview(null);
+      }
     }
   };
 
