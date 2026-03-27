@@ -35,15 +35,10 @@ workflows:
             exit 1
           fi
           echo "Projeto Xcode encontrado: $XCODE_PROJECT"
-          # Copia os ícones corretos (logo Tá Na Mão) para o xcassets gerado pelo Capacitor
-          ICONS_SRC="assets/ios-icons"
-          ICONS_DEST="ios/App/App/Assets.xcassets/AppIcon.appiconset"
-          if [ -d "$ICONS_SRC" ]; then
-            cp "$ICONS_SRC"/*.png "$ICONS_DEST"/
-            echo "Ícones da logo copiados para $ICONS_DEST"
-          else
-            echo "AVISO: pasta $ICONS_SRC não encontrada"
-          fi
+          # Gera ícones iOS a partir de resources/icon.png usando @capacitor/assets
+          # Isso garante que a logo correta seja usada, sobrescrevendo o ícone padrão do Capacitor
+          npx @capacitor/assets generate --ios
+          echo "Ícones iOS gerados via @capacitor/assets"
       - name: Resolve Swift Package Manager dependencies
         script: |
           xcodebuild -resolvePackageDependencies \
