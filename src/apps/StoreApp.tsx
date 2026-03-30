@@ -696,12 +696,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         return;
       }
       setProductImageFile(file);
-      try {
-        setProductImagePreview(URL.createObjectURL(file));
-      } catch (err) {
-        console.warn('Preview indisponível para este formato:', err);
-        setProductImagePreview(null);
-      }
+      // FileReader é mais compatível com iOS/iPadOS que URL.createObjectURL
+      const readerProduct = new FileReader();
+      readerProduct.onload = (ev) => { if (ev.target?.result) setProductImagePreview(ev.target.result as string); };
+      readerProduct.onerror = () => setProductImagePreview(null);
+      readerProduct.readAsDataURL(file);
     }
   };
 
@@ -887,12 +886,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         return;
       }
       setLogoFile(file);
-      try {
-        setLogoPreview(URL.createObjectURL(file));
-      } catch (err) {
-        console.warn('Preview indisponível para este formato:', err);
-        setLogoPreview(null);
-      }
+      // FileReader é mais compatível com iOS/iPadOS que URL.createObjectURL
+      const readerLogo = new FileReader();
+      readerLogo.onload = (ev) => { if (ev.target?.result) setLogoPreview(ev.target.result as string); };
+      readerLogo.onerror = () => setLogoPreview(null);
+      readerLogo.readAsDataURL(file);
     }
   };
 
@@ -904,12 +902,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         return;
       }
       setBannerFile(file);
-      try {
-        setBannerPreview(URL.createObjectURL(file));
-      } catch (err) {
-        console.warn('Preview indisponível para este formato:', err);
-        setBannerPreview(null);
-      }
+      // FileReader é mais compatível com iOS/iPadOS que URL.createObjectURL
+      const readerBanner = new FileReader();
+      readerBanner.onload = (ev) => { if (ev.target?.result) setBannerPreview(ev.target.result as string); };
+      readerBanner.onerror = () => setBannerPreview(null);
+      readerBanner.readAsDataURL(file);
     }
   };
 

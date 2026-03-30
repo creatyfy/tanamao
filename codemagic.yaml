@@ -37,35 +37,19 @@ workflows:
           echo "Projeto Xcode encontrado: $XCODE_PROJECT"
       - name: Apply app icons
         script: |
-          # Usa sips (nativo do macOS) para gerar todos os tamanhos de ícone iOS
-          # a partir de resources/icon.png, sobrescrevendo o ícone padrão do Capacitor
-          ICON_SRC="resources/icon.png"
+          # Copia ícones pré-gerados da pasta assets/ios-icons para o xcassets
+          # Os ícones foram gerados a partir da logo oficial "Tá Na Mão" (sem fundo preto)
           DEST="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          SRC="assets/ios-icons"
 
-          generate_icon() {
-            local size=$1
-            local filename=$2
-            sips -z $size $size "$ICON_SRC" --out "$DEST/$filename" > /dev/null 2>&1
-            echo "Gerado: $filename (${size}x${size})"
-          }
+          echo "Copiando ícones de $SRC para $DEST..."
+          ls -la "$SRC/"
 
-          generate_icon 20   "AppIcon-20.png"
-          generate_icon 40   "AppIcon-20@2x.png"
-          generate_icon 60   "AppIcon-20@3x.png"
-          generate_icon 29   "AppIcon-29.png"
-          generate_icon 58   "AppIcon-29@2x.png"
-          generate_icon 87   "AppIcon-29@3x.png"
-          generate_icon 40   "AppIcon-40.png"
-          generate_icon 80   "AppIcon-40@2x.png"
-          generate_icon 120  "AppIcon-40@3x.png"
-          generate_icon 120  "AppIcon-60@2x.png"
-          generate_icon 180  "AppIcon-60@3x.png"
-          generate_icon 76   "AppIcon-76.png"
-          generate_icon 152  "AppIcon-76@2x.png"
-          generate_icon 167  "AppIcon-83.5@2x.png"
-          generate_icon 1024 "AppIcon-1024.png"
+          # Copia todos os ícones PNG
+          cp "$SRC"/AppIcon-*.png "$DEST/"
 
-          echo "Todos os ícones iOS aplicados com sucesso!"
+          echo "Ícones copiados:"
+          ls -la "$DEST/"
       - name: Resolve Swift Package Manager dependencies
         script: |
           xcodebuild -resolvePackageDependencies \
