@@ -37,19 +37,35 @@ workflows:
           echo "Projeto Xcode encontrado: $XCODE_PROJECT"
       - name: Apply app icons
         script: |
-          # Copia ícones pré-gerados da pasta assets/ios-icons para o xcassets
-          # Os ícones foram gerados a partir da logo oficial "Tá Na Mão" (sem fundo preto)
+          # Capacitor 8 + Xcode 26 usa formato de ícone único (single icon):
+          # apenas AppIcon-512@2x.png (1024x1024) com idiom=universal, platform=ios
           DEST="ios/App/App/Assets.xcassets/AppIcon.appiconset"
-          SRC="assets/ios-icons"
 
-          echo "Copiando ícones de $SRC para $DEST..."
-          ls -la "$SRC/"
+          # Copia o ícone 1024x1024 com o nome correto para o novo formato
+          cp "assets/ios-icons/AppIcon-512@2x.png" "$DEST/AppIcon-512@2x.png"
 
-          # Copia todos os ícones PNG
-          cp "$SRC"/AppIcon-*.png "$DEST/"
+          # Atualiza o Contents.json para o formato do Capacitor 8 + Xcode 26
+          cat > "$DEST/Contents.json" << 'EOF'
+          {
+            "images" : [
+              {
+                "filename" : "AppIcon-512@2x.png",
+                "idiom" : "universal",
+                "platform" : "ios",
+                "size" : "1024x1024"
+              }
+            ],
+            "info" : {
+              "author" : "xcode",
+              "version" : 1
+            }
+          }
+          EOF
 
-          echo "Ícones copiados:"
+          echo "Ícone aplicado:"
           ls -la "$DEST/"
+          echo "Contents.json:"
+          cat "$DEST/Contents.json"
       - name: Resolve Swift Package Manager dependencies
         script: |
           xcodebuild -resolvePackageDependencies \
