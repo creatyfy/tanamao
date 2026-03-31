@@ -88,10 +88,23 @@ workflows:
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Tá Na Mão" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Tá Na Mão" "$PLIST"
 
+          # PERMISSÕES DE CÂMERA E FOTOS — obrigatórias para upload de foto de perfil no iOS/iPadOS
+          # Sem essas chaves, o app crasha ao tentar abrir o seletor de imagens (UIImagePickerController)
+          /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 'Usado para tirar foto de perfil da loja ou do motoboy'" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Usado para tirar foto de perfil da loja ou do motoboy'" "$PLIST"
+
+          /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 'Usado para selecionar foto de perfil da loja, motoboy ou produto'" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Usado para selecionar foto de perfil da loja, motoboy ou produto'" "$PLIST"
+
+          /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 'Usado para salvar fotos do app'" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 'Usado para salvar fotos do app'" "$PLIST"
+
           echo "CFBundleVersion: $BUILD_NUMBER"
           echo "CFBundleShortVersionString: 1.0"
           echo "ITSAppUsesNonExemptEncryption: false"
           echo "CFBundleDisplayName: Tá Na Mão"
+          echo "NSCameraUsageDescription: OK"
+          echo "NSPhotoLibraryUsageDescription: OK"
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles
