@@ -8,7 +8,8 @@ interface ToastProps {
 
 export function Toast({ message, type, onClose }: ToastProps) {
   useEffect(() => {
-    const timer = setTimeout(onClose, 4000);
+    // Atualizado para 10 segundos (10000 milissegundos)
+    const timer = setTimeout(onClose, 10000);
     return () => clearTimeout(timer);
   }, [onClose]);
 

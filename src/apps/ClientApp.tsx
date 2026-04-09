@@ -119,6 +119,14 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const [appliedCoupon, setAppliedCoupon] = useState<Coupon | null>(null);
   const [validatingCoupon, setValidatingCoupon] = useState(false);
   
+  // Asaas Payment States
+  const [pixQrCode, setPixQrCode] = useState<string | null>(null);
+  const [pixCopyPaste, setPixCopyPaste] = useState<string | null>(null);
+  const [pixExpiration, setPixExpiration] = useState<string | null>(null);
+  const [paymentScreen, setPaymentScreen] = useState<'pix_waiting' | 'card_form'>('pix_waiting');
+  const [cardData, setCardData] = useState({ number: '', name: '', expiry: '', cvv: '' });
+  const [paymentLoading, setPaymentLoading] = useState(false);
+  
   // Tracking & History
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [ordersHistory, setOrdersHistory] = useState<any[]>([]);
@@ -126,6 +134,11 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   // Courier Tracking
   const [courierLocation, setCourierLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationChannel, setLocationChannel] = useState<any>(null);
+  
+  // Refs
+  const orderChannelRef = React.useRef<any>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const isChatOpenRef = useRef(false);
 
   // Modals
   const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
@@ -141,8 +154,6 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const [chatMessages, setChatMessages] = useState<OrderChat[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatLoading, setChatLoading] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const isChatOpenRef = useRef(isChatOpen);
 
   // Review States
   const [showReviewModal, setShowReviewModal] = useState(false);
@@ -204,6 +215,20 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     };
   }, [user]);
 
+  // Realtime listener para atualizar categorias instantaneamente
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase.channel('public:store_categories_client')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'store_categories' }, () => {
+        loadCategories();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   useEffect(() => {
     if (currentScreen === 'history') fetchHistory();
     if (currentScreen === 'profile') fetchAddresses();
@@ -212,14 +237,53 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   useEffect(() => {
     return () => {
       if (locationChannel) supabase.removeChannel(locationChannel);
+      if (orderChannelRef.current) supabase.removeChannel(orderChannelRef.current);
     };
   }, [locationChannel]);
+
+  const loadCategories = async () => {
+    const { data } = await supabase.from('store_categories').select('*').eq('is_active', true).order('sort_order');
+    if (data) {
+      const updatedCategories = data.map(cat => {
+        const name = normalizeString(cat.name);
+        
+        if (name.includes('lanche') || name.includes('hamburguer') || name.includes('burger')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/asset-4016aec0-01a3-4b43-bb3c-ed91d84dfd66.webp' };
+        } else if (name.includes('pizza')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_172608-17e245a4-f2df-44b0-8aa5-1968a34e2217.webp' };
+        } else if (name.includes('japonesa') || name.includes('sushi') || name.includes('oriental')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_172638-e4b3b10c-e1dd-4279-b4c3-011a69c31c42.webp' };
+        } else if (name.includes('brasileira') || name.includes('feijoada') || name.includes('refeicao')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_174643-4d9c3a1a-98c1-4e90-bb5f-e34365992a46.webp' };
+        } else if (name.includes('doce') || name.includes('sobremesa') || name.includes('pudim')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_174715-bce8cbe3-68b1-4819-8bc3-09aa55845925.webp' };
+        } else if (name.includes('bebida')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082727-8dab3a55-37ad-47b1-94f8-6575bc4cab4e.webp' };
+        } else if (name.includes('saudavel') || name.includes('salada')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082738-4e538ac2-8141-4e78-a36a-b143ae3782b3.webp' };
+        } else if (name.includes('acai')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082747-02c1a18b-7dd5-494e-bccb-182e716e9def.webp' };
+        } else if (name.includes('mercado') || name.includes('conveniencia')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082758-4fcbaf4a-23da-4818-8cb9-3085448e3384.webp' };
+        } else if (name.includes('farmacia')) {
+          return { ...cat, icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082807-3be4bad4-c450-4dcf-ba72-28286d27ef53.webp' };
+        } else if (name.includes('salgado')) {
+          return { ...cat, icon: 'https://images.unsplash.com/photo-1628840042765-356cda07504e?w=200&h=200&fit=crop' };
+        } else if (name.includes('padaria') || name.includes('pao')) {
+          return { ...cat, icon: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200&h=200&fit=crop' };
+        }
+        return cat;
+      });
+      setCategories(updatedCategories);
+    }
+  };
 
   const fetchHomeData = async () => {
     setLoading(true);
     try {
-      const [catRes, storeRes, addrRes, orderRes, prodRes, favRes] = await Promise.all([
-        supabase.from('store_categories').select('*').eq('is_active', true).order('sort_order'),
+      await loadCategories();
+
+      const [storeRes, addrRes, orderRes, prodRes, favRes] = await Promise.all([
         supabase.from('stores').select('*, addresses!inner(city, state, neighborhood)').eq('is_approved', true).eq('status', 'active'),
         supabase.from('addresses').select('*').eq('user_id', user!.id).limit(1).maybeSingle(),
         supabase.from('orders').select('*, order_items(*), stores(name, logo_url, avg_prep_time_min)').eq('client_id', user!.id).not('status', 'in', '("delivered","cancelled")').order('created_at', { ascending: false }).limit(1).maybeSingle(),
@@ -227,76 +291,6 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         supabase.from('favorite_stores').select('store_id').eq('user_id', user!.id)
       ]);
       
-      if (catRes.data) {
-        const updatedCategories = catRes.data.map(cat => {
-          // Busca de forma flexível ignorando maiúsculas/minúsculas e acentos
-          const name = normalizeString(cat.name);
-          
-          if (name.includes('lanche') || name.includes('hamburguer') || name.includes('burger')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/asset-4016aec0-01a3-4b43-bb3c-ed91d84dfd66.webp'
-            };
-          } else if (name.includes('pizza')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_172608-17e245a4-f2df-44b0-8aa5-1968a34e2217.webp'
-            };
-          } else if (name.includes('japonesa') || name.includes('sushi') || name.includes('oriental')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_172638-e4b3b10c-e1dd-4279-b4c3-011a69c31c42.webp'
-            };
-          } else if (name.includes('brasileira') || name.includes('feijoada') || name.includes('refeicao')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_174643-4d9c3a1a-98c1-4e90-bb5f-e34365992a46.webp'
-            };
-          } else if (name.includes('doce') || name.includes('sobremesa') || name.includes('pudim')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-24_174715-bce8cbe3-68b1-4819-8bc3-09aa55845925.webp'
-            };
-          } else if (name.includes('bebida')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082727-8dab3a55-37ad-47b1-94f8-6575bc4cab4e.webp'
-            };
-          } else if (name.includes('saudavel') || name.includes('salada')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082738-4e538ac2-8141-4e78-a36a-b143ae3782b3.webp'
-            };
-          } else if (name.includes('acai')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082747-02c1a18b-7dd5-494e-bccb-182e716e9def.webp'
-            };
-          } else if (name.includes('mercado') || name.includes('conveniencia')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082758-4fcbaf4a-23da-4818-8cb9-3085448e3384.webp'
-            };
-          } else if (name.includes('farmacia')) {
-            return {
-              ...cat,
-              icon: 'https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/Captura_de_tela_2026-03-25_082807-3be4bad4-c450-4dcf-ba72-28286d27ef53.webp'
-            };
-          } else if (name.includes('salgado')) {
-            return {
-              ...cat,
-              icon: 'https://images.unsplash.com/photo-1628840042765-356cda07504e?w=200&h=200&fit=crop'
-            };
-          } else if (name.includes('padaria') || name.includes('pao')) {
-            return {
-              ...cat,
-              icon: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=200&h=200&fit=crop'
-            };
-          }
-          return cat;
-        });
-        setCategories(updatedCategories);
-      }
       if (storeRes.data) setStores(storeRes.data);
       if (addrRes.data) setUserAddress(addrRes.data);
       if (prodRes.data) setAllProducts(prodRes.data);
@@ -653,36 +647,89 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         });
       }
 
-      setCart([]);
-      setClientNotes('');
-      setCouponCode('');
-      setAppliedCoupon(null);
-      
-      // Atualiza o estado local com os dados da loja para a tela de tracking
-      setActiveOrder({ 
-        ...order, 
-        order_items: orderItems,
-        stores: {
-          name: selectedStore.name,
-          logo_url: selectedStore.logo_url,
-          avg_prep_time_min: selectedStore.avg_prep_time_min
+      if (paymentMethod === 'cash') {
+        setCart([]);
+        setClientNotes('');
+        setCouponCode('');
+        setAppliedCoupon(null);
+        setActiveOrder({ ...order, order_items: orderItems, stores: { name: selectedStore.name, logo_url: selectedStore.logo_url, avg_prep_time_min: selectedStore.avg_prep_time_min } });
+        setCurrentScreen('tracking');
+        subscribeToOrder(order.id);
+        if (notifPermission === 'default') requestPermission();
+        showToast('Pedido realizado com sucesso!');
+      } else if (paymentMethod === 'pix') {
+        setPaymentLoading(true);
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const { data: payData, error: payErr } = await supabase.functions.invoke('create-payment', {
+            body: { orderId: order.id, method: 'PIX' },
+            headers: { Authorization: `Bearer ${session?.access_token}` }
+          });
+          if (payErr || !payData?.success) {
+            console.error("Payment Error:", payErr, payData);
+            throw new Error(payData?.error || payErr?.message || 'Erro ao gerar PIX. Tente novamente.');
+          }
+          setPixQrCode(payData.pixQrCode);
+          setPixCopyPaste(payData.pixCopyPaste);
+          setPixExpiration(payData.pixExpiration);
+          setActiveOrder({ ...order, order_items: orderItems, stores: { name: selectedStore.name, logo_url: selectedStore.logo_url, avg_prep_time_min: selectedStore.avg_prep_time_min } });
+          subscribeToOrder(order.id);
+          setCart([]);
+          setClientNotes('');
+          setCouponCode('');
+          setAppliedCoupon(null);
+          setPaymentScreen('pix_waiting');
+          setCurrentScreen('payment');
+        } finally {
+          setPaymentLoading(false);
         }
-      });
-      
-      setCurrentScreen('tracking');
-      subscribeToOrder(order.id);
-      
-      // Request permission if not granted yet, since they just made an order
-      if (notifPermission === 'default') {
-        requestPermission();
+      } else if (paymentMethod === 'card') {
+        setActiveOrder({ ...order, order_items: orderItems, stores: { name: selectedStore.name, logo_url: selectedStore.logo_url, avg_prep_time_min: selectedStore.avg_prep_time_min } });
+        subscribeToOrder(order.id);
+        setCart([]);
+        setClientNotes('');
+        setCouponCode('');
+        setAppliedCoupon(null);
+        setPaymentScreen('card_form');
+        setCurrentScreen('payment');
       }
-
-      showToast('Pedido realizado com sucesso!');
     } catch (error: any) {
       console.error("Erro no checkout:", error);
       showToast(error.message || 'Erro ao finalizar pedido.', 'error');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleCardPayment = async () => {
+    if (!activeOrder || !cardData.number || !cardData.name || !cardData.expiry || !cardData.cvv) return;
+    setPaymentLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const { data: payData, error: payErr } = await supabase.functions.invoke('create-payment', {
+        body: {
+          orderId: activeOrder.id,
+          method: 'CREDIT_CARD',
+          cardData: {
+            holderName: cardData.name,
+            number: cardData.number.replace(/\s/g, ''),
+            expiryMonth: cardData.expiry.split('/')[0],
+            expiryYear: '20' + cardData.expiry.split('/')[1],
+            ccv: cardData.cvv
+          }
+        },
+        headers: { Authorization: `Bearer ${session?.access_token}` }
+      });
+      if (payErr || !payData?.success) {
+        console.error("Card Payment Error:", payErr, payData);
+        throw new Error(payData?.error || payErr?.message || 'Pagamento recusado. Verifique os dados do cartão.');
+      }
+      showToast('Pagamento aprovado! 🎉', 'success');
+      setCurrentScreen('tracking');
+    } catch (err: any) {
+      showToast(err.message || 'Erro no pagamento', 'error');
+    } finally {
+      setPaymentLoading(false);
     }
   };
 
@@ -799,15 +846,17 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   };
 
   const subscribeToOrder = (orderId: number) => {
-    supabase.channel(`order_${orderId}`)
+    // Remove canal anterior de forma síncrona via ref
+    if (orderChannelRef.current) {
+      supabase.removeChannel(orderChannelRef.current);
+      orderChannelRef.current = null;
+    }
+
+    const channel = supabase.channel(`order_${orderId}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` }, async (payload) => {
         const updatedOrder = payload.new as Order;
         const { data: items } = await supabase.from('order_items').select('*').eq('order_id', orderId);
-        
-        // Mantém as informações da loja que já estavam no activeOrder
         setActiveOrder(prev => prev ? { ...prev, ...updatedOrder, order_items: items || [], stores: prev.stores } : { ...updatedOrder, order_items: items || [] } as any);
-        
-        // Push Notifications para o Cliente
         if (updatedOrder.status === 'delivering') {
           sendNotification('🏍️ Pedido a caminho!', { body: 'Seu pedido saiu para entrega. Acompanhe no mapa!' });
         } else if (updatedOrder.status === 'delivered') {
@@ -815,11 +864,9 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         } else if (updatedOrder.status === 'cancelled') {
           sendNotification('❌ Pedido Cancelado', { body: 'Seu pedido foi cancelado pela loja.' });
         }
-
         if (updatedOrder.status === 'delivering' && updatedOrder.courier_id && !updatedOrder.own_delivery) {
           subscribeToCourierLocation(updatedOrder.courier_id);
         }
-
         if (updatedOrder.status === 'delivered') {
           setCourierLocation(null);
           setLocationChannel((prev: any) => {
@@ -828,7 +875,10 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           });
           showToast('Seu pedido foi entregue! 🎉', 'success');
         }
-      }).subscribe();
+      })
+      .subscribe();
+
+    orderChannelRef.current = channel;
   };
 
   const filteredStores = stores.filter(store => {
@@ -1020,7 +1070,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           )}
 
           <div className="p-4">
-            <div className="flex gap-4 overflow-x-auto pb-4 pt-2 px-2 scrollbar-hide snap-x mb-4">
+            <div className="flex gap-4 overflow-x-auto pb-4 pt-2 px-2 snap-x mb-4 custom-scrollbar">
               {categories.map(cat => (
                 <button
                   key={cat.id}
@@ -1311,7 +1361,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             {/* Category Navigation Totems */}
             {storeCategories.length > 0 && (
               <div className="sticky top-0 z-30 bg-white pt-2 pb-2 border-b border-gray-100 -mx-4 px-4 mb-6 shadow-sm">
-                <div className="flex space-x-2 overflow-x-auto scrollbar-hide">
+                <div className="flex space-x-2 overflow-x-auto custom-scrollbar">
                   {storeCategories.map(category => {
                     const hasProducts = products.some(p => p.category_id === category.id);
                     if (!hasProducts) return null;
@@ -1437,6 +1487,133 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         </div>
       )}
 
+      {currentScreen === 'payment' && (
+        <div className="flex-1 flex flex-col bg-gray-50">
+          <div className="bg-white p-4 flex items-center border-b border-gray-100 shrink-0">
+            <button onClick={() => setCurrentScreen('store')} className="mr-3 text-gray-500">
+              <ChevronLeft size={24} />
+            </button>
+            <h1 className="text-lg font-bold text-brand-dark">
+              {paymentScreen === 'pix_waiting' ? '📱 Pagar com PIX' : '💳 Dados do Cartão'}
+            </h1>
+          </div>
+
+          {paymentScreen === 'pix_waiting' && (
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 w-full max-w-sm">
+                <p className="text-center text-2xl font-black text-brand-dark mb-1">
+                  R$ {activeOrder?.total.toFixed(2)}
+                </p>
+                <p className="text-center text-sm text-gray-500 mb-6">
+                  Escaneie o QR Code ou copie o código PIX
+                </p>
+
+                {pixQrCode && (
+                  <div className="flex justify-center mb-5">
+                    <img
+                      src={`data:image/png;base64,${pixQrCode}`}
+                      alt="QR Code PIX"
+                      className="w-56 h-56 rounded-2xl border-2 border-brand-primary/20"
+                    />
+                  </div>
+                )}
+
+                {pixCopyPaste && (
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(pixCopyPaste!);
+                      showToast('Código PIX copiado!', 'success');
+                    }}
+                    className="w-full bg-brand-light text-brand-primary py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 mb-4"
+                  >
+                    <CheckCircle size={16} /> Copiar código PIX
+                  </button>
+                )}
+
+                <p className="text-center text-xs text-gray-400 mb-4">⏱ Expira em 30 minutos</p>
+
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                  <p className="text-blue-700 text-xs font-medium text-center">
+                    Após o pagamento, seu pedido será confirmado automaticamente. Não feche o app.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {paymentScreen === 'card_form' && (
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
+                <p className="font-bold text-brand-dark text-center mb-2">
+                  Total: R$ {activeOrder?.total.toFixed(2)}
+                </p>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Número do Cartão</label>
+                  <input
+                    type="text" inputMode="numeric" maxLength={19}
+                    placeholder="0000 0000 0000 0000"
+                    value={cardData.number}
+                    onChange={e => {
+                      const v = e.target.value.replace(/\D/g, '').slice(0, 16);
+                      setCardData(p => ({ ...p, number: v.replace(/(\d{4})/g, '$1 ').trim() }));
+                    }}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">Nome no Cartão</label>
+                  <input
+                    type="text" placeholder="Como está no cartão"
+                    value={cardData.name}
+                    onChange={e => setCardData(p => ({ ...p, name: e.target.value.toUpperCase() }))}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-gray-600 mb-1">Validade</label>
+                    <input
+                      type="text" inputMode="numeric" maxLength={5} placeholder="MM/AA"
+                      value={cardData.expiry}
+                      onChange={e => {
+                        let v = e.target.value.replace(/\D/g, '').slice(0, 4);
+                        if (v.length >= 2) v = v.slice(0, 2) + '/' + v.slice(2);
+                        setCardData(p => ({ ...p, expiry: v }));
+                      }}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-bold text-gray-600 mb-1">CVV</label>
+                    <input
+                      type="text" inputMode="numeric" maxLength={4} placeholder="000"
+                      value={cardData.cvv}
+                      onChange={e => setCardData(p => ({ ...p, cvv: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                      className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleCardPayment}
+                  disabled={paymentLoading || cardData.number.replace(/\s/g,'').length < 16 || !cardData.name || cardData.expiry.length < 5 || cardData.cvv.length < 3}
+                  className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center disabled:opacity-50 mt-2"
+                >
+                  {paymentLoading ? <Loader2 className="animate-spin" size={24} /> : `Pagar R$ ${activeOrder?.total.toFixed(2)}`}
+                </button>
+
+                <p className="text-center text-xs text-gray-400">
+                  🔒 Pagamento seguro processado pelo Asaas
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {currentScreen === 'checkout' && (
         <div className="flex-1 flex flex-col bg-gray-50 min-h-0">
           <div className="bg-white p-4 flex items-center border-b border-gray-100 shrink-0">
@@ -1525,14 +1702,14 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                 {selectedStore?.accepts_pix && (
                   <label className={`flex items-center p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === 'pix' ? 'border-brand-primary bg-brand-light' : 'border-gray-200'}`}>
                     <input type="radio" name="payment" checked={paymentMethod === 'pix'} onChange={() => setPaymentMethod('pix')} className="text-brand-primary mr-3" />
-                    <span className="text-sm font-bold text-brand-dark">📱 PIX (Pague ao motoboy)</span>
+                    <span className="text-sm font-bold text-brand-dark">📱 PIX (Pague no app)</span>
                   </label>
                 )}
 
                 {selectedStore?.accepts_card && (
                   <label className={`flex items-center p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === 'card' ? 'border-brand-primary bg-brand-light' : 'border-gray-200'}`}>
                     <input type="radio" name="payment" checked={paymentMethod === 'card'} onChange={() => setPaymentMethod('card')} className="text-brand-primary mr-3" />
-                    <span className="text-sm font-bold text-brand-dark">💳 Cartão (Maquininha na entrega)</span>
+                    <span className="text-sm font-bold text-brand-dark">💳 Cartão (Pague no app)</span>
                   </label>
                 )}
 
@@ -1631,8 +1808,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                   {activeOrder.payment_method === 'cash' 
                     ? `Prepare R$ ${activeOrder.total.toFixed(2)} para o motoboy.${activeOrder.change_for ? ` Troco para R$ ${activeOrder.change_for.toFixed(2)}.` : ''}`
                     : activeOrder.payment_method === 'pix' 
-                      ? `Combine a chave PIX com o motoboy na entrega. Valor: R$ ${activeOrder.total.toFixed(2)}`
-                      : `Prepare seu cartão para pagar R$ ${activeOrder.total.toFixed(2)} na maquininha do motoboy.`}
+                      ? `Pagamento digital via PIX. Valor: R$ ${activeOrder.total.toFixed(2)}`
+                      : `Pagamento digital via Cartão. Valor: R$ ${activeOrder.total.toFixed(2)}`}
                 </p>
               </div>
             )}

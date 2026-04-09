@@ -43,7 +43,7 @@ html, body, #root {
 }
 
 /* =====================================================
-   SCROLLBAR HIDE
+   SCROLLBAR HIDE & CUSTOM SCROLLBAR
    ===================================================== */
 .scrollbar-hide {
   -ms-overflow-style: none;
@@ -51,6 +51,21 @@ html, body, #root {
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* Barra de rolagem fina para visualização no Desktop */
+.custom-scrollbar::-webkit-scrollbar {
+  height: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #e5e7eb;
+  border-radius: 10px;
+}
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: #d1d5db;
 }
 
 /* =====================================================

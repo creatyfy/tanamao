@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { LayoutDashboard, Store, Bike, LogOut, CheckCircle, XCircle, Loader2, Users, Eye, X, MapPin, FileText, DollarSign, Clock, CreditCard, User, ShoppingBag, Package, MessageSquare, Ticket, Star, Trash2, Search, Percent, BarChart3 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { LayoutDashboard, Store, Bike, LogOut, CheckCircle, XCircle, Loader2, Users, Eye, X, MapPin, FileText, DollarSign, Clock, CreditCard, User, ShoppingBag, Package, MessageSquare, Ticket, Star, Trash2, Search, Percent, BarChart3, BellRing } from 'lucide-react';
 import { Toast } from '../components/Toast';
 
 export default function AdminApp({ onExit }: { onExit: () => void }) {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
@@ -50,6 +52,28 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   const [allCoupons, setAllCoupons] = useState<any[]>([]);
   const [couponStoreFilter, setCouponStoreFilter] = useState('all');
 
+  // Repasses Tab
+  const [storeRepasses, setStoreRepasses] = useState<{ name: string; amount: number; walletId: string }[]>([]);
+  const [courierRepasses, setCourierRepasses] = useState<{ name: string; amount: number; walletId: string }[]>([]);
+  const [repassesLoading, setRepassesLoading] = useState(false);
+  const [repassesTotal, setRepassesTotal] = useState({ stores: 0, couriers: 0, platform: 0 });
+
+  // Notifications Tab
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [showNotifModal, setShowNotifModal] = useState(false);
+  const [notifForm, setNotifForm] = useState({
+    title: '',
+    body: '',
+    targetType: 'all',
+    targetCity: '',
+    scheduledAt: '',
+    repeatType: '',
+    repeatDay: 0,
+    repeatHour: 18,
+  });
+  const [sendingNotif, setSendingNotif] = useState(false);
+
   // Filtros internos (Abas)
   const [storeFilter, setStoreFilter] = useState<'pending' | 'approved'>('pending');
   const [courierFilter, setCourierFilter] = useState<'pending' | 'approved'>('pending');
@@ -82,6 +106,8 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     }
     if (activeTab === 'reviews') fetchAllReviews();
     if (activeTab === 'coupons') fetchAllCoupons();
+    if (activeTab === 'repasses') fetchRepasses();
+    if (activeTab === 'notifications') fetchNotifications();
   }, [activeTab, orderStatusFilter, orderDateFilter]);
 
   const fetchData = async () => {
@@ -316,6 +342,142 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     }
   };
 
+  const fetchRepasses = async () => {
+    setRepassesLoading(true);
+    try {
+      const today = new Date();
+      const dayOfWeek = today.getDay();
+      const lastMonday = new Date(today);
+      lastMonday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+      lastMonday.setHours(0, 0, 0, 0);
+
+      const { data: payments } = await supabase
+        .from('payments')
+        .select(`
+          split_store_amount,
+          split_courier_amount,
+          split_platform_amount,
+          orders(
+            store_id,
+            courier_id,
+            stores(name, asaas_wallet_id),
+            couriers(users:user_id(name), asaas_wallet_id)
+          )
+        `)
+        .eq('status', 'confirmed')
+        .gte('confirmed_at', lastMonday.toISOString());
+
+      const storeMap: Record<number, { name: string; amount: number; walletId: string }> = {};
+      const courierMap: Record<number, { name: string; amount: number; walletId: string }> = {};
+      let platformTotal = 0;
+
+      (payments || []).forEach((p: any) => {
+        const storeId = p.orders?.store_id;
+        const courierId = p.orders?.courier_id;
+
+        if (storeId && (p.split_store_amount || 0) > 0) {
+          if (!storeMap[storeId]) {
+            storeMap[storeId] = {
+              name: p.orders?.stores?.name || 'Loja',
+              amount: 0,
+              walletId: p.orders?.stores?.asaas_wallet_id || ''
+            };
+          }
+          storeMap[storeId].amount += p.split_store_amount || 0;
+        }
+
+        if (courierId && (p.split_courier_amount || 0) > 0) {
+          if (!courierMap[courierId]) {
+            courierMap[courierId] = {
+              name: p.orders?.couriers?.users?.name || 'Motoboy',
+              amount: 0,
+              walletId: p.orders?.couriers?.asaas_wallet_id || ''
+            };
+          }
+          courierMap[courierId].amount += p.split_courier_amount || 0;
+        }
+
+        platformTotal += p.split_platform_amount || 0;
+      });
+
+      const storeList = Object.values(storeMap).sort((a, b) => b.amount - a.amount);
+      const courierList = Object.values(courierMap).sort((a, b) => b.amount - a.amount);
+
+      setStoreRepasses(storeList);
+      setCourierRepasses(courierList);
+      setRepassesTotal({
+        stores: storeList.reduce((acc, s) => acc + s.amount, 0),
+        couriers: courierList.reduce((acc, c) => acc + c.amount, 0),
+        platform: platformTotal
+      });
+    } catch (err) {
+      console.error('fetchRepasses error:', err);
+      showToast('Erro ao carregar repasses', 'error');
+    } finally {
+      setRepassesLoading(false);
+    }
+  };
+
+  const fetchNotifications = async () => {
+    setNotifLoading(true);
+    try {
+      const { data } = await supabase
+        .from('notifications')
+        .select('*, stores(name)')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setNotifications(data || []);
+    } finally {
+      setNotifLoading(false);
+    }
+  };
+
+  const handleSendNotification = async () => {
+    if (!notifForm.title || !notifForm.body) return;
+    setSendingNotif(true);
+    try {
+      // 1. Salva a notificação no banco
+      const { data: notif, error } = await supabase.from('notifications').insert({
+        created_by: user!.id,
+        title: notifForm.title,
+        body: notifForm.body,
+        target_type: notifForm.targetType,
+        target_city: notifForm.targetCity || null,
+        scheduled_at: notifForm.scheduledAt ? new Date(notifForm.scheduledAt).toISOString() : null,
+        repeat_type: notifForm.repeatType || null,
+        repeat_day: notifForm.repeatType === 'weekly' ? notifForm.repeatDay : null,
+        repeat_hour: notifForm.repeatHour,
+        status: notifForm.scheduledAt ? 'scheduled' : 'pending',
+      }).select().single();
+
+      if (error) throw error;
+
+      // 2. Se não agendada, dispara imediatamente
+      if (!notifForm.scheduledAt) {
+        await supabase.functions.invoke('send-push', {
+          body: {
+            notificationId: notif.id,
+            title: notifForm.title,
+            body: notifForm.body,
+            targetType: notifForm.targetType,
+            targetCity: notifForm.targetCity || null,
+          }
+        });
+        showToast('Notificação enviada! 🔔', 'success');
+      } else {
+        showToast('Notificação agendada! ✅', 'success');
+      }
+
+      setShowNotifModal(false);
+      setNotifForm({ title: '', body: '', targetType: 'all', targetCity: '', scheduledAt: '', repeatType: '', repeatDay: 0, repeatHour: 18 });
+      fetchNotifications();
+    } catch (err: any) {
+      showToast(err.message || 'Erro ao enviar notificação', 'error');
+    } finally {
+      setSendingNotif(false);
+    }
+  };
+
   const openCourierDetails = async (courier: any) => {
     setLoading(true);
     try {
@@ -508,6 +670,8 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
           <button onClick={() => setActiveTab('couriers')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'couriers' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><Bike size={20} /><span>Motoboys</span></button>
           <button onClick={() => setActiveTab('coupons')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'coupons' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><Ticket size={20} /><span>Cupons</span></button>
           <button onClick={() => setActiveTab('reviews')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'reviews' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><Star size={20} /><span>Avaliações</span></button>
+          <button onClick={() => setActiveTab('repasses')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'repasses' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><BarChart3 size={20} /><span>Repasses</span></button>
+          <button onClick={() => setActiveTab('notifications')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'notifications' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><BellRing size={20} /><span>Notificações</span></button>
         </nav>
         <div className="p-4 border-t border-emerald-800/50">
           <button onClick={onExit} className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-emerald-200 hover:bg-red-500 hover:text-white font-medium transition-colors"><LogOut size={20} /><span>Sair do Sistema</span></button>
@@ -682,6 +846,211 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                 </>
               )}
             </div>
+          </div>
+        )}
+
+        {/* NOTIFICAÇÕES */}
+        {activeTab === 'notifications' && (
+          <div className="max-w-4xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800">Notificações</h2>
+                <p className="text-gray-500 text-sm mt-1">Dispare, agende e repita notificações para seus usuários.</p>
+              </div>
+              <button
+                onClick={() => setShowNotifModal(true)}
+                className="px-5 py-2.5 bg-brand-primary text-white rounded-xl font-bold text-sm shadow-sm hover:bg-green-600 transition-colors flex items-center gap-2"
+              >
+                <BellRing size={16} /> Nova Notificação
+              </button>
+            </div>
+
+            {/* Histórico */}
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="p-4 border-b border-gray-100">
+                <h3 className="font-bold text-gray-800">Histórico de Envios</h3>
+              </div>
+              {notifLoading ? (
+                <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-brand-primary" size={24} /></div>
+              ) : notifications.length === 0 ? (
+                <p className="p-6 text-center text-gray-400 text-sm">Nenhuma notificação enviada ainda</p>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {notifications.map((n) => (
+                    <div key={n.id} className="p-4">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="font-bold text-gray-800 text-sm">{n.title}</p>
+                          <p className="text-gray-500 text-sm mt-0.5">{n.body}</p>
+                          <div className="flex items-center gap-3 mt-2 flex-wrap">
+                            <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
+                              {n.target_type === 'all' ? '👥 Todos' : n.target_type === 'clients' ? '🛒 Clientes' : n.target_type === 'city' ? `📍 ${n.target_city}` : n.target_type === 'couriers' ? '🏍️ Motoboys' : '🏪 Lojas'}
+                            </span>
+                            {n.stores?.name && (
+                              <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">🏪 {n.stores.name}</span>
+                            )}
+                            {n.repeat_type && (
+                              <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full font-medium">
+                                🔁 {n.repeat_type === 'daily' ? 'Diário' : 'Semanal'}
+                              </span>
+                            )}
+                            {n.scheduled_at && n.status === 'scheduled' && (
+                              <span className="text-xs bg-yellow-50 text-yellow-600 px-2 py-0.5 rounded-full font-medium">
+                                ⏰ {new Date(n.scheduled_at).toLocaleString('pt-BR')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right ml-4 shrink-0">
+                          <span className={`text-xs font-bold px-2 py-1 rounded-full ${
+                            n.status === 'sent' ? 'bg-green-100 text-green-700' :
+                            n.status === 'scheduled' ? 'bg-yellow-100 text-yellow-700' :
+                            n.status === 'failed' ? 'bg-red-100 text-red-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {n.status === 'sent' ? `✅ Enviado (${n.sent_count})` : n.status === 'scheduled' ? '⏰ Agendado' : n.status === 'failed' ? '❌ Falhou' : '⏳ Pendente'}
+                          </span>
+                          <p className="text-xs text-gray-400 mt-1">{new Date(n.created_at).toLocaleDateString('pt-BR')}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal de nova notificação */}
+            {showNotifModal && (
+              <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-4">
+                <div className="bg-white rounded-3xl w-full max-w-lg p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                  <div className="flex justify-between items-center mb-5">
+                    <h2 className="text-xl font-black text-gray-800">Nova Notificação</h2>
+                    <button onClick={() => setShowNotifModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24} /></button>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">Título</label>
+                      <input
+                        type="text" maxLength={50} placeholder="Ex: 🔥 Promoção especial hoje!"
+                        value={notifForm.title}
+                        onChange={e => setNotifForm(p => ({ ...p, title: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">Mensagem</label>
+                      <textarea
+                        rows={3} maxLength={150} placeholder="Ex: Use o cupom PROMO10 e ganhe 10% de desconto!"
+                        value={notifForm.body}
+                        onChange={e => setNotifForm(p => ({ ...p, body: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none resize-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">Destinatários</label>
+                      <select
+                        value={notifForm.targetType}
+                        onChange={e => setNotifForm(p => ({ ...p, targetType: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                      >
+                        <option value="all">👥 Todos os usuários</option>
+                        <option value="clients">🛒 Só clientes</option>
+                        <option value="couriers">🏍️ Só motoboys</option>
+                        <option value="stores">🏪 Só lojas</option>
+                        <option value="city">📍 Por cidade</option>
+                      </select>
+                    </div>
+
+                    {notifForm.targetType === 'city' && (
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1">Cidade</label>
+                        <input
+                          type="text" placeholder="Ex: Alfenas"
+                          value={notifForm.targetCity}
+                          onChange={e => setNotifForm(p => ({ ...p, targetCity: e.target.value }))}
+                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                        />
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">Agendar para (opcional)</label>
+                      <input
+                        type="datetime-local"
+                        value={notifForm.scheduledAt}
+                        onChange={e => setNotifForm(p => ({ ...p, scheduledAt: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                      />
+                      <p className="text-xs text-gray-400 mt-1">Deixe em branco para enviar agora</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-gray-600 mb-1">Repetição</label>
+                      <select
+                        value={notifForm.repeatType}
+                        onChange={e => setNotifForm(p => ({ ...p, repeatType: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                      >
+                        <option value="">Sem repetição</option>
+                        <option value="daily">🔁 Diário</option>
+                        <option value="weekly">📅 Semanal</option>
+                      </select>
+                    </div>
+
+                    {notifForm.repeatType === 'weekly' && (
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1">Dia da semana</label>
+                        <select
+                          value={notifForm.repeatDay}
+                          onChange={e => setNotifForm(p => ({ ...p, repeatDay: parseInt(e.target.value) }))}
+                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                        >
+                          <option value={0}>Domingo</option>
+                          <option value={1}>Segunda-feira</option>
+                          <option value={2}>Terça-feira</option>
+                          <option value={3}>Quarta-feira</option>
+                          <option value={4}>Quinta-feira</option>
+                          <option value={5}>Sexta-feira</option>
+                          <option value={6}>Sábado</option>
+                        </select>
+                      </div>
+                    )}
+
+                    {notifForm.repeatType && (
+                      <div>
+                        <label className="block text-xs font-bold text-gray-600 mb-1">Horário do envio</label>
+                        <input
+                          type="number" min={0} max={23}
+                          value={notifForm.repeatHour}
+                          onChange={e => setNotifForm(p => ({ ...p, repeatHour: parseInt(e.target.value) }))}
+                          className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-3 mt-6">
+                    <button
+                      onClick={() => setShowNotifModal(false)}
+                      className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleSendNotification}
+                      disabled={sendingNotif || !notifForm.title || !notifForm.body}
+                      className="flex-1 py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center gap-2 disabled:opacity-50"
+                    >
+                      {sendingNotif ? <Loader2 size={18} className="animate-spin" /> : <BellRing size={18} />}
+                      {notifForm.scheduledAt ? 'Agendar' : 'Enviar agora'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1072,6 +1441,105 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                   Nenhuma avaliação recebida ainda.
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* REPASSES */}
+        {activeTab === 'repasses' && (
+          <div className="max-w-6xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800">Repasses da Semana</h2>
+                <p className="text-gray-500 text-sm mt-1">
+                  Valores acumulados desde segunda-feira. Transferência automática via Asaas toda segunda-feira.
+                </p>
+              </div>
+              <button
+                onClick={fetchRepasses}
+                disabled={repassesLoading}
+                className="px-4 py-2 bg-white border border-gray-200 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-50 transition-colors flex items-center gap-2"
+              >
+                {repassesLoading ? <Loader2 size={16} className="animate-spin" /> : '↻'} Atualizar
+              </button>
+            </div>
+
+            {/* Cards de totais */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Total para Lojas</p>
+                <p className="text-3xl font-black text-brand-primary">R$ {repassesTotal.stores.toFixed(2)}</p>
+              </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Total para Motoboys</p>
+                <p className="text-3xl font-black text-brand-primary">R$ {repassesTotal.couriers.toFixed(2)}</p>
+              </div>
+              <div className="bg-gradient-to-br from-brand-primary to-green-600 p-6 rounded-2xl shadow-sm">
+                <p className="text-xs font-bold text-white/70 uppercase tracking-wider mb-2">Comissão da Plataforma</p>
+                <p className="text-3xl font-black text-white">R$ {repassesTotal.platform.toFixed(2)}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Lojas */}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="p-4 border-b border-gray-100 flex items-center gap-2">
+                  <Store size={18} className="text-brand-primary" />
+                  <h3 className="font-bold text-gray-800">Lojas Parceiras</h3>
+                  <span className="ml-auto text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-bold">
+                    {storeRepasses.length}
+                  </span>
+                </div>
+                {repassesLoading ? (
+                  <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-brand-primary" size={24} /></div>
+                ) : storeRepasses.length === 0 ? (
+                  <p className="p-6 text-center text-gray-400 text-sm">Nenhum repasse esta semana</p>
+                ) : (
+                  <div className="divide-y divide-gray-100">
+                    {storeRepasses.map((s, i) => (
+                      <div key={i} className="p-4 flex justify-between items-center">
+                        <div>
+                          <p className="font-bold text-gray-800 text-sm">{s.name}</p>
+                          {s.walletId && (
+                            <p className="text-xs text-gray-400 mt-0.5">Wallet: {s.walletId.slice(0, 12)}...</p>
+                          )}
+                        </div>
+                        <span className="font-black text-brand-primary">R$ {s.amount.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Motoboys */}
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                <div className="p-4 border-b border-gray-100 flex items-center gap-2">
+                  <Bike size={18} className="text-brand-primary" />
+                  <h3 className="font-bold text-gray-800">Motoboys</h3>
+                  <span className="ml-auto text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-bold">
+                    {courierRepasses.length}
+                  </span>
+                </div>
+                {repassesLoading ? (
+                  <div className="p-8 flex justify-center"><Loader2 className="animate-spin text-brand-primary" size={24} /></div>
+                ) : courierRepasses.length === 0 ? (
+                  <p className="p-6 text-center text-gray-400 text-sm">Nenhum repasse esta semana</p>
+                ) : (
+                  <div className="divide-y divide-gray-100">
+                    {courierRepasses.map((c, i) => (
+                      <div key={i} className="p-4 flex justify-between items-center">
+                        <div>
+                          <p className="font-bold text-gray-800 text-sm">{c.name}</p>
+                          {c.walletId && (
+                            <p className="text-xs text-gray-400 mt-0.5">Wallet: {c.walletId.slice(0, 12)}...</p>
+                          )}
+                        </div>
+                        <span className="font-black text-brand-primary">R$ {c.amount.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         )}

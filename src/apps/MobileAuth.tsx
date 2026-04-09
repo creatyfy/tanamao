@@ -48,13 +48,12 @@ export default function MobileAuth() {
   const [formData, setFormData] = useState({
     email: '', password: '', phone: '',
     cep: '', street: '', number: '', complement: '', neighborhood: '', city: '', state: '',
-    name: '',
+    name: '', cpf: '',
     storeName: '', ownerName: '', cnpj: '', description: '', category: '', prepTime: '', minOrder: '', deliveryFee: '',
     acceptsPix: true, acceptsCard: true, acceptsCash: false,
-    fullName: '', cpf: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', pixKey: '', operationCity: ''
+    fullName: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', pixKey: '', operationCity: ''
   });
 
-  // Busca as categorias globais para o cadastro de lojas
   useEffect(() => {
     const fetchCategories = async () => {
       try {
@@ -65,7 +64,7 @@ export default function MobileAuth() {
           .order('sort_order');
         if (data) setGlobalCategories(data);
       } catch (error) {
-        console.error("Erro ao buscar categorias:", error);
+        console.error("Error fetching categories:", error);
       }
     };
     fetchCategories();
@@ -77,7 +76,6 @@ export default function MobileAuth() {
     
     setFormData(prev => ({ ...prev, [name]: finalValue }));
 
-    // Busca automática de CEP
     if (name === 'cep') {
       const cleanCep = finalValue.replace(/\D/g, '');
       if (cleanCep.length === 8) {
@@ -97,7 +95,7 @@ export default function MobileAuth() {
             setErrorMsg('CEP não encontrado.');
           }
         } catch (error) {
-          console.error("Erro ao buscar CEP:", error);
+          console.error("Error fetching zip code:", error);
         }
       }
     }
@@ -114,7 +112,7 @@ export default function MobileAuth() {
   const handleBannerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (file.size > 5 * 1024 * 1024) { // Max 5MB
+      if (file.size > 5 * 1024 * 1024) { 
         setErrorMsg('A imagem do banner deve ter no máximo 5MB.');
         return;
       }
@@ -129,14 +127,14 @@ export default function MobileAuth() {
     
     if (msg.includes('Invalid login credentials')) {
       msg = 'E-mail ou senha incorretos.';
+    } else if (msg.includes('Failed to fetch')) {
+      msg = 'Erro de conexão ou configuração. Verifique se as chaves do Supabase no arquivo .env estão corretas.';
     } else if (msg.includes('rate limit')) {
       msg = 'Muitas tentativas. Aguarde um momento.';
     } else if (msg.includes('duplicate key')) {
-      msg = 'Algum dado informado (como CPF, CNPJ ou Placa) já está em uso por outra conta.';
+      msg = 'Alguns dados fornecidos (como RG, CNPJ ou Placa) já estão em uso por outra conta.';
     } else if (msg.includes('too long')) {
-      msg = 'Algum campo excedeu o limite de caracteres. Verifique os dados informados.';
-    } else if (msg.includes('Failed to fetch')) {
-      msg = 'Erro de conexão. Verifique sua internet.';
+      msg = 'Algum campo excedeu o limite de caracteres. Verifique os dados fornecidos.';
     } else if (msg.includes('new row violates row-level security')) {
       msg = 'Erro de permissão no banco de dados. Por favor, aplique as migrações SQL pendentes.';
     }
@@ -160,10 +158,9 @@ export default function MobileAuth() {
         const { data: profile } = await supabase.from('users').select('id').eq('id', data.user.id).maybeSingle();
         if (!profile) {
           await supabase.auth.signOut();
-          throw new Error('Seu cadastro ficou incompleto. Por favor, vá em "Cadastre-se agora", preencha os dados e use a MESMA SENHA para finalizar.');
+          throw new Error('Seu cadastro está incompleto. Por favor, vá em "Cadastre-se agora", preencha os dados e use a MESMA SENHA para finalizar.');
         }
 
-        // FIX: Força o reload da página após o login para evitar a tela branca (limpa o cache de estado do React)
         window.location.reload();
 
       } else {
@@ -209,7 +206,7 @@ export default function MobileAuth() {
               const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
               finalAvatarUrl = publicUrlData.publicUrl;
             } else {
-              console.warn('Aviso: Falha ao fazer upload da foto. O bucket "avatars" pode não existir.', uploadError);
+              console.warn('Aviso: Falha ao enviar foto. O bucket "avatars" pode não existir.', uploadError);
             }
           } catch (err) {
             console.warn('Erro ao processar foto:', err);
@@ -230,7 +227,7 @@ export default function MobileAuth() {
               const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
               finalBannerUrl = publicUrlData.publicUrl;
             } else {
-              console.warn('Aviso: Falha ao fazer upload do banner. O bucket "stores" pode não existir.', uploadError);
+              console.warn('Aviso: Falha ao enviar banner. O bucket "stores" pode não existir.', uploadError);
             }
           } catch (err) {
             console.warn('Erro ao processar banner:', err);
@@ -250,7 +247,8 @@ export default function MobileAuth() {
           phone: cleanPhone,
           role: roleMap[registerRole],
           is_active: isActive, 
-          password_hash: 'supabase_auth'
+          password_hash: 'supabase_auth',
+          cpf: formData.cpf ? formData.cpf.replace(/\D/g, '') : null,
         };
         
         if (finalAvatarUrl) userData.avatar_url = finalAvatarUrl;
@@ -287,11 +285,11 @@ export default function MobileAuth() {
           const storeData: any = {
             owner_id: userId,
             name: formData.storeName || 'Nova Loja',
-            slug: `loja-${userId.substring(0,8)}`,
+            slug: `store-${userId.substring(0,8)}`,
             cnpj: cleanCnpj,
             phone: cleanPhone,
             description: formData.description || null,
-            global_category_id: formData.category ? parseInt(formData.category) : null, // Vínculo com a categoria global
+            global_category_id: formData.category ? parseInt(formData.category) : null,
             avg_prep_time_min: formData.prepTime ? parseInt(formData.prepTime) : 30,
             min_order_value: formData.minOrder ? parseFloat(formData.minOrder) : 0,
             delivery_fee: formData.deliveryFee ? parseFloat(formData.deliveryFee) : 0,
@@ -301,7 +299,8 @@ export default function MobileAuth() {
             address_id: addressId,
             status: 'pending', 
             is_approved: false,
-            commission_rate: 4 // Taxa do app definida para 4%
+            commission_rate: 4,
+            pix_key: formData.pixKey || null
           };
 
           if (finalBannerUrl) storeData.banner_url = finalBannerUrl;
@@ -335,6 +334,23 @@ export default function MobileAuth() {
           } else {
             const { error: courierErr } = await supabase.from('couriers').insert(courierData);
             if (courierErr) throw new Error(`Erro ao criar motoboy: ${courierErr.message}`);
+          }
+        }
+
+        // Integração Asaas - Criação de Subconta
+        if (registerRole === 'store' && userId) {
+          const { data: savedStore } = await supabase.from('stores').select('id').eq('owner_id', userId).single();
+          if (savedStore) {
+            supabase.functions.invoke('create-asaas-account', {
+              body: { entityType: 'store', entityId: savedStore.id }
+            }).catch(err => console.warn('Asaas:', err));
+          }
+        } else if (registerRole === 'courier' && userId) {
+          const { data: savedCourier } = await supabase.from('couriers').select('id').eq('user_id', userId).single();
+          if (savedCourier) {
+            supabase.functions.invoke('create-asaas-account', {
+              body: { entityType: 'courier', entityId: savedCourier.id }
+            }).catch(err => console.warn('Asaas:', err));
           }
         }
 
@@ -383,6 +399,7 @@ export default function MobileAuth() {
                 {registerRole === 'client' && (
                   <div className="space-y-1">
                     <InputField icon={User} name="name" placeholder="Nome completo" required value={formData.name} onChange={handleChange} />
+                    <InputField icon={FileText} name="cpf" placeholder="CPF" required value={formData.cpf} onChange={handleChange} maxLength={14} />
                     <InputField icon={Mail} name="email" placeholder="Seu e-mail" type="email" required value={formData.email} onChange={handleChange} />
                     <InputField icon={Lock} name="password" placeholder="Sua senha" type="password" required value={formData.password} onChange={handleChange} />
                   </div>
@@ -390,7 +407,7 @@ export default function MobileAuth() {
                 
                 {registerRole === 'store' && (
                   <>
-                    <FormSection title="Dados do Negócio">
+                    <FormSection title="Dados da Empresa">
                       <InputField icon={Store} name="storeName" placeholder="Nome da loja" required value={formData.storeName} onChange={handleChange} />
                       <InputField icon={User} name="ownerName" placeholder="Nome do responsável" required value={formData.ownerName} onChange={handleChange} />
                       <InputField icon={FileText} name="cnpj" placeholder="CPF ou CNPJ" required value={formData.cnpj} onChange={handleChange} />
@@ -400,7 +417,6 @@ export default function MobileAuth() {
                     </FormSection>
                     <FormSection title="Informações da Loja">
                       
-                      {/* Categoria Dropdown */}
                       <div className="relative mb-3">
                         <Store className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                         <select 
@@ -410,7 +426,7 @@ export default function MobileAuth() {
                           onChange={handleChange} 
                           className="w-full bg-white border border-gray-200 rounded-xl py-3 pl-11 pr-4 focus:outline-none focus:ring-2 focus:ring-brand-primary text-sm font-medium text-brand-dark appearance-none"
                         >
-                          <option value="" disabled>Selecione a Categoria Principal</option>
+                          <option value="" disabled>Selecione a categoria principal</option>
                           {globalCategories.map(cat => (
                             <option key={cat.id} value={cat.id}>{cat.name}</option>
                           ))}
@@ -419,7 +435,6 @@ export default function MobileAuth() {
 
                       <InputField icon={FileText} name="description" placeholder="Descrição curta da loja" value={formData.description} onChange={handleChange} />
                       
-                      {/* Banner Upload */}
                       <div className="mt-4">
                         <label className="block text-sm font-bold text-gray-700 mb-2">Banner da Loja</label>
                         <div className="flex flex-col items-center justify-center">
@@ -434,7 +449,7 @@ export default function MobileAuth() {
                             ) : (
                               <div className="flex flex-col items-center text-gray-400">
                                 <ImageIcon size={32} className="mb-2" />
-                                <span className="text-sm font-bold">Clique para enviar banner</span>
+                                <span className="text-sm font-bold">Clique para enviar o banner</span>
                                 <span className="text-xs mt-1">Max: 5MB</span>
                               </div>
                             )}
@@ -464,7 +479,7 @@ export default function MobileAuth() {
                         <div className="flex-[2]"><InputField name="city" placeholder="Cidade" required value={formData.city} onChange={handleChange} /></div>
                         <div className="flex-1 relative mb-3">
                           <select name="state" required value={formData.state} onChange={handleChange} className="w-full bg-white border border-gray-200 rounded-xl py-3 pl-4 pr-4 focus:outline-none focus:ring-2 focus:ring-brand-primary text-sm font-medium text-brand-dark appearance-none">
-                            <option value="" disabled>UF</option>
+                            <option value="" disabled>Estado</option>
                             {UFS.map(uf => <option key={uf} value={uf}>{uf}</option>)}
                           </select>
                         </div>
@@ -473,12 +488,25 @@ export default function MobileAuth() {
                     <FormSection title="Operação e Taxas">
                       <InputField icon={Clock} name="prepTime" placeholder="Tempo médio de preparo (min)" type="number" value={formData.prepTime} onChange={handleChange} />
                       <InputField icon={DollarSign} name="minOrder" placeholder="Valor mínimo do pedido (R$)" type="number" value={formData.minOrder} onChange={handleChange} />
-                      <InputField icon={Bike} name="deliveryFee" placeholder="Taxa de entrega base (R$)" type="number" value={formData.deliveryFee} onChange={handleChange} />
+                      <InputField icon={Bike} name="deliveryFee" placeholder="Taxa base de entrega (R$)" type="number" value={formData.deliveryFee} onChange={handleChange} />
+                    </FormSection>
+                    <FormSection title="Dados Financeiros">
+                      <InputField
+                        icon={DollarSign}
+                        name="pixKey"
+                        placeholder="Chave PIX (CPF, e-mail, telefone ou aleatória)"
+                        required
+                        value={formData.pixKey}
+                        onChange={handleChange}
+                      />
+                      <p className="text-xs text-gray-500 mt-1 px-1">
+                        Os pagamentos digitais serão enviados toda segunda-feira para esta chave.
+                      </p>
                     </FormSection>
                     <FormSection title="Formas de Pagamento Aceitas">
                       <div className="flex flex-col space-y-2">
-                        <label className="flex items-center"><input type="checkbox" name="acceptsPix" checked={formData.acceptsPix} onChange={handleChange} className="mr-2" /> PIX (App)</label>
-                        <label className="flex items-center"><input type="checkbox" name="acceptsCard" checked={formData.acceptsCard} onChange={handleChange} className="mr-2" /> Cartão (App)</label>
+                        <label className="flex items-center"><input type="checkbox" name="acceptsPix" checked={formData.acceptsPix} onChange={handleChange} className="mr-2" /> PIX (No app)</label>
+                        <label className="flex items-center"><input type="checkbox" name="acceptsCard" checked={formData.acceptsCard} onChange={handleChange} className="mr-2" /> Cartão (No app)</label>
                         <label className="flex items-center"><input type="checkbox" name="acceptsCash" checked={formData.acceptsCash} onChange={handleChange} className="mr-2" /> Dinheiro (Na entrega)</label>
                       </div>
                     </FormSection>
@@ -508,7 +536,7 @@ export default function MobileAuth() {
                           className="hidden"
                         />
                         <p className="text-xs text-gray-500 mt-3 text-center max-w-[250px]">
-                          Toque acima para abrir a câmera do seu celular e tirar uma foto do seu rosto.
+                          Toque acima para abrir a câmera e tirar uma foto do seu rosto.
                         </p>
                       </div>
                     </FormSection>
@@ -533,7 +561,7 @@ export default function MobileAuth() {
                         <div className="flex-[2]"><InputField name="city" placeholder="Cidade" required value={formData.city} onChange={handleChange} /></div>
                         <div className="flex-1 relative mb-3">
                           <select name="state" required value={formData.state} onChange={handleChange} className="w-full bg-white border border-gray-200 rounded-xl py-3 pl-4 pr-4 focus:outline-none focus:ring-2 focus:ring-brand-primary text-sm font-medium text-brand-dark appearance-none">
-                            <option value="" disabled>UF</option>
+                            <option value="" disabled>Estado</option>
                             {UFS.map(uf => <option key={uf} value={uf}>{uf}</option>)}
                           </select>
                         </div>
@@ -563,7 +591,7 @@ export default function MobileAuth() {
                       <InputField icon={DollarSign} name="pixKey" placeholder="Chave PIX para recebimento" required value={formData.pixKey} onChange={handleChange} />
                     </FormSection>
                     <FormSection title="Área de Atuação">
-                      <InputField icon={Map} name="operationCity" placeholder="Cidade onde deseja trabalhar" required value={formData.operationCity} onChange={handleChange} />
+                      <InputField icon={Map} name="operationCity" placeholder="Cidade de atuação" required value={formData.operationCity} onChange={handleChange} />
                     </FormSection>
                   </>
                 )}
@@ -578,9 +606,9 @@ export default function MobileAuth() {
           </form>
 
           <div className="mt-auto text-center pt-4 border-t border-gray-100 shrink-0" style={{paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))'}}>
-            <p className="text-gray-500 text-sm">{isLogin ? "Ainda não tem uma conta?" : "Já tem uma conta?"}</p>
+            <p className="text-gray-500 text-sm">{isLogin ? "Não tem uma conta?" : "Já tem uma conta?"}</p>
             <button onClick={() => { setIsLogin(!isLogin); setRegisterRole('client'); setErrorMsg(''); }} className="mt-2 text-brand-dark font-bold text-base hover:text-brand-primary transition-colors">
-              {isLogin ? "Cadastre-se agora" : "Faça login"}
+              {isLogin ? "Cadastre-se agora" : "Entrar"}
             </button>
           </div>
         </div>

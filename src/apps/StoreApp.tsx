@@ -34,6 +34,8 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [dashboardFilter, setDashboardFilter] = useState<'today' | '7days' | '15days' | '30days' | 'custom'>('today');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
+  const [storeBalance, setStoreBalance] = useState<number | null>(null);
+  const [nextPayoutDate, setNextPayoutDate] = useState<string>('');
 
   // History Tab
   const [historyFilter, setHistoryFilter] = useState<'today' | 'yesterday' | 'week'>('today');
@@ -58,6 +60,9 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   // Coupon Modal State
   const [showCouponModal, setShowCouponModal] = useState(false);
   const [couponForm, setCouponForm] = useState({ code: '', type: 'percentage', value: '', min_order_value: '0', expires_at: '', is_active: true });
+  const [newCouponCode, setNewCouponCode] = useState<string>('');
+  const [showNotifyModal, setShowNotifyModal] = useState(false);
+  const [sendingCouponNotif, setSendingCouponNotif] = useState(false);
 
   // Settings Form State
   const [settingsForm, setSettingsForm] = useState({
@@ -87,6 +92,8 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [activeChatOrderId, setActiveChatOrderId] = useState<number | null>(null);
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const storeOrdersChannelRef = React.useRef<any>(null);
+  const storeChatsChannelRef = React.useRef<any>(null);
 
   // Timer para busca de motoboys
   const [now, setNow] = useState(Date.now());
@@ -150,6 +157,29 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         const revenue = periodOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.total, 0);
         setDashboardMetrics({ totalOrders, deliveredOrders, cancelledOrders, revenue });
       }
+
+      // Saldo disponível — soma dos split_store_amount de pagamentos confirmados ainda não repassados
+      const { data: pendingPayments } = await supabase
+        .from('payments')
+        .select('split_store_amount, confirmed_at')
+        .eq('status', 'confirmed')
+        .in('order_id',
+          (await supabase
+            .from('orders')
+            .select('id')
+            .eq('store_id', store.id)
+          ).data?.map((o: any) => o.id) || []
+        );
+
+      const balance = (pendingPayments || []).reduce((acc: number, p: any) => acc + (p.split_store_amount || 0), 0);
+      setStoreBalance(balance);
+
+      // Próxima segunda-feira
+      const today = new Date();
+      const daysUntilMonday = (8 - today.getDay()) % 7 || 7;
+      const nextMonday = new Date(today);
+      nextMonday.setDate(today.getDate() + daysUntilMonday);
+      setNextPayoutDate(nextMonday.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
     };
 
     if (activeTab === 'dashboard' && store) {
@@ -224,7 +254,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const fetchStoreData = async () => {
     setLoading(true);
     try {
-      const { data: storeData } = await supabase.from('stores').select('*').eq('owner_id', user!.id).maybeSingle();
+      const { data: storeData } = await supabase.from('stores').select('*, addresses(*)').eq('owner_id', user!.id).maybeSingle();
       if (storeData) {
         
         const { data: storeReviews } = await supabase
@@ -253,6 +283,12 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         fetchProducts(storeData.id);
         fetchProductCategories(storeData.id);
         
+        // Remove canal anterior de forma síncrona
+        if (storeOrdersChannelRef.current) {
+          supabase.removeChannel(storeOrdersChannelRef.current);
+          storeOrdersChannelRef.current = null;
+        }
+
         const channelOrders = supabase.channel(`store_orders_${storeData.id}`)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `store_id=eq.${storeData.id}` }, (payload) => {
             
@@ -265,6 +301,14 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             fetchOrders(storeData.id);
             setLastUpdate(Date.now());
           }).subscribe();
+
+        storeOrdersChannelRef.current = channelOrders;
+
+        // Remove canal de chat anterior de forma síncrona
+        if (storeChatsChannelRef.current) {
+          supabase.removeChannel(storeChatsChannelRef.current);
+          storeChatsChannelRef.current = null;
+        }
 
         const channelChats = supabase.channel(`store_chats_${storeData.id}`)
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'order_chats' }, (payload) => {
@@ -282,10 +326,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             });
           }).subscribe();
 
-        return () => { 
-          supabase.removeChannel(channelOrders); 
-          supabase.removeChannel(channelChats);
-        };
+        storeChatsChannelRef.current = channelChats;
       }
     } catch (error) {
       console.error('Erro ao carregar loja:', error);
@@ -831,9 +872,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         throw error;
       }
 
-      showToast('Cupom criado com sucesso!');
+      const createdCode = couponData.code;
+      setNewCouponCode(createdCode);
       setShowCouponModal(false);
       fetchCoupons(store.id);
+      setShowNotifyModal(true);
     } catch (error: any) {
       showToast(error.message || 'Erro ao criar cupom', 'error');
     } finally {
@@ -1171,6 +1214,30 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                   <div className="p-3 bg-yellow-50 rounded-xl text-yellow-500 w-fit mb-4"><Star size={24} /></div>
                   <h3 className="text-3xl font-black text-brand-dark">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</h3>
                   <p className="text-sm text-gray-500 font-medium mt-1">Avaliação geral</p>
+                </div>
+                {/* Card de Saldo Disponível — largura total abaixo dos outros cards */}
+                <div className="col-span-2 md:col-span-3 lg:col-span-5 bg-gradient-to-r from-brand-primary to-green-600 p-6 rounded-2xl shadow-md text-white">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="p-2 bg-white/20 rounded-xl">
+                          <DollarSign size={20} className="text-white" />
+                        </div>
+                        <p className="font-bold text-white/80 text-sm uppercase tracking-wider">Saldo a Receber</p>
+                      </div>
+                      <h3 className="text-4xl font-black text-white mt-2">
+                        {storeBalance !== null ? `R$ ${storeBalance.toFixed(2)}` : '—'}
+                      </h3>
+                      <p className="text-white/70 text-sm mt-1">
+                        Pagamentos digitais confirmados aguardando repasse
+                      </p>
+                    </div>
+                    <div className="bg-white/20 rounded-2xl p-4 text-center min-w-[180px]">
+                      <p className="text-white/80 text-xs font-bold uppercase tracking-wider mb-1">Próximo repasse</p>
+                      <p className="text-white font-black text-sm capitalize">{nextPayoutDate || 'Toda segunda-feira'}</p>
+                      <p className="text-white/70 text-xs mt-1">via PIX cadastrado</p>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2132,6 +2199,78 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             <div className="flex space-x-3">
               <button onClick={() => setConfirmModal(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-colors">Cancelar</button>
               <button onClick={confirmModal.onConfirm} className="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors">Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: notificar clientes sobre o cupom */}
+      {showNotifyModal && store && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="text-center mb-5">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                <BellRing size={28} className="text-brand-primary" />
+              </div>
+              <h2 className="text-xl font-black text-gray-800">Cupom criado! 🎉</h2>
+              <p className="text-gray-500 text-sm mt-2">
+                Quer avisar os clientes da sua cidade sobre o cupom <span className="font-bold text-brand-primary">{newCouponCode}</span>?
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={async () => {
+                  setSendingCouponNotif(true);
+                  try {
+                    const { data: notif } = await supabase
+                      .from('notifications')
+                      .insert({
+                        created_by: user!.id,
+                        title: `🎁 Cupom especial de ${store.name}!`,
+                        body: `Use o código ${newCouponCode} e ganhe desconto no seu próximo pedido!`,
+                        target_type: 'city',
+                        target_city: store.addresses?.city || null,
+                        store_id: store.id,
+                        status: 'pending',
+                      })
+                      .select()
+                      .single();
+
+                    await supabase.functions.invoke('send-push', {
+                      body: {
+                        notificationId: notif?.id,
+                        title: `🎁 Cupom especial de ${store.name}!`,
+                        body: `Use o código ${newCouponCode} e ganhe desconto no seu próximo pedido!`,
+                        targetType: 'city',
+                        targetCity: store.addresses?.city || null,
+                      }
+                    });
+
+                    showToast('Clientes notificados! 🔔', 'success');
+                  } catch {
+                    showToast('Cupom criado, mas falha ao notificar.', 'warning');
+                  } finally {
+                    setSendingCouponNotif(false);
+                    setShowNotifyModal(false);
+                    setNewCouponCode('');
+                  }
+                }}
+                disabled={sendingCouponNotif}
+                className="w-full py-3.5 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center gap-2 disabled:opacity-50"
+              >
+                {sendingCouponNotif
+                  ? <Loader2 size={18} className="animate-spin" />
+                  : <BellRing size={18} />}
+                Sim, notificar clientes da cidade
+              </button>
+
+              <button
+                onClick={() => { setShowNotifyModal(false); setNewCouponCode(''); }}
+                className="w-full py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm"
+              >
+                Agora não
+              </button>
             </div>
           </div>
         </div>

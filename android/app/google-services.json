@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "227341511769",
+    "project_id": "tanamao-f5623",
+    "storage_bucket": "tanamao-f5623.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:227341511769:android:eebe1de2d62b4722861548",
+        "android_client_info": {
+          "package_name": "com.tanamaoc.delivery"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDHldqMSQemoN9L0GjyxPXeokOOZgoMzik"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

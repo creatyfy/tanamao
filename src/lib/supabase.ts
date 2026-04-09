@@ -1,7 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://fgjlyvkdkhxvzsgxuuad.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnamx5dmtka2h4dnpzZ3h1dWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyODg0MDEsImV4cCI6MjA4OTg2NDQwMX0.TLh27Ok-uAlaKihA1_1mE5i4yRIRWYsKcT6o_pu1TyI';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://ymeyfhqietbznqslhjbh.supabase.co';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+
+if (!supabaseAnonKey.startsWith('eyJ')) {
+  console.error('CRITICAL: Invalid Supabase Anon Key. The key must be a JWT starting with "eyJ". You are currently using a Stripe key or an empty string.');
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
