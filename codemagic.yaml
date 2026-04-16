@@ -25,9 +25,9 @@ workflows:
           # Remove pasta ios para garantir setup limpo
           rm -rf ios
           # Adiciona plataforma iOS (Capacitor 8 usa Swift Package Manager, sem Podfile)
-          npx cap add ios
+          yarn cap add ios
           # Sincroniza os assets web com o projeto iOS
-          npx cap sync ios
+          yarn cap sync ios
           # Verifica se o projeto Xcode foi criado
           if [ ! -d "$XCODE_PROJECT" ]; then
             echo "ERRO: Projeto Xcode não encontrado em $XCODE_PROJECT"
