@@ -22,16 +22,33 @@ workflows:
           yarn build
       - name: Setup iOS platform
         script: |
+          # Verificar se o dist foi gerado
+          if [ ! -d "dist" ]; then
+            echo "ERRO: pasta dist não encontrada. O build web falhou."
+            exit 1
+          fi
+          echo "dist encontrado:"
+          ls dist/
+      
+          # Verificar se o Capacitor CLI está disponível
+          echo "Capacitor CLI:"
+          ./node_modules/.bin/cap --version
+      
           # Remove pasta ios para garantir setup limpo
           rm -rf ios
-          # Adiciona plataforma iOS (Capacitor 8 usa Swift Package Manager, sem Podfile)
-          yarn cap add ios
+      
+          # Adiciona plataforma iOS
+          ./node_modules/.bin/cap add ios
+      
           # Sincroniza os assets web com o projeto iOS
-          yarn cap sync ios
+          ./node_modules/.bin/cap sync ios
+      
           # Verifica se o projeto Xcode foi criado
+          echo "Estrutura ios criada:"
+          find ios -name "*.xcodeproj" -o -name "*.xcworkspace" 2>/dev/null
+      
           if [ ! -d "$XCODE_PROJECT" ]; then
             echo "ERRO: Projeto Xcode não encontrado em $XCODE_PROJECT"
-            find ios -name "*.xcodeproj" -o -name "*.xcworkspace" 2>/dev/null
             exit 1
           fi
           echo "Projeto Xcode encontrado: $XCODE_PROJECT"
