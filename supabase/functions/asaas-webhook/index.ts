@@ -3,6 +3,14 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 serve(async (req) => {
   try {
+    // Valida que a requisição vem realmente do Asaas
+    const asaasToken = req.headers.get('asaas-access-token')
+    const expectedToken = Deno.env.get('ASAAS_WEBHOOK_TOKEN')
+    if (!asaasToken || !expectedToken || asaasToken !== expectedToken) {
+      console.error('Webhook: token inválido ou ausente')
+      return new Response('Unauthorized', { status: 401 })
+    }
+
     const payload = await req.json()
     const { event, payment } = payload
 

@@ -7,22 +7,27 @@ interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  isPasswordRecovery: boolean;
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<void>;
+  clearRecovery: () => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   profile: null,
   loading: true,
+  isPasswordRecovery: false,
   signOut: async () => {},
   deleteAccount: async () => {},
+  clearRecovery: () => {},
 });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   // Função auxiliar para limpar a sessão local em caso de erro
   const clearSession = () => {
@@ -82,6 +87,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     // Escuta mudanças de estado da autenticação
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsPasswordRecovery(true);
+        setLoading(false);
+        return;
+      }
+
       // Se o token falhar ao atualizar ou o usuário sair, limpa tudo
       if (event === 'TOKEN_REFRESH_FAILED' || event === 'SIGNED_OUT') {
         clearSession();
@@ -101,6 +112,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  const clearRecovery = () => {
+    setIsPasswordRecovery(false);
+  };
 
   const signOut = async () => {
     try {
@@ -135,7 +150,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signOut, deleteAccount }}>
+    <AuthContext.Provider value={{ user, profile, loading, isPasswordRecovery, signOut, deleteAccount, clearRecovery }}>
       {children}
     </AuthContext.Provider>
   );

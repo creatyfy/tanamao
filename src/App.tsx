@@ -6,7 +6,7 @@ import StoreApp from './apps/StoreApp';
 import CourierApp from './apps/CourierApp';
 import AdminApp from './apps/AdminApp';
 import ResetPasswordScreen from './apps/ResetPasswordScreen';
-import { Loader2, Clock } from 'lucide-react';
+import { Loader2, Clock, XCircle } from 'lucide-react';
 
 function App() {
   const { user, profile, loading, signOut, isPasswordRecovery, clearRecovery } = useAuth();
@@ -29,7 +29,22 @@ function App() {
     return <MobileAuth />;
   }
 
-  // Bloqueia o acesso para usuários não aprovados (exceto admin)
+  // Verifica se a conta foi excluída pelo usuário (Soft Delete)
+  // Clientes inativos SEMPRE são contas excluídas, pois cliente não tem fase de aprovação.
+  if (profile.name === 'Conta Excluída' || (!profile.is_active && profile.role === 'client')) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center" style={{paddingTop: 'max(1.5rem, env(safe-area-inset-top, 0px))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))'}}>
+        <div className="w-24 h-24 bg-red-100 text-red-600 rounded-full flex items-center justify-center mb-6 shadow-inner">
+          <XCircle size={48} />
+        </div>
+        <h2 className="text-2xl font-black text-brand-dark mb-2">Conta Excluída</h2>
+        <p className="text-gray-600 mb-8 font-medium max-w-sm">Esta conta foi desativada e excluída permanentemente pelo usuário.</p>
+        <button onClick={signOut} className="px-8 py-4 bg-brand-primary text-white rounded-2xl font-bold w-full max-w-xs shadow-lg hover:bg-green-600 transition-colors">Voltar ao Login</button>
+      </div>
+    );
+  }
+
+  // Bloqueia o acesso para usuários não aprovados (Lojas e Motoboys pendentes)
   if (!profile.is_active && profile.role !== 'admin') {
     return (
       <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center" style={{paddingTop: 'max(1.5rem, env(safe-area-inset-top, 0px))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))'}}>

@@ -10,7 +10,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { orderId, method, cardToken } = await req.json()
+    const { orderId, method, cardToken, cardData, savedCardData } = await req.json()
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -70,9 +70,17 @@ serve(async (req) => {
     const deliveryFee = Number(order.delivery_fee) || 0
     const subtotal = Number(order.subtotal) || (Number(order.total) - deliveryFee)
 
+    // Taxa cobrada pelo Asaas por transação (sai do repasse da loja, não da plataforma)
+    // PIX: R$ 1,99 fixo | Cartão de crédito: 2,99% do total | Dinheiro: sem taxa
+    const asaasFee = method === 'PIX'
+      ? 1.99
+      : method === 'CREDIT_CARD'
+        ? parseFloat((Number(order.total) * 0.0299).toFixed(2))
+        : 0
+
     // Cálculo do split
     const platformAmount = parseFloat((subtotal * (commissionRate / 100)).toFixed(2))
-    const storeAmount = parseFloat((subtotal - platformAmount).toFixed(2))
+    const storeAmount = parseFloat(Math.max(0, subtotal - platformAmount - asaasFee).toFixed(2))
     const courierAmount = parseFloat(deliveryFee.toFixed(2))
 
     // Splits para subcontas
@@ -96,13 +104,48 @@ serve(async (req) => {
       description: `Pedido #${orderId} - ${order.stores?.name}`,
       externalReference: String(orderId),
       split: splits.length > 0 ? splits : undefined,
-      // Cliente paga a taxa do Asaas por cima — não impacta a comissão
+      // Taxa do Asaas descontada do repasse da loja (asaasFee já subtraído do storeAmount)
       fine: { value: 0 },
       interest: { value: 0 },
+      postalService: false,
     }
 
-    if (method === 'CREDIT_CARD' && cardToken) {
-      paymentPayload.creditCardToken = cardToken
+    if (method === 'CREDIT_CARD') {
+      if (cardData) {
+        // Cartão novo — dados completos enviados pelo frontend
+        paymentPayload.creditCard = {
+          holderName: cardData.holderName,
+          number: cardData.number,
+          expiryMonth: cardData.expiryMonth,
+          expiryYear: cardData.expiryYear,
+          ccv: cardData.ccv,
+        }
+        paymentPayload.creditCardHolderInfo = {
+          name: cardData.holderName,
+          email: order.users?.email || '',
+          cpfCnpj: (order.users?.cpf || '').replace(/\D/g, ''),
+          postalCode: '00000000',
+          addressNumber: '0',
+          phone: (order.users?.phone || '').replace(/\D/g, ''),
+        }
+      } else if (savedCardData) {
+        // Cartão salvo — reconta com dados parciais + CVV
+        paymentPayload.creditCard = {
+          holderName: savedCardData.holderName,
+          number: savedCardData.number,
+          expiryMonth: savedCardData.expiryMonth,
+          expiryYear: savedCardData.expiryYear,
+          ccv: savedCardData.ccv,
+        }
+        paymentPayload.creditCardHolderInfo = {
+          name: savedCardData.holderName,
+          email: order.users?.email || '',
+          cpfCnpj: (order.users?.cpf || '').replace(/\D/g, ''),
+          postalCode: '00000000',
+          addressNumber: '0',
+          phone: (order.users?.phone || '').replace(/\D/g, ''),
+        }
+      }
     }
 
     const asaasRes = await fetch(`${ASAAS_BASE_URL}/payments`, {
@@ -142,6 +185,7 @@ serve(async (req) => {
       split_store_amount: storeAmount,
       split_platform_amount: platformAmount,
       split_courier_amount: courierAmount,
+      asaas_fee: asaasFee,
     })
 
     await supabase.from('orders').update({ payment_status: 'pending' }).eq('id', orderId)

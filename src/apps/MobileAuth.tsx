@@ -143,7 +143,11 @@ export default function MobileAuth() {
   };
 
   const handleAuthError = (err: any) => {
-    console.error("Auth Error:", err);
+    // Apenas loga erros reais do sistema para não poluir o console de monitoramento
+    if (!err.message || err.status >= 500) {
+      console.error("Auth Error:", err);
+    }
+    
     let msg = err.message || 'Ocorreu um erro inesperado.';
     
     if (msg.includes('Invalid login credentials')) {
@@ -175,8 +179,12 @@ export default function MobileAuth() {
 
     const { data: profile } = await supabase.from('users').select('id').eq('id', data.user.id).maybeSingle();
     if (!profile) {
-      await supabase.auth.signOut();
-      throw new Error('Seu cadastro está incompleto. Por favor, vá em "Cadastre-se agora", preencha os dados e use a MESMA SENHA para finalizar.');
+      // O usuário confirmou o e-mail mas não concluiu o cadastro na tabela users.
+      // Mantemos a sessão ativa e direcionamos para a tela de registro suavemente.
+      setFormData(prev => ({ ...prev, email: data.user.email || emailClean }));
+      setAuthMode('register');
+      setErrorMsg('Seu cadastro está incompleto. Por favor, preencha os dados abaixo para finalizar.');
+      return;
     }
 
     window.location.reload();
@@ -209,7 +217,10 @@ export default function MobileAuth() {
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: emailClean,
         password: formData.password,
-        options: { data: { name: userName, role: roleMap[registerRole] } }
+        options: { 
+          data: { name: userName, role: roleMap[registerRole] },
+          emailRedirectTo: `${window.location.origin}/`
+        }
       });
 
       if (signUpError) {
