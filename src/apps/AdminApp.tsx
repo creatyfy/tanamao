@@ -495,9 +495,30 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     try {
       await supabase.from('stores').update({ is_approved: true, status: 'active' }).eq('id', storeId);
       await supabase.from('users').update({ is_active: true }).eq('id', ownerId);
+
+      // Cria subconta Asaas se ainda não existir
+      const { data: storeData } = await supabase
+        .from('stores')
+        .select('asaas_wallet_id')
+        .eq('id', storeId)
+        .single();
+
+      if (!storeData?.asaas_wallet_id) {
+        const { data: result, error: asaasErr } = await supabase.functions.invoke('create-asaas-account', {
+          body: { entityType: 'store', entityId: storeId }
+        });
+        if (asaasErr || !result?.success) {
+          console.error('Erro ao criar subconta Asaas da loja:', asaasErr, result);
+          showToast('Loja aprovada, mas houve erro ao criar conta de pagamentos. Tente reprocessar.', 'warning');
+        } else {
+          showToast('Loja aprovada e conta de pagamentos criada!');
+        }
+      } else {
+        showToast('Loja aprovada com sucesso!');
+      }
+
       setViewStore(null);
       fetchData();
-      showToast('Loja aprovada com sucesso!');
     } catch (error) {
       showToast('Erro ao aprovar loja', 'error');
     } finally {
@@ -549,9 +570,30 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     try {
       await supabase.from('couriers').update({ is_approved: true, status: 'active' }).eq('id', courierId);
       await supabase.from('users').update({ is_active: true }).eq('id', userId);
+
+      // Cria subconta Asaas se ainda não existir
+      const { data: courierData } = await supabase
+        .from('couriers')
+        .select('asaas_wallet_id')
+        .eq('id', courierId)
+        .single();
+
+      if (!courierData?.asaas_wallet_id) {
+        const { data: result, error: asaasErr } = await supabase.functions.invoke('create-asaas-account', {
+          body: { entityType: 'courier', entityId: courierId }
+        });
+        if (asaasErr || !result?.success) {
+          console.error('Erro ao criar subconta Asaas do motoboy:', asaasErr, result);
+          showToast('Motoboy aprovado, mas houve erro ao criar conta de pagamentos. Tente reprocessar.', 'warning');
+        } else {
+          showToast('Motoboy aprovado e conta de pagamentos criada!');
+        }
+      } else {
+        showToast('Motoboy aprovado com sucesso!');
+      }
+
       setViewCourier(null);
       fetchData();
-      showToast('Motoboy aprovado com sucesso!');
     } catch (error) {
       showToast('Erro ao aprovar motoboy', 'error');
     } finally {
@@ -1704,6 +1746,29 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                 <button onClick={() => handleApproveStore(viewStore.id, viewStore.owner_id)} className="px-8 py-3 text-white bg-brand-primary hover:bg-green-600 rounded-xl font-bold flex items-center shadow-lg transition-colors"><CheckCircle size={20} className="mr-2"/> Aprovar Loja</button>
               </div>
             )}
+            {viewStore.is_approved && !viewStore.asaas_wallet_id && (
+              <div className="p-6 border-t border-gray-100 bg-gray-50 shrink-0">
+                <button
+                  onClick={async () => {
+                    setLoading(true);
+                    const { data: result, error } = await supabase.functions.invoke('create-asaas-account', {
+                      body: { entityType: 'store', entityId: viewStore.id }
+                    });
+                    setLoading(false);
+                    if (error || !result?.success) {
+                      showToast('Erro ao criar conta Asaas. Verifique os dados da loja.', 'error');
+                    } else {
+                      showToast('Conta de pagamentos criada com sucesso!');
+                      fetchData();
+                      setViewStore(null);
+                    }
+                  }}
+                  className="w-full bg-yellow-500 hover:bg-yellow-600 text-white py-3 rounded-xl font-bold transition-colors"
+                >
+                  ⚠️ Criar conta de pagamentos (Asaas)
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1791,6 +1856,29 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
               <div className="p-6 border-t border-gray-100 bg-gray-50 flex justify-end space-x-4 shrink-0">
                 <button onClick={() => handleRejectCourier(viewCourier.id, viewCourier.user_id)} className="px-6 py-3 text-red-600 bg-red-100 hover:bg-red-200 rounded-xl font-bold flex items-center transition-colors"><XCircle size={20} className="mr-2"/> Recusar e Excluir</button>
                 <button onClick={() => handleApproveCourier(viewCourier.id, viewCourier.user_id)} className="px-8 py-3 text-white bg-brand-primary hover:bg-green-600 rounded-xl font-bold flex items-center shadow-lg transition-colors"><CheckCircle size={20} className="mr-2"/> Aprovar Motoboy</button>
+              </div>
+            )}
+            {viewCourier.is_approved && !viewCourier.asaas_wallet_id && (
+              <div className="p-6 border-t border-gray-100 bg-gray-50 shrink-0">
+                <button
+                  onClick={async () => {
+                    setLoading(true);
+                    const { data: result, error } = await supabase.functions.invoke('create-asaas-account', {
+                      body: { entityType: 'courier', entityId: viewCourier.id }
+                    });
+                    setLoading(false);
+                    if (error || !result?.success) {
+                      showToast('Erro ao criar conta Asaas. Verifique os dados do motoboy.', 'error');
+                    } else {
+                      showToast('Conta de pagamentos criada com sucesso!');
+                      fetchData();
+                      setViewCourier(null);
+                    }
+                  }}
+                  className="w-full bg-yellow-500 hover:bg-yellow-600 text-white py-3 rounded-xl font-bold transition-colors"
+                >
+                  ⚠️ Criar conta de pagamentos (Asaas)
+                </button>
               </div>
             )}
           </div>

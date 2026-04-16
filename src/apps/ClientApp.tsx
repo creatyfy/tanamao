@@ -123,8 +123,12 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const [pixQrCode, setPixQrCode] = useState<string | null>(null);
   const [pixCopyPaste, setPixCopyPaste] = useState<string | null>(null);
   const [pixExpiration, setPixExpiration] = useState<string | null>(null);
-  const [paymentScreen, setPaymentScreen] = useState<'pix_waiting' | 'card_form'>('pix_waiting');
+  const [paymentScreen, setPaymentScreen] = useState<'pix_waiting' | 'card_form' | 'saved_cards'>('pix_waiting');
   const [cardData, setCardData] = useState({ number: '', name: '', expiry: '', cvv: '' });
+  const [savedCards, setSavedCards] = useState<any[]>([]);
+  const [selectedSavedCard, setSelectedSavedCard] = useState<any>(null);
+  const [savedCardCvv, setSavedCardCvv] = useState('');
+  const [saveCardForLater, setSaveCardForLater] = useState(false);
   const [paymentLoading, setPaymentLoading] = useState(false);
   
   // Tracking & History
@@ -286,7 +290,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       const [storeRes, addrRes, orderRes, prodRes, favRes] = await Promise.all([
         supabase.from('stores').select('*, addresses!inner(city, state, neighborhood)').eq('is_approved', true).eq('status', 'active'),
         supabase.from('addresses').select('*').eq('user_id', user!.id).limit(1).maybeSingle(),
-        supabase.from('orders').select('*, order_items(*), stores(name, logo_url, avg_prep_time_min)').eq('client_id', user!.id).not('status', 'in', '("delivered","cancelled")').order('created_at', { ascending: false }).limit(1).maybeSingle(),
+        supabase.from('orders').select('*, order_items(*), stores(name, logo_url, avg_prep_time_min), couriers(users(name, avatar_url), vehicle_type, license_plate)').eq('client_id', user!.id).not('status', 'in', '("delivered","cancelled")').order('created_at', { ascending: false }).limit(1).maybeSingle(),
         supabase.from('products').select('store_id, name, description').eq('is_available', true),
         supabase.from('favorite_stores').select('store_id').eq('user_id', user!.id)
       ]);
@@ -317,7 +321,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     try {
       const { data } = await supabase
         .from('orders')
-        .select('*, stores(name, logo_url), order_items(*)')
+        .select('*, stores(name, logo_url), order_items(*), couriers(users(name, avatar_url), vehicle_type, license_plate)')
         .eq('client_id', user!.id)
         .in('status', ['delivered', 'cancelled'])
         .order('created_at', { ascending: false });
@@ -455,7 +459,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     try {
       const [prodRes, catRes] = await Promise.all([
         supabase.from('products').select('*').eq('store_id', store.id).eq('is_available', true),
-        supabase.from('product_categories').select('*').eq('store_id', store.id).eq('is_active', true).order('sort_order')
+        supabase.from('product_categories').select('*').eq('product_categories.is_active', true).eq('store_id', store.id).order('sort_order')
       ]);
       if (prodRes.data) setProducts(prodRes.data);
       if (catRes.data) setStoreCategories(catRes.data);
@@ -690,7 +694,18 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         setClientNotes('');
         setCouponCode('');
         setAppliedCoupon(null);
-        setPaymentScreen('card_form');
+        
+        // Carrega cartões salvos do usuário
+        const { data: cards } = await supabase
+          .from('saved_cards')
+          .select('*')
+          .eq('user_id', user!.id)
+          .order('is_default', { ascending: false });
+        setSavedCards(cards || []);
+        setSelectedSavedCard(cards?.[0] || null);
+        setSavedCardCvv('');
+        setPaymentScreen(cards && cards.length > 0 ? 'saved_cards' : 'card_form');
+        
         setCurrentScreen('payment');
       }
     } catch (error: any) {
@@ -702,26 +717,58 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   };
 
   const handleCardPayment = async () => {
-    if (!activeOrder || !cardData.number || !cardData.name || !cardData.expiry || !cardData.cvv) return;
     setPaymentLoading(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
+
+      let body: any = { orderId: activeOrder!.id, method: 'CREDIT_CARD' };
+
+      if (selectedSavedCard && savedCardCvv) {
+        // Pagando com cartão salvo — envia dados de exibição + CVV digitado agora
+        body.savedCardData = {
+          holderName: selectedSavedCard.holder_name,
+          number: '000000000000' + selectedSavedCard.last_four, // placeholder, não usado para cobrança real sem tokenização
+          expiryMonth: selectedSavedCard.expiry_month,
+          expiryYear: selectedSavedCard.expiry_year,
+          ccv: savedCardCvv,
+        };
+      } else {
+        // Cartão novo
+        if (!cardData.number || !cardData.name || !cardData.expiry || !cardData.cvv) {
+          showToast('Preencha todos os dados do cartão', 'error');
+          return;
+        }
+        body.cardData = {
+          holderName: cardData.name,
+          number: cardData.number.replace(/\s/g, ''),
+          expiryMonth: cardData.expiry.split('/')[0],
+          expiryYear: '20' + cardData.expiry.split('/')[1],
+          ccv: cardData.cvv,
+        };
+
+        // Salvar cartão se o usuário marcou a opção
+        if (saveCardForLater) {
+          const number = cardData.number.replace(/\s/g, '');
+          const firstDigit = number[0];
+          const brand = firstDigit === '4' ? 'Visa' : firstDigit === '5' ? 'Mastercard' : firstDigit === '3' ? 'Amex' : 'Cartão';
+          await supabase.from('saved_cards').insert({
+            user_id: user!.id,
+            brand,
+            last_four: number.slice(-4),
+            holder_name: cardData.name,
+            expiry_month: cardData.expiry.split('/')[0],
+            expiry_year: '20' + cardData.expiry.split('/')[1],
+            is_default: savedCards.length === 0,
+          });
+        }
+      }
+
       const { data: payData, error: payErr } = await supabase.functions.invoke('create-payment', {
-        body: {
-          orderId: activeOrder.id,
-          method: 'CREDIT_CARD',
-          cardData: {
-            holderName: cardData.name,
-            number: cardData.number.replace(/\s/g, ''),
-            expiryMonth: cardData.expiry.split('/')[0],
-            expiryYear: '20' + cardData.expiry.split('/')[1],
-            ccv: cardData.cvv
-          }
-        },
-        headers: { Authorization: `Bearer ${session?.access_token}` }
+        body,
+        headers: { Authorization: `Bearer ${session?.access_token}` },
       });
+
       if (payErr || !payData?.success) {
-        console.error("Card Payment Error:", payErr, payData);
         throw new Error(payData?.error || payErr?.message || 'Pagamento recusado. Verifique os dados do cartão.');
       }
       showToast('Pagamento aprovado! 🎉', 'success');
@@ -857,6 +904,12 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         const updatedOrder = payload.new as Order;
         const { data: items } = await supabase.from('order_items').select('*').eq('order_id', orderId);
         setActiveOrder(prev => prev ? { ...prev, ...updatedOrder, order_items: items || [], stores: prev.stores } : { ...updatedOrder, order_items: items || [] } as any);
+        
+        // Se pagamento PIX foi confirmado, redireciona para tracking
+        if ((updatedOrder as any).payment_status === 'confirmed' && currentScreen === 'payment') {
+          setCurrentScreen('tracking');
+          showToast('Pagamento confirmado! ✅', 'success');
+        }
         if (updatedOrder.status === 'delivering') {
           sendNotification('🏍️ Pedido a caminho!', { body: 'Seu pedido saiu para entrega. Acompanhe no mapa!' });
         } else if (updatedOrder.status === 'delivered') {
@@ -1541,6 +1594,61 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             </div>
           )}
 
+          {paymentScreen === 'saved_cards' && (
+            <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
+              <h2 className="font-bold text-brand-dark text-lg">Pagar com cartão</h2>
+
+              <div className="space-y-3">
+                {savedCards.map(card => (
+                  <div
+                    key={card.id}
+                    onClick={() => setSelectedSavedCard(card)}
+                    className={`p-4 rounded-2xl border-2 cursor-pointer transition-all ${selectedSavedCard?.id === card.id ? 'border-brand-primary bg-brand-light' : 'border-gray-200 bg-white'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-bold text-brand-dark">{card.brand} •••• {card.last_four}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{card.holder_name} · {card.expiry_month}/{card.expiry_year}</p>
+                      </div>
+                      <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${selectedSavedCard?.id === card.id ? 'border-brand-primary bg-brand-primary' : 'border-gray-300'}`}>
+                        {selectedSavedCard?.id === card.id && <div className="w-2 h-2 bg-white rounded-full" />}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {selectedSavedCard && (
+                <div>
+                  <label className="block text-xs font-bold text-gray-600 mb-1">CVV do cartão selecionado</label>
+                  <input
+                    type="text" inputMode="numeric" maxLength={4} placeholder="000"
+                    value={savedCardCvv}
+                    onChange={e => setSavedCardCvv(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-brand-primary outline-none"
+                  />
+                </div>
+              )}
+
+              <button
+                onClick={handleCardPayment}
+                disabled={paymentLoading || !selectedSavedCard || savedCardCvv.length < 3}
+                className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center disabled:opacity-50"
+              >
+                {paymentLoading ? <Loader2 className="animate-spin" size={24} /> : `Pagar R$ ${activeOrder?.total.toFixed(2)}`}
+              </button>
+
+              <button
+                onClick={() => { setSelectedSavedCard(null); setPaymentScreen('card_form'); }}
+                className="w-full text-brand-primary font-bold py-2 text-sm"
+              >
+                + Usar outro cartão
+              </button>
+
+              <p className="text-center text-xs text-gray-400">🔒 Pagamento seguro processado pelo Asaas</p>
+            </div>
+          )}
+
           {paymentScreen === 'card_form' && (
             <div className="flex-1 overflow-y-auto p-6">
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-4">
@@ -1596,6 +1704,16 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                     />
                   </div>
                 </div>
+
+                <label className="flex items-center gap-3 cursor-pointer py-1">
+                  <input
+                    type="checkbox"
+                    checked={saveCardForLater}
+                    onChange={e => setSaveCardForLater(e.target.checked)}
+                    className="w-4 h-4 accent-brand-primary"
+                  />
+                  <span className="text-sm text-gray-600 font-medium">Salvar cartão para próximas compras</span>
+                </label>
 
                 <button
                   onClick={handleCardPayment}
@@ -1846,10 +1964,23 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             {activeOrder.status === 'delivering' && courierLocation && !activeOrder.own_delivery && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-4 shrink-0">
                 <div className="p-4 border-b border-gray-100 flex items-center">
-                  <div className="w-2.5 h-2.5 bg-brand-primary rounded-full animate-ping mr-2"></div>
-                  <div className="w-2.5 h-2.5 bg-brand-primary rounded-full absolute mr-2 ml-0"></div>
-                  <span className="font-bold text-brand-dark text-sm ml-1">🏍️ Motoboy a caminho</span>
-                  <span className="ml-auto text-xs text-gray-400 font-medium">Ao vivo</span>
+                  {activeOrder.couriers?.users?.avatar_url ? (
+                    <img src={activeOrder.couriers.users.avatar_url} alt="Motoboy" className="w-9 h-9 rounded-full object-cover border-2 border-brand-primary mr-3 shrink-0" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-full bg-brand-light border-2 border-brand-primary mr-3 shrink-0 flex items-center justify-center">
+                      <Bike size={18} className="text-brand-primary" />
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-brand-dark text-sm truncate">{activeOrder.couriers?.users?.name || 'Motoboy a caminho'}</p>
+                    {activeOrder.couriers?.license_plate && (
+                      <p className="text-xs text-gray-400 font-medium">{activeOrder.couriers.license_plate}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center ml-2 shrink-0">
+                    <div className="w-2 h-2 bg-brand-primary rounded-full animate-ping mr-1"></div>
+                    <span className="text-xs text-gray-400 font-medium">Ao vivo</span>
+                  </div>
                 </div>
                 <LiveMap lat={courierLocation.lat} lng={courierLocation.lng} />
               </div>

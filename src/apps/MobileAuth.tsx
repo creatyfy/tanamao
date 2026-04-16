@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { Toast } from '../components/Toast';
 import { 
   Mail, Lock, User, ArrowRight, Store, Bike, 
   FileText, CheckCircle, Loader2, Phone, MapPin, DollarSign,
-  Clock, Map, CreditCard, Calendar, Camera, Image as ImageIcon, UploadCloud
+  Clock, Map, Calendar, Camera, Image as ImageIcon, UploadCloud
 } from 'lucide-react';
 
 const InputField = ({ icon: Icon, placeholder, type = "text", required = false, name, value, onChange, maxLength }: any) => (
@@ -32,10 +33,13 @@ const FormSection = ({ title, children }: { title: string, children: React.React
 const UFS = ['AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'];
 
 export default function MobileAuth() {
-  const [isLogin, setIsLogin] = useState(true);
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot_password'>('login');
   const [registerRole, setRegisterRole] = useState<'client' | 'store' | 'courier'>('client');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  
+  const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => setToast({ message, type });
   
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -50,11 +54,28 @@ export default function MobileAuth() {
     cep: '', street: '', number: '', complement: '', neighborhood: '', city: '', state: '',
     name: '', cpf: '',
     storeName: '', ownerName: '', cnpj: '', description: '', category: '', prepTime: '', minOrder: '', deliveryFee: '',
-    acceptsPix: true, acceptsCard: true, acceptsCash: false,
-    fullName: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', pixKey: '', operationCity: ''
+    acceptsPix: true, acceptsCard: true, acceptsCash: false, pixKey: '',
+    fullName: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', operationCity: ''
   });
 
   useEffect(() => {
+    // Verifica se o usuário acabou de confirmar o e-mail e precisa concluir o cadastro
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        const pending = localStorage.getItem('pendingRegistration');
+        if (pending) {
+          try {
+            const parsed = JSON.parse(pending);
+            setRegisterRole(parsed.role);
+            setFormData(parsed.formData);
+            setAuthMode('register');
+            showToast('E-mail confirmado! Clique em Cadastrar para concluir.', 'success');
+            localStorage.removeItem('pendingRegistration');
+          } catch (e) {}
+        }
+      }
+    });
+
     const fetchCategories = async () => {
       try {
         const { data } = await supabase
@@ -122,13 +143,15 @@ export default function MobileAuth() {
   };
 
   const handleAuthError = (err: any) => {
-    console.log("Auth Error Debug:", err);
+    console.error("Auth Error:", err);
     let msg = err.message || 'Ocorreu um erro inesperado.';
     
     if (msg.includes('Invalid login credentials')) {
       msg = 'E-mail ou senha incorretos.';
+    } else if (msg.includes('Email not confirmed')) {
+      msg = 'Por favor, confirme seu e-mail antes de fazer login.';
     } else if (msg.includes('Failed to fetch')) {
-      msg = 'Erro de conexão ou configuração. Verifique se as chaves do Supabase no arquivo .env estão corretas.';
+      msg = 'Erro de conexão. Verifique sua internet.';
     } else if (msg.includes('rate limit')) {
       msg = 'Muitas tentativas. Aguarde um momento.';
     } else if (msg.includes('duplicate key')) {
@@ -136,9 +159,215 @@ export default function MobileAuth() {
     } else if (msg.includes('too long')) {
       msg = 'Algum campo excedeu o limite de caracteres. Verifique os dados fornecidos.';
     } else if (msg.includes('new row violates row-level security')) {
-      msg = 'Erro de permissão no banco de dados. Por favor, aplique as migrações SQL pendentes.';
+      msg = 'Erro de permissão. Certifique-se de confirmar seu e-mail primeiro.';
     }
     setErrorMsg(msg);
+  };
+
+  const handleLogin = async () => {
+    const emailClean = formData.email.trim();
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({ 
+      email: emailClean, 
+      password: formData.password 
+    });
+    
+    if (signInError) throw signInError;
+
+    const { data: profile } = await supabase.from('users').select('id').eq('id', data.user.id).maybeSingle();
+    if (!profile) {
+      await supabase.auth.signOut();
+      throw new Error('Seu cadastro está incompleto. Por favor, vá em "Cadastre-se agora", preencha os dados e use a MESMA SENHA para finalizar.');
+    }
+
+    window.location.reload();
+  };
+
+  const handleForgotPassword = async () => {
+    const emailClean = formData.email.trim();
+    if (!emailClean) throw new Error('Por favor, informe seu e-mail.');
+
+    const { error } = await supabase.auth.resetPasswordForEmail(emailClean, {
+      redirectTo: 'com.tanamaoc.delivery://reset-password',
+    });
+    
+    if (error) throw error;
+    
+    showToast('Link de recuperação enviado para seu e-mail!', 'success');
+    setAuthMode('login');
+  };
+
+  const handleRegister = async () => {
+    const emailClean = formData.email.trim();
+    const roleMap: Record<string, string> = { client: 'client', store: 'store_owner', courier: 'courier' };
+    const userName = registerRole === 'store' ? formData.ownerName : (registerRole === 'courier' ? formData.fullName : formData.name);
+
+    // Verifica se já existe uma sessão ativa (caso o usuário tenha voltado do link de confirmação de e-mail)
+    const { data: { session } } = await supabase.auth.getSession();
+    let userId = session?.user?.id;
+
+    if (!userId) {
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: emailClean,
+        password: formData.password,
+        options: { data: { name: userName, role: roleMap[registerRole] } }
+      });
+
+      if (signUpError) {
+        if (signUpError.message.includes('already registered')) {
+          const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+            email: emailClean,
+            password: formData.password
+          });
+          if (signInError) throw new Error('Este e-mail já está cadastrado. Se for você, a senha está incorreta.');
+          userId = signInData.user.id;
+        } else {
+          throw signUpError;
+        }
+      } else {
+        // Se a confirmação de e-mail estiver ativada, a sessão será nula
+        if (!signUpData.session) {
+          const safeFormData = { ...formData, password: 'dummy_password_not_used' };
+          localStorage.setItem('pendingRegistration', JSON.stringify({ role: registerRole, formData: safeFormData }));
+          showToast('Verifique seu e-mail para confirmar a conta. Depois, retorne ao app.', 'success');
+          setAuthMode('login');
+          setFormData(prev => ({ ...prev, password: '' }));
+          return; // Para a execução aqui até o e-mail ser confirmado
+        }
+        userId = signUpData.user?.id;
+      }
+    }
+
+    if (!userId) throw new Error('Falha ao obter ID do usuário.');
+
+    let finalAvatarUrl = null;
+    if (photoFile && userId) {
+      try {
+        const fileExt = photoFile.name ? photoFile.name.split('.').pop() : 'jpg';
+        const fileName = `avatar_${userId}_${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, photoFile, { cacheControl: '3600', upsert: false });
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
+          finalAvatarUrl = publicUrlData.publicUrl;
+        }
+      } catch (err) { console.warn('Erro ao processar foto:', err); }
+    }
+
+    let finalBannerUrl = null;
+    if (bannerFile && userId && registerRole === 'store') {
+      try {
+        const fileExt = bannerFile.name ? bannerFile.name.split('.').pop() : 'jpg';
+        const fileName = `store_banner_${userId}_${Date.now()}.${fileExt}`;
+        const { error: uploadError } = await supabase.storage.from('stores').upload(fileName, bannerFile, { cacheControl: '3600', upsert: false });
+        if (!uploadError) {
+          const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
+          finalBannerUrl = publicUrlData.publicUrl;
+        }
+      } catch (err) { console.warn('Erro ao processar banner:', err); }
+    }
+
+    const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : null;
+    const cleanCep = formData.cep ? formData.cep.replace(/\D/g, '') : '00000000';
+    const cleanCnpj = formData.cnpj ? formData.cnpj.replace(/\D/g, '') : null;
+    const cleanCpf = formData.cpf ? formData.cpf.replace(/\D/g, '') : '00000000000';
+    const isActive = registerRole === 'client';
+
+    const userData: any = {
+      id: userId,
+      name: userName || emailClean.split('@')[0],
+      email: emailClean,
+      phone: cleanPhone,
+      role: roleMap[registerRole],
+      is_active: isActive, 
+      password_hash: 'supabase_auth',
+      cpf: formData.cpf ? formData.cpf.replace(/\D/g, '') : null,
+    };
+    
+    if (finalAvatarUrl) userData.avatar_url = finalAvatarUrl;
+
+    const { error: userErr } = await supabase.from('users').upsert(userData, { onConflict: 'id' });
+    if (userErr) throw new Error(`Erro ao salvar perfil: ${userErr.message}`);
+
+    let addressId = null;
+    if (registerRole === 'store' || registerRole === 'courier') {
+      const addressData = {
+        user_id: userId,
+        street: formData.street || 'Não informado',
+        number: formData.number || 'S/N',
+        complement: formData.complement || null,
+        neighborhood: formData.neighborhood || 'Não informado',
+        city: formData.city || 'Não informado',
+        state: formData.state || 'SP',
+        zip_code: cleanCep
+      };
+
+      const { data: existingAddr } = await supabase.from('addresses').select('id').eq('user_id', userId).maybeSingle();
+      if (existingAddr) {
+        addressId = existingAddr.id;
+        await supabase.from('addresses').update(addressData).eq('id', addressId);
+      } else {
+        const { data: newAddr, error: addrErr } = await supabase.from('addresses').insert(addressData).select().single();
+        if (addrErr) throw new Error(`Erro ao salvar endereço: ${addrErr.message}`);
+        addressId = newAddr.id;
+      }
+    }
+
+    if (registerRole === 'store') {
+      const storeData: any = {
+        owner_id: userId,
+        name: formData.storeName || 'Nova Loja',
+        slug: `store-${userId.substring(0,8)}`,
+        cnpj: cleanCnpj,
+        phone: cleanPhone,
+        description: formData.description || null,
+        global_category_id: formData.category ? parseInt(formData.category) : null,
+        avg_prep_time_min: formData.prepTime ? parseInt(formData.prepTime) : 30,
+        min_order_value: formData.minOrder ? parseFloat(formData.minOrder) : 0,
+        delivery_fee: formData.deliveryFee ? parseFloat(formData.deliveryFee) : 0,
+        accepts_pix: formData.acceptsPix,
+        accepts_card: formData.acceptsCard,
+        accepts_cash: formData.acceptsCash,
+        address_id: addressId,
+        status: 'pending', 
+        is_approved: false,
+        commission_rate: 4,
+        pix_key: formData.pixKey || null
+      };
+
+      if (finalBannerUrl) storeData.banner_url = finalBannerUrl;
+
+      const { data: existingStore } = await supabase.from('stores').select('id').eq('owner_id', userId).maybeSingle();
+      if (existingStore) {
+        await supabase.from('stores').update(storeData).eq('id', existingStore.id);
+      } else {
+        const { error: storeErr } = await supabase.from('stores').insert(storeData);
+        if (storeErr) throw new Error(`Erro ao criar loja: ${storeErr.message}`);
+      }
+    } 
+    else if (registerRole === 'courier') {
+      const courierData = {
+        user_id: userId,
+        cpf: cleanCpf,
+        vehicle_type: formData.vehicleType,
+        vehicle_brand: formData.vehicleBrand || null,
+        vehicle_model: formData.vehicleModel || null,
+        vehicle_year: formData.vehicleYear ? parseInt(formData.vehicleYear) : new Date().getFullYear(),
+        license_plate: formData.licensePlate || null,
+        pix_key: formData.pixKey || null,
+        operation_city: formData.operationCity || formData.city,
+        status: 'pending', 
+        is_approved: false 
+      };
+
+      const { data: existingCourier } = await supabase.from('couriers').select('id').eq('user_id', userId).maybeSingle();
+      if (existingCourier) {
+        await supabase.from('couriers').update(courierData).eq('id', existingCourier.id);
+      } else {
+        const { error: courierErr } = await supabase.from('couriers').insert(courierData);
+        if (courierErr) throw new Error(`Erro ao criar motoboy: ${courierErr.message}`);
+      }
+    }
+
+    window.location.reload();
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -147,215 +376,9 @@ export default function MobileAuth() {
     setErrorMsg('');
     
     try {
-      if (isLogin) {
-        const { data, error: signInError } = await supabase.auth.signInWithPassword({ 
-          email: formData.email, 
-          password: formData.password 
-        });
-        
-        if (signInError) throw signInError;
-
-        const { data: profile } = await supabase.from('users').select('id').eq('id', data.user.id).maybeSingle();
-        if (!profile) {
-          await supabase.auth.signOut();
-          throw new Error('Seu cadastro está incompleto. Por favor, vá em "Cadastre-se agora", preencha os dados e use a MESMA SENHA para finalizar.');
-        }
-
-        window.location.reload();
-
-      } else {
-        const roleMap: Record<string, string> = { client: 'client', store: 'store_owner', courier: 'courier' };
-        const userName = registerRole === 'store' ? formData.ownerName : (registerRole === 'courier' ? formData.fullName : formData.name);
-
-        let userId = null;
-
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email: formData.email,
-          password: formData.password,
-          options: { data: { name: userName, role: roleMap[registerRole] } }
-        });
-
-        if (signUpError) {
-          if (signUpError.message.includes('already registered')) {
-            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-              email: formData.email,
-              password: formData.password
-            });
-            if (signInError) throw new Error('Este e-mail já está cadastrado. Se for você, a senha está incorreta.');
-            userId = signInData.user.id;
-          } else {
-            throw signUpError;
-          }
-        } else {
-          userId = signUpData.user?.id;
-        }
-
-        if (!userId) throw new Error('Falha ao obter ID do usuário.');
-
-        let finalAvatarUrl = null;
-        if (photoFile && userId) {
-          try {
-            const fileExt = photoFile.name ? photoFile.name.split('.').pop() : 'jpg';
-            const fileName = `avatar_${userId}_${Date.now()}.${fileExt}`;
-            
-            const { error: uploadError } = await supabase.storage
-              .from('avatars')
-              .upload(fileName, photoFile, { cacheControl: '3600', upsert: false });
-
-            if (!uploadError) {
-              const { data: publicUrlData } = supabase.storage.from('avatars').getPublicUrl(fileName);
-              finalAvatarUrl = publicUrlData.publicUrl;
-            } else {
-              console.warn('Aviso: Falha ao enviar foto. O bucket "avatars" pode não existir.', uploadError);
-            }
-          } catch (err) {
-            console.warn('Erro ao processar foto:', err);
-          }
-        }
-
-        let finalBannerUrl = null;
-        if (bannerFile && userId && registerRole === 'store') {
-          try {
-            const fileExt = bannerFile.name ? bannerFile.name.split('.').pop() : 'jpg';
-            const fileName = `store_banner_${userId}_${Date.now()}.${fileExt}`;
-            
-            const { error: uploadError } = await supabase.storage
-              .from('stores')
-              .upload(fileName, bannerFile, { cacheControl: '3600', upsert: false });
-
-            if (!uploadError) {
-              const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
-              finalBannerUrl = publicUrlData.publicUrl;
-            } else {
-              console.warn('Aviso: Falha ao enviar banner. O bucket "stores" pode não existir.', uploadError);
-            }
-          } catch (err) {
-            console.warn('Erro ao processar banner:', err);
-          }
-        }
-
-        const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : null;
-        const cleanCep = formData.cep ? formData.cep.replace(/\D/g, '') : '00000000';
-        const cleanCnpj = formData.cnpj ? formData.cnpj.replace(/\D/g, '') : null;
-        const cleanCpf = formData.cpf ? formData.cpf.replace(/\D/g, '') : '00000000000';
-        const isActive = registerRole === 'client';
-
-        const userData: any = {
-          id: userId,
-          name: userName || formData.email.split('@')[0],
-          email: formData.email,
-          phone: cleanPhone,
-          role: roleMap[registerRole],
-          is_active: isActive, 
-          password_hash: 'supabase_auth',
-          cpf: formData.cpf ? formData.cpf.replace(/\D/g, '') : null,
-        };
-        
-        if (finalAvatarUrl) userData.avatar_url = finalAvatarUrl;
-
-        const { error: userErr } = await supabase.from('users').upsert(userData, { onConflict: 'id' });
-        if (userErr) throw new Error(`Erro ao salvar perfil: ${userErr.message}`);
-
-        let addressId = null;
-        if (registerRole === 'store' || registerRole === 'courier') {
-          const addressData = {
-            user_id: userId,
-            street: formData.street || 'Não informado',
-            number: formData.number || 'S/N',
-            complement: formData.complement || null,
-            neighborhood: formData.neighborhood || 'Não informado',
-            city: formData.city || 'Não informado',
-            state: formData.state || 'SP',
-            zip_code: cleanCep
-          };
-
-          const { data: existingAddr } = await supabase.from('addresses').select('id').eq('user_id', userId).maybeSingle();
-          
-          if (existingAddr) {
-            addressId = existingAddr.id;
-            await supabase.from('addresses').update(addressData).eq('id', addressId);
-          } else {
-            const { data: newAddr, error: addrErr } = await supabase.from('addresses').insert(addressData).select().single();
-            if (addrErr) throw new Error(`Erro ao salvar endereço: ${addrErr.message}`);
-            addressId = newAddr.id;
-          }
-        }
-
-        if (registerRole === 'store') {
-          const storeData: any = {
-            owner_id: userId,
-            name: formData.storeName || 'Nova Loja',
-            slug: `store-${userId.substring(0,8)}`,
-            cnpj: cleanCnpj,
-            phone: cleanPhone,
-            description: formData.description || null,
-            global_category_id: formData.category ? parseInt(formData.category) : null,
-            avg_prep_time_min: formData.prepTime ? parseInt(formData.prepTime) : 30,
-            min_order_value: formData.minOrder ? parseFloat(formData.minOrder) : 0,
-            delivery_fee: formData.deliveryFee ? parseFloat(formData.deliveryFee) : 0,
-            accepts_pix: formData.acceptsPix,
-            accepts_card: formData.acceptsCard,
-            accepts_cash: formData.acceptsCash,
-            address_id: addressId,
-            status: 'pending', 
-            is_approved: false,
-            commission_rate: 4,
-            pix_key: formData.pixKey || null
-          };
-
-          if (finalBannerUrl) storeData.banner_url = finalBannerUrl;
-
-          const { data: existingStore } = await supabase.from('stores').select('id').eq('owner_id', userId).maybeSingle();
-          if (existingStore) {
-            await supabase.from('stores').update(storeData).eq('id', existingStore.id);
-          } else {
-            const { error: storeErr } = await supabase.from('stores').insert(storeData);
-            if (storeErr) throw new Error(`Erro ao criar loja: ${storeErr.message}`);
-          }
-        } 
-        else if (registerRole === 'courier') {
-          const courierData = {
-            user_id: userId,
-            cpf: cleanCpf,
-            vehicle_type: formData.vehicleType,
-            vehicle_brand: formData.vehicleBrand || null,
-            vehicle_model: formData.vehicleModel || null,
-            vehicle_year: formData.vehicleYear ? parseInt(formData.vehicleYear) : new Date().getFullYear(),
-            license_plate: formData.licensePlate || null,
-            pix_key: formData.pixKey || null,
-            operation_city: formData.operationCity || formData.city,
-            status: 'pending', 
-            is_approved: false 
-          };
-
-          const { data: existingCourier } = await supabase.from('couriers').select('id').eq('user_id', userId).maybeSingle();
-          if (existingCourier) {
-            await supabase.from('couriers').update(courierData).eq('id', existingCourier.id);
-          } else {
-            const { error: courierErr } = await supabase.from('couriers').insert(courierData);
-            if (courierErr) throw new Error(`Erro ao criar motoboy: ${courierErr.message}`);
-          }
-        }
-
-        // Integração Asaas - Criação de Subconta
-        if (registerRole === 'store' && userId) {
-          const { data: savedStore } = await supabase.from('stores').select('id').eq('owner_id', userId).single();
-          if (savedStore) {
-            supabase.functions.invoke('create-asaas-account', {
-              body: { entityType: 'store', entityId: savedStore.id }
-            }).catch(err => console.warn('Asaas:', err));
-          }
-        } else if (registerRole === 'courier' && userId) {
-          const { data: savedCourier } = await supabase.from('couriers').select('id').eq('user_id', userId).single();
-          if (savedCourier) {
-            supabase.functions.invoke('create-asaas-account', {
-              body: { entityType: 'courier', entityId: savedCourier.id }
-            }).catch(err => console.warn('Asaas:', err));
-          }
-        }
-
-        window.location.reload();
-      }
+      if (authMode === 'login') await handleLogin();
+      else if (authMode === 'register') await handleRegister();
+      else if (authMode === 'forgot_password') await handleForgotPassword();
     } catch (error: any) {
       handleAuthError(error);
     } finally {
@@ -365,11 +388,12 @@ export default function MobileAuth() {
 
   return (
     <div className="w-full max-w-md mx-auto h-screen bg-white flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-900" style={{paddingBottom: 'env(safe-area-inset-bottom, 0px)', paddingTop: 'env(safe-area-inset-top, 0px)'}}>
+      {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       <div className="flex-1 overflow-y-auto flex flex-col scrollbar-hide">
         <div className="pt-12 pb-6 px-6 flex flex-col items-center justify-center bg-brand-light/30 rounded-b-[3rem] shrink-0">
           <img src="https://images.dualite.app/d52f60de-2692-4885-8c36-cb03ccdd56d7/width_533-e0f65105-eff1-406d-acc8-d6ec9f3aa0a7.webp" alt="Logo" className="w-36 h-auto object-contain mb-4 drop-shadow-md" />
           
-          {!isLogin && (
+          {authMode === 'register' && (
             <div className="flex space-x-3 mb-4 mt-2">
               <button type="button" onClick={() => setRegisterRole('client')} className={`flex flex-col items-center justify-center w-20 h-20 rounded-2xl transition-all ${registerRole === 'client' ? 'bg-brand-primary text-white shadow-lg scale-105' : 'bg-white text-gray-400 border border-gray-200'}`}>
                 <User size={24} className="mb-1" /><span className="text-xs font-bold">Cliente</span>
@@ -382,19 +406,38 @@ export default function MobileAuth() {
               </button>
             </div>
           )}
-          <h1 className="text-2xl font-black text-brand-dark text-center">{isLogin ? 'Bem-vindo de volta!' : 'Crie sua conta'}</h1>
+          <h1 className="text-2xl font-black text-brand-dark text-center">
+            {authMode === 'login' ? 'Bem-vindo de volta!' : 
+             authMode === 'register' ? 'Crie sua conta' : 
+             'Recuperar Senha'}
+          </h1>
         </div>
 
         <div className="p-6 flex-1 flex flex-col">
           {errorMsg && <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-bold mb-4 text-center border border-red-200 shadow-sm">{errorMsg}</div>}
 
           <form onSubmit={handleSubmit} className="flex-1 flex flex-col">
-            {isLogin ? (
+            
+            {authMode === 'login' && (
               <div className="space-y-4">
                 <InputField icon={Mail} name="email" placeholder="Seu e-mail" type="email" required value={formData.email} onChange={handleChange} />
                 <InputField icon={Lock} name="password" placeholder="Sua senha" type="password" required value={formData.password} onChange={handleChange} />
+                <div className="flex justify-end">
+                  <button type="button" onClick={() => { setAuthMode('forgot_password'); setErrorMsg(''); }} className="text-sm text-brand-primary font-bold hover:underline">
+                    Esqueci minha senha
+                  </button>
+                </div>
               </div>
-            ) : (
+            )}
+
+            {authMode === 'forgot_password' && (
+              <div className="space-y-4">
+                <p className="text-sm text-gray-600 text-center mb-4">Digite seu e-mail para receber um link de recuperação de senha.</p>
+                <InputField icon={Mail} name="email" placeholder="Seu e-mail" type="email" required value={formData.email} onChange={handleChange} />
+              </div>
+            )}
+
+            {authMode === 'register' && (
               <div className="space-y-2">
                 {registerRole === 'client' && (
                   <div className="space-y-1">
@@ -600,16 +643,32 @@ export default function MobileAuth() {
 
             <button type="submit" disabled={loading} className={`w-full bg-brand-primary text-white rounded-2xl py-4 font-bold text-lg shadow-lg shadow-brand-primary/30 hover:bg-green-600 transition-colors flex justify-center items-center mt-6 mb-4 shrink-0 ${loading ? 'opacity-70' : ''}`}>
               {loading ? <Loader2 className="animate-spin" size={20} /> : (
-                <>{isLogin ? 'Entrar' : 'Cadastrar'} {isLogin ? <ArrowRight size={20} className="ml-2" /> : <CheckCircle size={20} className="ml-2" />}</>
+                <>
+                  {authMode === 'login' ? 'Entrar' : 
+                   authMode === 'register' ? 'Cadastrar' : 
+                   'Enviar Link'} 
+                  {(authMode === 'login' || authMode === 'forgot_password') ? <ArrowRight size={20} className="ml-2" /> : <CheckCircle size={20} className="ml-2" />}
+                </>
               )}
             </button>
           </form>
 
           <div className="mt-auto text-center pt-4 border-t border-gray-100 shrink-0" style={{paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))'}}>
-            <p className="text-gray-500 text-sm">{isLogin ? "Não tem uma conta?" : "Já tem uma conta?"}</p>
-            <button onClick={() => { setIsLogin(!isLogin); setRegisterRole('client'); setErrorMsg(''); }} className="mt-2 text-brand-dark font-bold text-base hover:text-brand-primary transition-colors">
-              {isLogin ? "Cadastre-se agora" : "Entrar"}
-            </button>
+            {authMode === 'login' ? (
+              <>
+                <p className="text-gray-500 text-sm">Não tem uma conta?</p>
+                <button onClick={() => { setAuthMode('register'); setRegisterRole('client'); setErrorMsg(''); }} className="mt-2 text-brand-dark font-bold text-base hover:text-brand-primary transition-colors">
+                  Cadastre-se agora
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-500 text-sm">Já tem uma conta ou quer voltar?</p>
+                <button onClick={() => { setAuthMode('login'); setErrorMsg(''); }} className="mt-2 text-brand-dark font-bold text-base hover:text-brand-primary transition-colors">
+                  Voltar para o Login
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>

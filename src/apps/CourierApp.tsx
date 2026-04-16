@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, List, Bell, Star, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing, Map, Trash2 } from 'lucide-react';
+import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing, Map, Trash2 } from 'lucide-react';
 
 // Componente auxiliar para renderizar o mapa e os botões de navegação
 const AddressMap = ({ address }: { address: string }) => {
@@ -146,7 +146,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
         const { data: order } = await supabase
           .from('orders')
-          .select('*, stores(name, addresses(*)), addresses(*), users:client_id(name), order_items(*)')
+          .select('*, stores(name, addresses(*)), addresses(*), users:client_id(name, phone), order_items(*)')
           .eq('id', delivery.order_id)
           .maybeSingle();
 
@@ -644,7 +644,20 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
             <div className="mt-4 mb-auto">
               <h2 className="text-gray-400 text-sm font-bold uppercase tracking-widest mb-2">Entrega no Cliente</h2>
               <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 mb-4">
-                <h3 className="text-xl font-bold text-white mb-1">{activeDelivery.order.users?.name}</h3>
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-xl font-bold text-white">{activeDelivery.order.users?.name}</h3>
+                  {activeDelivery.order.users?.phone && (
+                    <a
+                      href={`tel:${activeDelivery.order.users.phone.replace(/\D/g, '')}`}
+                      className="flex items-center gap-1.5 bg-green-500 hover:bg-green-400 text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors"
+                    >
+                      📞 Ligar
+                    </a>
+                  )}
+                </div>
+                {activeDelivery.order.users?.phone && (
+                  <p className="text-gray-400 text-sm mb-2">{activeDelivery.order.users.phone}</p>
+                )}
                 <p className="text-gray-400 text-sm flex items-start mt-2"><MapPin size={16} className="mr-2 shrink-0 mt-0.5"/> {activeDelivery.order.addresses?.street}, {activeDelivery.order.addresses?.number} {activeDelivery.order.addresses?.complement ? `- ${activeDelivery.order.addresses?.complement}` : ''}</p>
                 <p className="text-gray-400 text-sm ml-6">{activeDelivery.order.addresses?.neighborhood}</p>
               </div>

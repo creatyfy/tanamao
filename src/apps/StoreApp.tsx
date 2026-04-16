@@ -6,10 +6,11 @@ import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { 
   LayoutDashboard, ShoppingBag, Package, DollarSign, LogOut, 
-  Check, X, Clock, Plus, Bell, Star, BarChart3, Tag, 
-  FolderTree, Bike, Settings, ChevronRight, Edit2, Trash2, 
-  Image as ImageIcon, Search, MapPin, MessageSquare, Loader2, History, Ticket, Percent, UploadCloud, BellRing,
-  User, CheckCircle, Printer, XCircle, Send, AlertTriangle, Phone, Lock, CreditCard, Store as StoreIcon
+  Check, X, Clock, Plus, Bell, Star, BarChart3, 
+  FolderTree, Bike, Settings, Edit2, Trash2, 
+  Image as ImageIcon, MapPin, MessageSquare, Loader2, History, Ticket, UploadCloud, BellRing,
+  User, CheckCircle, Printer, XCircle, Send, Lock, CreditCard, Store as StoreIcon,
+  Menu, ChevronLeft
 } from 'lucide-react';
 
 export default function StoreApp({ onExit }: { onExit: () => void }) {
@@ -19,6 +20,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => setToast({ message, type });
   
@@ -69,7 +71,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     name: '',
     phone: '',
     logo_url: '',
-    banner_url: '', // New banner_url field
+    banner_url: '',
     delivery_fee: '',
     min_order_value: '',
     avg_prep_time_min: '',
@@ -81,8 +83,8 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
-  const [bannerFile, setBannerFile] = useState<File | null>(null); // New bannerFile state
-  const [bannerPreview, setBannerPreview] = useState<string | null>(null); // New bannerPreview state
+  const [bannerFile, setBannerFile] = useState<File | null>(null);
+  const [bannerPreview, setBannerPreview] = useState<string | null>(null);
   const [settingsLoading, setSettingsLoading] = useState(false);
 
   // Confirm Modal
@@ -158,7 +160,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         setDashboardMetrics({ totalOrders, deliveredOrders, cancelledOrders, revenue });
       }
 
-      // Saldo disponível — soma dos split_store_amount de pagamentos confirmados ainda não repassados
+      // Saldo disponível
       const { data: pendingPayments } = await supabase
         .from('payments')
         .select('split_store_amount, confirmed_at')
@@ -201,7 +203,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         name: store.name,
         phone: store.phone || '',
         logo_url: store.logo_url || '',
-        banner_url: store.banner_url || '', // Set banner_url
+        banner_url: store.banner_url || '',
         delivery_fee: store.delivery_fee?.toString() || '0',
         min_order_value: store.min_order_value?.toString() || '0',
         avg_prep_time_min: store.avg_prep_time_min?.toString() || '30',
@@ -212,7 +214,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         confirmPassword: ''
       });
       setLogoPreview(store.logo_url || null);
-      setBannerPreview(store.banner_url || null); // Set bannerPreview
+      setBannerPreview(store.banner_url || null);
     }
   }, [activeTab, historyFilter, store, lastUpdate]);
 
@@ -283,7 +285,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         fetchProducts(storeData.id);
         fetchProductCategories(storeData.id);
         
-        // Remove canal anterior de forma síncrona
         if (storeOrdersChannelRef.current) {
           supabase.removeChannel(storeOrdersChannelRef.current);
           storeOrdersChannelRef.current = null;
@@ -304,7 +305,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
         storeOrdersChannelRef.current = channelOrders;
 
-        // Remove canal de chat anterior de forma síncrona
         if (storeChatsChannelRef.current) {
           supabase.removeChannel(storeChatsChannelRef.current);
           storeChatsChannelRef.current = null;
@@ -362,7 +362,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
       const { data } = await supabase
         .from('orders')
-        .select('*, users:client_id(name), order_items(*)')
+        .select('*, users:client_id(name, phone), order_items(*)')
         .eq('store_id', store.id)
         .in('status', ['delivered', 'cancelled'])
         .gte('created_at', startDate.toISOString())
@@ -383,7 +383,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
   const fetchOrders = async (storeId: number) => {
     const { data } = await supabase.from('orders')
-      .select(`*, users:client_id(name), order_items(*), addresses:delivery_address_id(*), order_chats(*), couriers(users(name, phone), vehicle_type, license_plate), deliveries(id, status, created_at)`)
+      .select(`*, users:client_id(name, phone), order_items(*), addresses:delivery_address_id(*), order_chats(*), couriers(users(name, phone), vehicle_type, license_plate), deliveries(id, status, created_at)`)
       .eq('store_id', storeId)
       .in('status', ['pending', 'preparing', 'ready', 'delivering'])
       .order('created_at', { ascending: false });
@@ -564,7 +564,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       if (updateErr) throw updateErr;
 
       if (status === 'ready') {
-        // Garante que o motoboy receba no mínimo R$ 2.00, mesmo que a taxa da loja seja zero
         const courierFee = Math.max(Number(store?.delivery_fee) || 0, 2.00);
         
         const { error: deliveryErr } = await supabase.from('deliveries').insert({
@@ -575,10 +574,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         
         if (deliveryErr) {
           console.error("Erro RLS ao despachar:", deliveryErr);
-          showToast("Erro ao chamar motoboy. Verifique as permissões.", 'error');
-        } else {
-          showToast(`Procurando motoboys... (Ganho: R$ ${courierFee.toFixed(2)})`);
+          showToast('Erro ao chamar motoboy. Verifique as permissões do sistema.', 'error');
+          return;
         }
+        
+        showToast(`Procurando motoboys... (Ganho: R$ ${courierFee.toFixed(2)})`);
       } else {
         showToast('Status do pedido atualizado!');
       }
@@ -737,7 +737,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         return;
       }
       setProductImageFile(file);
-      // FileReader é mais compatível com iOS/iPadOS que URL.createObjectURL
       const readerProduct = new FileReader();
       readerProduct.onload = (ev) => { if (ev.target?.result) setProductImagePreview(ev.target.result as string); };
       readerProduct.onerror = () => setProductImagePreview(null);
@@ -924,12 +923,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (file.size > 5 * 1024 * 1024) { // Max 5MB
+      if (file.size > 5 * 1024 * 1024) { 
         showToast('A imagem deve ter no máximo 5MB', 'warning');
         return;
       }
       setLogoFile(file);
-      // FileReader é mais compatível com iOS/iPadOS que URL.createObjectURL
       const readerLogo = new FileReader();
       readerLogo.onload = (ev) => { if (ev.target?.result) setLogoPreview(ev.target.result as string); };
       readerLogo.onerror = () => setLogoPreview(null);
@@ -940,12 +938,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const handleBannerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      if (file.size > 10 * 1024 * 1024) { // Max 10MB
+      if (file.size > 10 * 1024 * 1024) { 
         showToast('A imagem do banner deve ter no máximo 10MB', 'warning');
         return;
       }
       setBannerFile(file);
-      // FileReader é mais compatível com iOS/iPadOS que URL.createObjectURL
       const readerBanner = new FileReader();
       readerBanner.onload = (ev) => { if (ev.target?.result) setBannerPreview(ev.target.result as string); };
       readerBanner.onerror = () => setBannerPreview(null);
@@ -960,7 +957,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
     try {
       let updatedLogoUrl = settingsForm.logo_url;
-      let updatedBannerUrl = settingsForm.banner_url; // Initialize with current banner_url
+      let updatedBannerUrl = settingsForm.banner_url; 
 
       if (logoFile) {
         const fileExt = logoFile.name.split('.').pop();
@@ -979,7 +976,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         updatedLogoUrl = publicUrlData.publicUrl;
       }
 
-      if (bannerFile) { // Handle banner file upload
+      if (bannerFile) { 
         const fileExt = bannerFile.name.split('.').pop();
         const fileName = `store_banner_${store.id}_${Date.now()}.${fileExt}`;
         
@@ -1000,7 +997,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         name: settingsForm.name,
         phone: settingsForm.phone,
         logo_url: updatedLogoUrl,
-        banner_url: updatedBannerUrl, // Include updated banner_url
+        banner_url: updatedBannerUrl, 
         delivery_fee: parseFloat(settingsForm.delivery_fee),
         min_order_value: parseFloat(settingsForm.min_order_value),
         avg_prep_time_min: parseInt(settingsForm.avg_prep_time_min),
@@ -1016,7 +1013,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
       if (storeError) throw storeError;
 
-      // Update user's phone in users table
       const { error: userPhoneError } = await supabase
         .from('users')
         .update({ phone: settingsForm.phone })
@@ -1103,15 +1099,32 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     <div className="flex h-screen bg-gray-50 w-full font-sans" style={{paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)', paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)'}}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       
+      {/* OVERLAY MOBILE */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden" 
+          onClick={() => setIsMobileMenuOpen(false)} 
+        />
+      )}
+
       {/* SIDEBAR */}
-      <div className="w-64 bg-white border-r border-gray-200 flex flex-col shadow-sm z-10">
-        <div className="p-6 border-b border-gray-100">
-          <h1 className="text-2xl font-black text-brand-dark flex items-center"><span className="text-brand-primary mr-2">Tá Na Mão</span></h1>
-          <p className="text-sm text-gray-500 mt-1 font-medium">Portal do Parceiro</p>
+      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 flex flex-col shadow-2xl md:shadow-sm transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+          <div>
+            <h1 className="text-2xl font-black text-brand-dark flex items-center"><span className="text-brand-primary mr-2">Tá Na Mão</span></h1>
+            <p className="text-sm text-gray-500 mt-1 font-medium">Portal do Parceiro</p>
+          </div>
+          <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-gray-500 hover:text-gray-700">
+            <X size={24} />
+          </button>
         </div>
         <nav className="flex-1 overflow-y-auto p-4 space-y-1 scrollbar-hide">
           {menuItems.map(item => (
-            <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all relative ${activeTab === item.id ? 'bg-brand-primary text-white shadow-md shadow-brand-primary/20' : 'text-gray-600 hover:bg-brand-light hover:text-brand-primary'}`}>
+            <button 
+              key={item.id} 
+              onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} 
+              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all relative ${activeTab === item.id ? 'bg-brand-primary text-white shadow-md shadow-brand-primary/20' : 'text-gray-600 hover:bg-brand-light hover:text-brand-primary'}`}
+            >
               {item.icon}<span>{item.label}</span>
               {item.id === 'chats' && orders.some(o => o.order_chats?.length > 0) && (
                 <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse absolute top-3 right-4"></span>
@@ -1130,11 +1143,14 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       <div className="flex-1 flex flex-col overflow-hidden relative">
         {loading && <div className="absolute top-0 left-0 w-full h-1 bg-brand-primary animate-pulse z-50"></div>}
         
-        <header className="bg-white border-b border-gray-200 h-20 flex items-center justify-between px-8 shrink-0">
-          <div className="flex items-center space-x-4">
-            <div className="w-10 h-10 bg-brand-light text-brand-primary rounded-lg flex items-center justify-center font-bold text-xl">{store.name.charAt(0)}</div>
-            <div>
-              <h2 className="font-bold text-brand-dark leading-tight">{store.name}</h2>
+        <header className="bg-white border-b border-gray-200 h-20 flex items-center justify-between px-4 md:px-8 shrink-0">
+          <div className="flex items-center space-x-3 md:space-x-4">
+            <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-lg">
+              <Menu size={24} />
+            </button>
+            <div className="w-10 h-10 bg-brand-light text-brand-primary rounded-lg flex items-center justify-center font-bold text-xl shrink-0">{store.name.charAt(0)}</div>
+            <div className="hidden sm:block">
+              <h2 className="font-bold text-brand-dark leading-tight truncate max-w-[150px] md:max-w-xs">{store.name}</h2>
               <p className="text-xs text-gray-500">{store.is_approved ? 'Verificada' : 'Pendente'}</p>
             </div>
           </div>
@@ -1146,22 +1162,22 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-8">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
           
           {/* BANNER DE NOTIFICAÇÕES */}
           {notifPermission === 'default' && (
             <div className="max-w-6xl mx-auto mb-6 bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-center justify-between shadow-sm">
               <div className="flex items-center">
-                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mr-4">
+                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mr-4 shrink-0">
                   <BellRing size={20} />
                 </div>
                 <div>
                   <h3 className="font-bold text-blue-900">Ative as Notificações</h3>
-                  <p className="text-sm text-blue-700">Seja avisado imediatamente quando um novo pedido chegar.</p>
+                  <p className="text-sm text-blue-700 hidden sm:block">Seja avisado imediatamente quando um novo pedido chegar.</p>
                 </div>
               </div>
-              <button onClick={requestPermission} className="bg-blue-600 text-white px-5 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors shadow-sm">
-                Ativar Agora
+              <button onClick={requestPermission} className="bg-blue-600 text-white px-5 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors shadow-sm shrink-0 ml-2">
+                Ativar
               </button>
             </div>
           )}
@@ -1170,7 +1186,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           {activeTab === 'dashboard' && (
             <div className="max-w-6xl mx-auto space-y-8">
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <h2 className="text-3xl font-black text-brand-dark">Olá, Parceiro! 👋</h2>
+                <h2 className="text-2xl md:text-3xl font-black text-brand-dark">Olá, Parceiro! 👋</h2>
                 <div className="flex flex-col items-end gap-2 w-full md:w-auto">
                   <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200 w-full overflow-x-auto scrollbar-hide">
                     <button onClick={() => setDashboardFilter('today')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === 'today' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hoje</button>
@@ -1181,41 +1197,41 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                   </div>
                   {dashboardFilter === 'custom' && (
                     <div className="flex gap-2 items-center bg-white p-2 rounded-xl shadow-sm border border-gray-200 w-full md:w-auto justify-between">
-                      <input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent" />
+                      <input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent w-full md:w-auto" />
                       <span className="text-gray-400 text-sm font-medium">até</span>
-                      <input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent" />
+                      <input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent w-full md:w-auto" />
                     </div>
                   )}
                 </div>
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-blue-50 rounded-xl text-blue-500 w-fit mb-4"><ShoppingBag size={24} /></div>
-                  <h3 className="text-3xl font-black text-brand-dark">{dashboardMetrics.totalOrders}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Pedidos no período</p>
+                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">{dashboardMetrics.totalOrders}</h3>
+                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Pedidos no período</p>
                 </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-green-50 rounded-xl text-green-500 w-fit mb-4"><Check size={24} /></div>
-                  <h3 className="text-3xl font-black text-brand-dark">{dashboardMetrics.deliveredOrders}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Entregues no período</p>
+                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">{dashboardMetrics.deliveredOrders}</h3>
+                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Entregues no período</p>
                 </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-red-50 rounded-xl text-red-500 w-fit mb-4"><X size={24} /></div>
-                  <h3 className="text-3xl font-black text-brand-dark">{dashboardMetrics.cancelledOrders}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Cancelados no período</p>
+                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">{dashboardMetrics.cancelledOrders}</h3>
+                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Cancelados no período</p>
                 </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                   <div className="p-3 bg-brand-light rounded-xl text-brand-primary w-fit mb-4"><DollarSign size={24} /></div>
-                  <h3 className="text-3xl font-black text-brand-dark">R$ {dashboardMetrics.revenue.toFixed(2)}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Faturamento no período</p>
+                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">R$ {dashboardMetrics.revenue.toFixed(2)}</h3>
+                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Faturamento no período</p>
                 </div>
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 col-span-2 md:col-span-1 lg:col-span-1">
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 col-span-2 md:col-span-1 lg:col-span-1">
                   <div className="p-3 bg-yellow-50 rounded-xl text-yellow-500 w-fit mb-4"><Star size={24} /></div>
-                  <h3 className="text-3xl font-black text-brand-dark">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</h3>
-                  <p className="text-sm text-gray-500 font-medium mt-1">Avaliação geral</p>
+                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</h3>
+                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Avaliação geral</p>
                 </div>
-                {/* Card de Saldo Disponível — largura total abaixo dos outros cards */}
+                {/* Card de Saldo Disponível */}
                 <div className="col-span-2 md:col-span-3 lg:col-span-5 bg-gradient-to-r from-brand-primary to-green-600 p-6 rounded-2xl shadow-md text-white">
                   <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div>
@@ -1225,14 +1241,14 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                         </div>
                         <p className="font-bold text-white/80 text-sm uppercase tracking-wider">Saldo a Receber</p>
                       </div>
-                      <h3 className="text-4xl font-black text-white mt-2">
+                      <h3 className="text-3xl md:text-4xl font-black text-white mt-2">
                         {storeBalance !== null ? `R$ ${storeBalance.toFixed(2)}` : '—'}
                       </h3>
                       <p className="text-white/70 text-sm mt-1">
                         Pagamentos digitais confirmados aguardando repasse
                       </p>
                     </div>
-                    <div className="bg-white/20 rounded-2xl p-4 text-center min-w-[180px]">
+                    <div className="bg-white/20 rounded-2xl p-4 text-center w-full md:w-auto min-w-[180px]">
                       <p className="text-white/80 text-xs font-bold uppercase tracking-wider mb-1">Próximo repasse</p>
                       <p className="text-white font-black text-sm capitalize">{nextPayoutDate || 'Toda segunda-feira'}</p>
                       <p className="text-white/70 text-xs mt-1">via PIX cadastrado</p>
@@ -1247,21 +1263,31 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           {activeTab === 'orders' && (
             <div className="max-w-7xl mx-auto h-full flex flex-col">
               <h2 className="text-2xl font-bold text-brand-dark mb-6">Gestor de Pedidos</h2>
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-hidden">
+              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-y-auto md:overflow-hidden pb-10 md:pb-0">
                 
                 {/* Novos */}
-                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-full">
+                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[500px] md:h-full">
                   <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
                     Novos <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'pending').length}</span>
                   </h3>
                   <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                     {orders.filter(o => o.status === 'pending').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido novo</p>}
                     {orders.filter(o => o.status === 'pending').map(order => (
-                      <div key={order.id} className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-l-brand-secondary relative">
+                      <div key={order.id} className="bg-white rounded-2xl p-4 md:p-5 shadow-sm border-l-4 border-l-brand-secondary relative">
                         <div className="flex justify-between items-start mb-2">
                           <div>
                             <span className="text-xs font-bold text-gray-400">#{order.id}</span>
                             <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
+                            {order.users?.phone && (
+                              <a
+                                href={`https://wa.me/55${order.users.phone.replace(/\D/g, '')}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center text-xs text-green-600 font-bold mt-1 hover:underline"
+                              >
+                                📞 {order.users.phone}
+                              </a>
+                            )}
                           </div>
                           <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
                         </div>
@@ -1311,14 +1337,14 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                 </div>
 
                 {/* Em Preparo */}
-                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-full">
+                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[500px] md:h-full">
                   <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
                     Em Preparo <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'preparing').length}</span>
                   </h3>
                   <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                     {orders.filter(o => o.status === 'preparing').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido em preparo</p>}
                     {orders.filter(o => o.status === 'preparing').map(order => (
-                      <div key={order.id} className="bg-white rounded-2xl p-5 shadow-sm border-l-4 border-l-blue-500 relative">
+                      <div key={order.id} className="bg-white rounded-2xl p-4 md:p-5 shadow-sm border-l-4 border-l-blue-500 relative">
                         <button
                           onClick={() => printOrder(order)}
                           title="Reimprimir comanda"
@@ -1330,6 +1356,16 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                           <div>
                             <span className="text-xs font-bold text-gray-400">#{order.id}</span>
                             <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
+                            {order.users?.phone && (
+                              <a
+                                href={`https://wa.me/55${order.users.phone.replace(/\D/g, '')}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center text-xs text-green-600 font-bold mt-1 hover:underline"
+                              >
+                                📞 {order.users.phone}
+                              </a>
+                            )}
                           </div>
                           <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
                         </div>
@@ -1351,7 +1387,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                           {order.order_items?.map((item:any) => <p key={item.id} className="font-medium">{item.quantity}x {item.product_name}</p>)}
                         </div>
 
-                        <div className="flex gap-2 mt-3">
+                        <div className="flex flex-col sm:flex-row gap-2 mt-3">
                           <button
                             onClick={() => updateOrderStatus(order.id, 'ready')}
                             disabled={actionLoading === order.id}
@@ -1373,19 +1409,29 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                 </div>
 
                 {/* Prontos */}
-                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-full">
+                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[500px] md:h-full">
                   <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
                     Prontos / Rota <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'ready' || o.status === 'delivering').length}</span>
                   </h3>
                   <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                     {orders.filter(o => o.status === 'ready' || o.status === 'delivering').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido aguardando entrega</p>}
                     {orders.filter(o => o.status === 'ready' || o.status === 'delivering').map(order => (
-                      <div key={order.id} className={`bg-white rounded-2xl p-5 shadow-sm border-l-4 ${order.own_delivery ? 'border-l-purple-500' : order.courier_id ? 'border-l-brand-primary' : 'border-l-yellow-400'} opacity-90`}>
+                      <div key={order.id} className={`bg-white rounded-2xl p-4 md:p-5 shadow-sm border-l-4 ${order.own_delivery ? 'border-l-purple-500' : order.courier_id ? 'border-l-brand-primary' : 'border-l-yellow-400'} opacity-90`}>
                         <div className="flex justify-between items-start mb-2">
                           <span className="text-xs font-bold text-gray-400">#{order.id}</span>
                           <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
                         </div>
                         <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
+                        {order.users?.phone && (
+                          <a
+                            href={`https://wa.me/55${order.users.phone.replace(/\D/g, '')}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center text-xs text-green-600 font-bold mt-1 hover:underline"
+                          >
+                            📞 {order.users.phone}
+                          </a>
+                        )}
                         
                         {order.addresses && (
                           <p className="text-xs text-gray-500 mb-2 flex items-start mt-1">
@@ -1448,7 +1494,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             <div className="max-w-6xl mx-auto h-[calc(100vh-8rem)] flex flex-col">
               <h2 className="text-2xl font-black text-gray-800 mb-6 shrink-0">Chat com Clientes</h2>
               <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 min-h-0">
-                <div className="md:col-span-1 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-y-auto">
+                <div className={`md:col-span-1 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-y-auto ${activeChatOrderId ? 'hidden md:block' : 'block'}`}>
                   {orders.length === 0 && <p className="p-8 text-center text-gray-500 text-sm">Nenhum pedido ativo.</p>}
                   {orders.map(order => {
                     const msgs = order.order_chats || [];
@@ -1470,7 +1516,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                     );
                   })}
                 </div>
-                <div className="md:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden">
+                <div className={`md:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden ${!activeChatOrderId ? 'hidden md:flex' : 'flex h-[600px] md:h-auto'}`}>
                   {!activeChatOrderId ? (
                     <div className="h-full flex flex-col items-center justify-center text-gray-400 p-8">
                       <MessageSquare size={48} className="mb-4 opacity-30" />
@@ -1483,9 +1529,14 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                     return (
                       <>
                         <div className="p-4 border-b bg-gray-50 shrink-0 flex justify-between items-center">
-                          <div>
-                            <h3 className="font-bold text-gray-800">Pedido #{order.id}</h3>
-                            <p className="text-xs text-gray-500">Cliente: {order.users?.name}</p>
+                          <div className="flex items-center">
+                            <button onClick={() => setActiveChatOrderId(null)} className="md:hidden p-2 -ml-2 mr-2 text-gray-600 hover:bg-gray-200 rounded-lg">
+                              <ChevronLeft size={24} />
+                            </button>
+                            <div>
+                              <h3 className="font-bold text-gray-800">Pedido #{order.id}</h3>
+                              <p className="text-xs text-gray-500">Cliente: {order.users?.name}</p>
+                            </div>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="bg-white px-3 py-1 rounded-full text-xs font-bold border border-gray-200 text-gray-600 hidden sm:inline-block">
@@ -1505,9 +1556,9 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                                     }
                                   });
                                 }}
-                                className="bg-red-500 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-red-600 transition-colors flex items-center shadow-sm"
+                                className="bg-red-500 text-white px-3 md:px-4 py-2 rounded-xl text-xs font-bold hover:bg-red-600 transition-colors flex items-center shadow-sm"
                               >
-                                <XCircle size={14} className="mr-1.5" /> Cancelar Pedido
+                                <XCircle size={14} className="mr-1.5" /> <span className="hidden sm:inline">Cancelar Pedido</span><span className="sm:hidden">Cancelar</span>
                               </button>
                             )}
                           </div>
@@ -1535,7 +1586,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                             <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Digite sua mensagem..."
                               className="flex-1 bg-gray-100 rounded-full px-4 py-3 text-sm outline-none" />
                             <button type="submit" disabled={!chatInput.trim()}
-                              className="w-12 h-12 bg-brand-primary text-white rounded-full flex items-center justify-center disabled:opacity-50">
+                              className="w-12 h-12 bg-brand-primary text-white rounded-full flex items-center justify-center disabled:opacity-50 shrink-0">
                               <Send size={18} className="ml-1" />
                             </button>
                           </form>
@@ -1551,17 +1602,17 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           {/* HISTÓRICO DE PEDIDOS */}
           {activeTab === 'history' && (
             <div className="max-w-6xl mx-auto">
-              <div className="flex justify-between items-center mb-6">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <h2 className="text-2xl font-bold text-brand-dark">Histórico de Pedidos</h2>
-                <div className="flex bg-gray-200 p-1 rounded-xl">
-                  <button onClick={() => setHistoryFilter('today')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${historyFilter === 'today' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hoje</button>
-                  <button onClick={() => setHistoryFilter('yesterday')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${historyFilter === 'yesterday' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Ontem</button>
-                  <button onClick={() => setHistoryFilter('week')} className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${historyFilter === 'week' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Últimos 7 dias</button>
+                <div className="flex bg-gray-200 p-1 rounded-xl w-full md:w-auto overflow-x-auto scrollbar-hide">
+                  <button onClick={() => setHistoryFilter('today')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${historyFilter === 'today' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hoje</button>
+                  <button onClick={() => setHistoryFilter('yesterday')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${historyFilter === 'yesterday' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Ontem</button>
+                  <button onClick={() => setHistoryFilter('week')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${historyFilter === 'week' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Últimos 7 dias</button>
                 </div>
               </div>
               
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                <table className="w-full text-left border-collapse">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[800px]">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
                       <th className="p-4 font-medium">#ID</th>
@@ -1645,12 +1696,12 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             <div className="max-w-6xl mx-auto">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-brand-dark">Categorias do Cardápio</h2>
-                <button onClick={openNewCategoryModal} className="bg-brand-primary text-white px-6 py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors">
-                  <Plus size={20} className="mr-2" /> Nova Categoria
+                <button onClick={openNewCategoryModal} className="bg-brand-primary text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm md:text-base">
+                  <Plus size={20} className="mr-1 md:mr-2" /> <span className="hidden sm:inline">Nova Categoria</span><span className="sm:hidden">Nova</span>
                 </button>
               </div>
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                <table className="w-full text-left border-collapse">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[600px]">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
                       <th className="p-4 font-medium">Nome da Categoria</th>
@@ -1697,12 +1748,12 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             <div className="max-w-6xl mx-auto">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-brand-dark">Gestão de Cardápio</h2>
-                <button onClick={openNewProductModal} className="bg-brand-primary text-white px-6 py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors">
-                  <Plus size={20} className="mr-2" /> Novo Produto
+                <button onClick={openNewProductModal} className="bg-brand-primary text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm md:text-base">
+                  <Plus size={20} className="mr-1 md:mr-2" /> <span className="hidden sm:inline">Novo Produto</span><span className="sm:hidden">Novo</span>
                 </button>
               </div>
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                <table className="w-full text-left border-collapse">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[800px]">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
                       <th className="p-4 font-medium w-20">Foto</th>
@@ -1766,12 +1817,12 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             <div className="max-w-6xl mx-auto">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-brand-dark">Cupons de Desconto</h2>
-                <button onClick={() => { setCouponForm({ code: '', type: 'percentage', value: '', min_order_value: '0', expires_at: '', is_active: true }); setShowCouponModal(true); }} className="bg-brand-primary text-white px-6 py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors">
-                  <Plus size={20} className="mr-2" /> Novo Cupom
+                <button onClick={() => { setCouponForm({ code: '', type: 'percentage', value: '', min_order_value: '0', expires_at: '', is_active: true }); setShowCouponModal(true); }} className="bg-brand-primary text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm md:text-base">
+                  <Plus size={20} className="mr-1 md:mr-2" /> <span className="hidden sm:inline">Novo Cupom</span><span className="sm:hidden">Novo</span>
                 </button>
               </div>
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                <table className="w-full text-left border-collapse">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[800px]">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
                       <th className="p-4 font-medium">Código</th>
@@ -1832,7 +1883,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                 <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-gray-100 flex items-center">
                   <Star className="text-yellow-400 mr-2 fill-current" size={20} />
                   <span className="font-black text-brand-dark text-lg">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</span>
-                  <span className="text-gray-400 text-sm ml-2 font-medium">({reviews.length} avaliações)</span>
+                  <span className="text-gray-400 text-sm ml-2 font-medium hidden sm:inline">({reviews.length} avaliações)</span>
                 </div>
               </div>
               
@@ -1874,11 +1925,11 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
           {/* SETTINGS */}
           {activeTab === 'settings' && (
-            <div className="max-w-4xl mx-auto space-y-8">
-              <h2 className="text-3xl font-black text-brand-dark">Configurações da Loja</h2>
+            <div className="max-w-4xl mx-auto space-y-8 pb-8">
+              <h2 className="text-2xl md:text-3xl font-black text-brand-dark">Configurações da Loja</h2>
 
               {/* Store Profile Settings */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                 <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><StoreIcon size={20} className="mr-2 text-brand-primary"/> Perfil da Loja</h3>
                 <form onSubmit={handleUpdateStoreSettings} className="space-y-5">
                   <div className="flex flex-col items-center justify-center mb-4">
@@ -1957,7 +2008,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
               </div>
 
               {/* Delivery Settings */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                 <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><Bike size={20} className="mr-2 text-brand-primary"/> Configurações de Entrega</h3>
                 <form onSubmit={handleUpdateStoreSettings} className="space-y-5">
                   <div>
@@ -1979,7 +2030,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
               </div>
 
               {/* Payment Methods */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                 <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><CreditCard size={20} className="mr-2 text-brand-primary"/> Formas de Pagamento</h3>
                 <form onSubmit={handleUpdateStoreSettings} className="space-y-4">
                   <label className="flex items-center text-gray-700 font-medium">
@@ -2001,7 +2052,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
               </div>
 
               {/* Password Change */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                 <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><Lock size={20} className="mr-2 text-brand-primary"/> Alterar Senha</h3>
                 <form onSubmit={handleChangePassword} className="space-y-5">
                   <div>
@@ -2024,7 +2075,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
       {/* CATEGORY MODAL */}
       {showCategoryModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-brand-dark">{editingCategory ? 'Editar Categoria' : 'Nova Categoria'}</h2>
@@ -2061,7 +2112,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
       {/* PRODUCT MODAL */}
       {showProductModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto scrollbar-hide">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-brand-dark">{editingProduct ? 'Editar Produto' : 'Novo Produto'}</h2>
@@ -2144,7 +2195,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
       {/* COUPON MODAL */}
       {showCouponModal && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-brand-dark flex items-center"><Ticket className="mr-2 text-brand-primary" size={24}/> Novo Cupom</h2>
@@ -2206,7 +2257,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
       {/* Modal: notificar clientes sobre o cupom */}
       {showNotifyModal && store && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center p-4">
           <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl">
             <div className="text-center mb-5">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
