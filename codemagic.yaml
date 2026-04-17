@@ -19,15 +19,19 @@ workflows:
           set -euo pipefail
           node --version
           yarn --version
+          
+          # Instala dependências
           yarn install
-          # Executa o build e garante que a pasta dist seja criada
-          yarn build
+          
+          # Executa o build usando o binário direto do vite para evitar problemas com scripts do yarn
+          ./node_modules/.bin/vite build
+          
           echo "Verificando pasta de build..."
           if [ -d "dist" ]; then
             echo "Pasta dist encontrada com sucesso."
             ls -la dist/
           else
-            echo "ERRO: Pasta dist não encontrada após yarn build."
+            echo "ERRO: Pasta dist não encontrada após vite build."
             ls -la
             exit 1
           fi
@@ -81,7 +85,7 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Tá Na Mão" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 'Usado para tirar foto de perfil da loja ou do motoboy'" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Usado para tirar foto de perfil da loja ou do motoboy'" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 'Usado para selecionar foto de perfil da loja, motoboy ou produto'" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c :NSPhotoLibraryUsageDescription 'Usado para selecionar foto de perfil da loja, motoboy ou produto'" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Usado para selecionar foto de perfil da loja, motoboy ou produto'" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 'Usado para salvar fotos do app'" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 'Usado para salvar fotos do app'" "$PLIST"
@@ -118,7 +122,7 @@ workflows:
         script: |
           set -euo pipefail
           yarn install
-          yarn build
+          ./node_modules/.bin/vite build
       - name: Setup Android platform
         script: |
           set -euo pipefail
