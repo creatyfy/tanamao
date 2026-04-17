@@ -18,23 +18,20 @@ workflows:
         script: |
           set -euo pipefail
           node --version
-          yarn --version
+          npm --version
           
-          # Garante que o yarn use node-modules para compatibilidade com Capacitor
-          yarn config set nodeLinker node-modules
+          # Instala dependências com NPM
+          npm install
           
-          # Instala dependências
-          yarn install
-          
-          # Executa o build usando yarn para localizar o binário corretamente
-          yarn vite build
+          # Executa o build com NPM
+          npm run build
           
           echo "Verificando pasta de build..."
           if [ -d "dist" ]; then
             echo "Pasta dist encontrada com sucesso."
             ls -la dist/
           else
-            echo "ERRO: Pasta dist não encontrada após yarn vite build."
+            echo "ERRO: Pasta dist não encontrada após npm run build."
             ls -la
             exit 1
           fi
@@ -124,9 +121,8 @@ workflows:
       - name: Install and build
         script: |
           set -euo pipefail
-          yarn config set nodeLinker node-modules
-          yarn install
-          yarn vite build
+          npm install
+          npm run build
       - name: Setup Android platform
         script: |
           set -euo pipefail
