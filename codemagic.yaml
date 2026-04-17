@@ -51,27 +51,10 @@ workflows:
             exit 1
           fi
           echo "OK: $XCODE_PROJECT"
-      - name: Apply app icons
+
+      - name: Generate app icons
         script: |
-          DEST="ios/App/App/Assets.xcassets/AppIcon.appiconset"
-          mkdir -p "$DEST"
-          cp "assets/ios-icons/AppIcon-512@2x.png" "$DEST/AppIcon-512@2x.png"
-          cat > "$DEST/Contents.json" << 'EOF'
-          {
-            "images" : [
-              {
-                "filename" : "AppIcon-512@2x.png",
-                "idiom" : "universal",
-                "platform" : "ios",
-                "size" : "1024x1024"
-              }
-            ],
-            "info" : {
-              "author" : "xcode",
-              "version" : 1
-            }
-          }
-          EOF
+          npx @capacitor/assets generate --ios
       - name: Resolve Swift Package Manager dependencies
         script: |
           xcodebuild -resolvePackageDependencies \
