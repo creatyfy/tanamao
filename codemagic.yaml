@@ -171,6 +171,11 @@ workflows:
           
           # Entra na pasta android e executa o build
           cd android
-          ./gradlew bundleRelease
+          # Força a assinatura via parâmetros do Gradle para garantir que o AAB seja assinado
+          ./gradlew bundleRelease \
+            -Pandroid.injected.signing.store.file=tanamao-release.keystore \
+            -Pandroid.injected.signing.store.password=tanamao123 \
+            -Pandroid.injected.signing.key.alias=tanamao \
+            -Pandroid.injected.signing.key.password=tanamao123
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab

@@ -18,7 +18,7 @@ android {
     }
     signingConfigs {
         release {
-            storeFile file("app/tanamao-release.keystore")
+            storeFile file("tanamao-release.keystore")
             storePassword "tanamao123"
             keyAlias "tanamao"
             keyPassword "tanamao123"
