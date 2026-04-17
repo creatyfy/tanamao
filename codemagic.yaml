@@ -20,13 +20,22 @@ workflows:
           node --version
           yarn --version
           yarn install
+          # Executa o build e garante que a pasta dist seja criada
           yarn build
-          echo "Build concluido. Conteudo do dist:"
-          ls -la dist/
+          echo "Verificando pasta de build..."
+          if [ -d "dist" ]; then
+            echo "Pasta dist encontrada com sucesso."
+            ls -la dist/
+          else
+            echo "ERRO: Pasta dist não encontrada após yarn build."
+            ls -la
+            exit 1
+          fi
       - name: Setup iOS platform
         script: |
           set -euo pipefail
-          npx cap add ios
+          # Garante que o Capacitor use a pasta dist correta
+          npx cap add ios || true
           npx cap sync ios
           if [ ! -d "$XCODE_PROJECT" ]; then
             echo "ERRO: Projeto Xcode não encontrado"
@@ -37,6 +46,7 @@ workflows:
       - name: Apply app icons
         script: |
           DEST="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          mkdir -p "$DEST"
           cp "assets/ios-icons/AppIcon-512@2x.png" "$DEST/AppIcon-512@2x.png"
           cat > "$DEST/Contents.json" << 'EOF'
           {
@@ -112,7 +122,7 @@ workflows:
       - name: Setup Android platform
         script: |
           set -euo pipefail
-          npx cap add android
+          npx cap add android || true
           npx cap sync android
       - name: Build Android AAB
         script: |
