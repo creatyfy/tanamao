@@ -160,17 +160,47 @@ workflows:
           chmod +x gradlew
           cd ..
           
-          # Garante que o keystore esteja na pasta android/app antes do build
+          # Garante que o keystore esteja na pasta android antes do build
           if [ -f "tanamao-release.keystore" ]; then
-            echo "Keystore encontrado na raiz. Movendo para android/app..."
-            mv tanamao-release.keystore android/app/tanamao-release.keystore
+            echo "Keystore encontrado na raiz. Movendo para android/ ..."
+            mv tanamao-release.keystore android/tanamao-release.keystore
           else
             echo "ERRO: tanamao-release.keystore NÃO ENCONTRADO na raiz do projeto. O build NÃO SERÁ ASSINADO."
             exit 1
           fi
 
-          # Entra na pasta android e executa o build, que agora deve assinar automaticamente
+          # Entra na pasta android e executa o build, que agora deve assinar automaticamente via gradle.properties
           cd android
           ./gradlew bundleRelease
+          cd ..
+
+          # --- Verificação de Assinatura do AAB --- 
+          echo "Verificando assinatura do AAB..."
+          # Instala o bundletool se não estiver presente
+          if [ ! -f "bundletool.jar" ]; then
+              echo "bundletool não encontrado. Baixando..."
+              wget https://github.com/google/bundletool/releases/download/1.15.0/bundletool-all-1.15.0.jar -O bundletool.jar
+          fi
+          BUNDLETOOL_CMD="java -jar bundletool.jar"
+
+          # Gera um APK universal a partir do AAB para verificação
+          $BUNDLETOOL_CMD build-apks --bundle=android/app/build/outputs/bundle/release/app-release.aab --output=app.apks --mode=universal
+
+          # Descompacta o APK universal
+          unzip -o app.apks universal.apk
+
+          # Verifica a assinatura do APK extraído
+          APKSIGNER_PATH=$(find $ANDROID_SDK_ROOT -name "apksigner" | head -n 1)
+          if [ -z "$APKSIGNER_PATH" ]; then
+            echo "ERRO: apksigner não encontrado. Certifique-se de que o Android SDK Build-Tools está instalado."
+            exit 1
+          fi
+          $APKSIGNER_PATH verify universal.apk
+          if [ $? -ne 0 ]; then
+            echo "ERRO: O AAB NÃO ESTÁ ASSINADO CORRETAMENTE!"
+            exit 1
+          else
+            echo "SUCESSO: O AAB ESTÁ ASSINADO CORRETAMENTE!"
+          fi
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
