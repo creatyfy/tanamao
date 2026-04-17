@@ -12,46 +12,25 @@ workflows:
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
-      node: 22.13.0
+      node: 20.11.0
     scripts:
-      - name: Install dependencies
+      - name: Install and build
         script: |
-          yarn install
-      - name: Build web assets
-        script: |
-          echo "Node version: $(node --version)"
-          echo "Yarn version: $(yarn --version)"
-          echo "Listando arquivos raiz:"
-          ls -la
-          echo "vite.config.ts:"
-          cat vite.config.ts
-          echo "Iniciando build..."
-          yarn build
-          echo "Exit code do build: $?"
-          ls -la dist/ 2>/dev/null || echo "dist nao existe apos o build"
+          set -euo pipefail
+          node --version
+          npm --version
+          npm install
+          npm run build
+          echo "Build concluido. Conteudo do dist:"
+          ls -la dist/
       - name: Setup iOS platform
         script: |
-          if [ ! -d "dist" ]; then
-            echo "ERRO: pasta dist não encontrada. O build web falhou."
-            exit 1
-          fi
-          echo "dist encontrado:"
-          ls dist/
-
-          echo "Capacitor CLI:"
-          ./node_modules/.bin/cap --version
-
-          rm -rf ios
-
+          set -euo pipefail
           ./node_modules/.bin/cap add ios
-
           ./node_modules/.bin/cap sync ios
-
-          echo "Estrutura ios criada:"
-          find ios -name "*.xcodeproj" -o -name "*.xcworkspace" 2>/dev/null
-
           if [ ! -d "$XCODE_PROJECT" ]; then
-            echo "ERRO: Projeto Xcode não encontrado em $XCODE_PROJECT"
+            echo "ERRO: Projeto Xcode não encontrado"
+            find ios -name "*.xcodeproj" 2>/dev/null
             exit 1
           fi
           echo "Projeto Xcode encontrado: $XCODE_PROJECT"
@@ -75,8 +54,6 @@ workflows:
             }
           }
           EOF
-          echo "Ícone aplicado:"
-          ls -la "$DEST/"
       - name: Resolve Swift Package Manager dependencies
         script: |
           xcodebuild -resolvePackageDependencies \
@@ -115,3 +92,36 @@ workflows:
         submit_to_testflight: true
         beta_groups:
           - Internal Testers
+
+  android-release:
+    name: Android Release Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      android_signing:
+        - tanamao_keystore
+      vars:
+        PACKAGE_NAME: "com.tanamaoc.delivery"
+      node: 20.11.0
+    scripts:
+      - name: Install and build
+        script: |
+          set -euo pipefail
+          npm install
+          npm run build
+      - name: Setup Android platform
+        script: |
+          set -euo pipefail
+          ./node_modules/.bin/cap add android
+          ./node_modules/.bin/cap sync android
+      - name: Build Android AAB
+        script: |
+          cd android
+          ./gradlew bundleRelease
+    artifacts:
+      - android/app/build/outputs/bundle/release/*.aab
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: production
+        submit_as_draft: true
