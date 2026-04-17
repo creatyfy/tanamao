@@ -19,7 +19,16 @@ workflows:
           yarn install
       - name: Build web assets
         script: |
-          yarn build 2>&1 || (echo "BUILD FALHOU COM ERRO ACIMA" && exit 1)
+          echo "Node version: $(node --version)"
+          echo "Yarn version: $(yarn --version)"
+          echo "Listando arquivos raiz:"
+          ls -la
+          echo "vite.config.ts:"
+          cat vite.config.ts
+          echo "Iniciando build..."
+          yarn build
+          echo "Exit code do build: $?"
+          ls -la dist/ 2>/dev/null || echo "dist nao existe apos o build"
       - name: Setup iOS platform
         script: |
           if [ ! -d "dist" ]; then
