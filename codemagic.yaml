@@ -131,13 +131,11 @@ workflows:
           npx cap sync android
       - name: Build Android AAB
         script: |
-          # Garante permissão de execução para o gradlew
-          chmod +x android/gradlew
-          # Limpa o cache do Gradle para evitar corrupção
-          rm -rf android/.gradle
-          # Força a recriação do Gradle Wrapper
+          # Limpa o wrapper corrompido e recria um novo
+          rm -rf android/gradle/wrapper/gradle-wrapper.jar
           cd android
-          gradle wrapper --gradle-version 8.1.0
+          gradle wrapper
+          chmod +x gradlew
           cd ..
           
           # Verifica se o keystore existe antes de mover
@@ -145,11 +143,11 @@ workflows:
             echo "Keystore encontrado. Movendo para android/app..."
             mv tanamao-release.keystore android/app/tanamao-release.keystore
           else
-            echo "AVISO: tanamao-release.keystore NÃO ENCONTRADO na raiz do projeto. O build pode falhar na assinatura."
-            echo "Por favor, faça o commit do arquivo tanamao-release.keystore para a raiz do seu repositório."
+            echo "AVISO: tanamao-release.keystore NÃO ENCONTRADO na raiz do projeto."
+            echo "O build vai falhar se o keystore não estiver em android/app/tanamao-release.keystore"
           fi
           
-          # Entra na pasta android e executa o build
+          # Executa o build
           cd android
           ./gradlew bundleRelease
     artifacts:
