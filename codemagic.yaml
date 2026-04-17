@@ -38,15 +38,19 @@ workflows:
       - name: Setup iOS platform
         script: |
           set -euo pipefail
-          # Garante que o Capacitor use a pasta dist correta
-          npx cap add ios || true
-          npx cap sync ios
+          rm -rf ios
+          npx cap add ios
+          cd ios/App
+          xcodebuild -resolvePackageDependencies \
+            -project App.xcodeproj \
+            -scheme App
+          cd ../..
+          npx cap sync ios --no-deps
           if [ ! -d "$XCODE_PROJECT" ]; then
             echo "ERRO: Projeto Xcode não encontrado"
-            find ios -name "*.xcodeproj" 2>/dev/null
             exit 1
           fi
-          echo "Projeto Xcode encontrado: $XCODE_PROJECT"
+          echo "OK: $XCODE_PROJECT"
       - name: Apply app icons
         script: |
           DEST="ios/App/App/Assets.xcassets/AppIcon.appiconset"
