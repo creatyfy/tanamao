@@ -131,8 +131,10 @@ workflows:
           npx cap sync android
       - name: Build Android AAB
         script: |
+          # Garante permissão de execução para o gradlew
+          chmod +x android/gradlew
           # Move o keystore para o local esperado pelo build.gradle
-          mv tanamao-release.keystore app/tanamao-release.keystore
+          mv tanamao-release.keystore android/app/tanamao-release.keystore
           cd android
           ./gradlew bundleRelease
     artifacts:
