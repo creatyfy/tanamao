@@ -133,8 +133,11 @@ workflows:
         script: |
           # Garante permissão de execução para o gradlew
           chmod +x android/gradlew
-          # Move o keystore para o local esperado pelo build.gradle
+          # Limpa o cache do Gradle e o wrapper para evitar corrupção
+          rm -rf android/.gradle android/gradle/wrapper/gradle-wrapper.jar
+          # Move o keystore para o local esperado pelo build.gradle (executado da raiz do projeto)
           mv tanamao-release.keystore android/app/tanamao-release.keystore
+          # Entra na pasta android e executa o build
           cd android
           ./gradlew bundleRelease
     artifacts:
