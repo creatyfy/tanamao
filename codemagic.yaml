@@ -171,11 +171,31 @@ workflows:
           
           # Entra na pasta android e executa o build
           cd android
-          # Força a assinatura via parâmetros do Gradle para garantir que o AAB seja assinado
-          ./gradlew bundleRelease \
-            -Pandroid.injected.signing.store.file=tanamao-release.keystore \
-            -Pandroid.injected.signing.store.password=tanamao123 \
-            -Pandroid.injected.signing.key.alias=tanamao \
-            -Pandroid.injected.signing.key.password=tanamao123
+          ./gradlew bundleRelease
+          cd ..
+
+          # Assinatura manual do AAB com jarsigner
+          echo "Realizando assinatura manual do AAB com jarsigner..."
+          jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 \
+            -keystore tanamao-release.keystore \
+            -storepass tanamao123 \
+            android/app/build/outputs/bundle/release/app-release.aab \
+            tanamao
+
+          # Otimização do AAB com zipalign (opcional, mas recomendado)
+          echo "Otimizando AAB com zipalign..."
+          # Encontra o zipalign no Android SDK
+          ZIPALIGN_PATH=$(find $ANDROID_SDK_ROOT -name "zipalign" | head -n 1)
+          if [ -z "$ZIPALIGN_PATH" ]; then
+            echo "ERRO: zipalign não encontrado. Certifique-se de que o Android SDK Build-Tools está instalado."
+            exit 1
+          fi
+          $ZIPALIGN_PATH -f -p 4 \
+            android/app/build/outputs/bundle/release/app-release.aab \
+            android/app/build/outputs/bundle/release/app-release-signed.aab
+          
+          # Renomeia o arquivo assinado para o nome original esperado
+          mv android/app/build/outputs/bundle/release/app-release-signed.aab \
+            android/app/build/outputs/bundle/release/app-release.aab
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
