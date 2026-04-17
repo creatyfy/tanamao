@@ -54,6 +54,13 @@ workflows:
 
       - name: Generate app icons
         script: |
+          # Garante que a logo correta esteja nos locais esperados pelo gerador
+          mkdir -p assets
+          cp logo_new.png assets/logo.png
+          cp logo_new.png assets/icon-only.png
+          cp logo_new.png assets/splash.png
+          cp logo_new.png assets/splash-dark.png
+          # Gera os assets para iOS
           npx @capacitor/assets generate --ios
       - name: Resolve Swift Package Manager dependencies
         script: |
