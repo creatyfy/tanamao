@@ -146,12 +146,18 @@ workflows:
           npx @capacitor/assets generate --android
       - name: Build Android AAB
         script: |
-          # Garante permissão de execução para o gradlew
-          chmod +x android/gradlew
-          # Limpa o cache do Gradle para evitar corrupção (opcional, mas seguro)
+          # Limpa o cache do Gradle para evitar corrupção
           rm -rf android/.gradle
-          # Remove o wrapper corrompido e permite que gradlew baixe um novo se necessário
+          # Remove o wrapper corrompido
           rm -rf android/gradle/wrapper/gradle-wrapper.jar
+          
+          # Entra na pasta android para recriar o wrapper e executar o build
+          cd android
+          # Recria o Gradle Wrapper (se necessário)
+          gradle wrapper
+          # Garante permissão de execução para o gradlew recém-criado/baixado
+          chmod +x gradlew
+          cd ..
           
           # Verifica se o keystore existe antes de mover
           if [ -f "tanamao-release.keystore" ]; then
@@ -162,7 +168,7 @@ workflows:
             echo "O build vai falhar se o keystore não estiver em android/app/tanamao-release.keystore"
           fi
           
-          # Executa o build
+          # Entra na pasta android e executa o build
           cd android
           ./gradlew bundleRelease
     artifacts:
