@@ -110,6 +110,7 @@ workflows:
       vars:
         PACKAGE_NAME: "com.tanamaoc.delivery"
       node: 22.13.0
+      java: 21
     scripts:
       - name: Install and build
         script: |
