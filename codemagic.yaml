@@ -133,10 +133,22 @@ workflows:
         script: |
           # Garante permissão de execução para o gradlew
           chmod +x android/gradlew
-          # Limpa o cache do Gradle e o wrapper para evitar corrupção
-          rm -rf android/.gradle android/gradle/wrapper/gradle-wrapper.jar
-          # Move o keystore para o local esperado pelo build.gradle (executado da raiz do projeto)
-          mv tanamao-release.keystore android/app/tanamao-release.keystore
+          # Limpa o cache do Gradle para evitar corrupção
+          rm -rf android/.gradle
+          # Força a recriação do Gradle Wrapper
+          cd android
+          gradle wrapper --gradle-version 8.1.0
+          cd ..
+          
+          # Verifica se o keystore existe antes de mover
+          if [ -f "tanamao-release.keystore" ]; then
+            echo "Keystore encontrado. Movendo para android/app..."
+            mv tanamao-release.keystore android/app/tanamao-release.keystore
+          else
+            echo "AVISO: tanamao-release.keystore NÃO ENCONTRADO na raiz do projeto. O build pode falhar na assinatura."
+            echo "Por favor, faça o commit do arquivo tanamao-release.keystore para a raiz do seu repositório."
+          fi
+          
           # Entra na pasta android e executa o build
           cd android
           ./gradlew bundleRelease
