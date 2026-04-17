@@ -127,8 +127,23 @@ workflows:
       - name: Setup Android platform
         script: |
           set -euo pipefail
-          npx cap add android || true
+          # Remove a plataforma Android para garantir um ambiente limpo
+          rm -rf android
+          npx cap add android
           npx cap sync android
+          # Limpa os diretórios de ícones existentes para evitar conflitos
+          rm -rf android/app/src/main/res/mipmap-*
+      - name: Generate Android icons
+        script: |
+          set -euo pipefail
+          # Garante que a logo correta esteja nos locais esperados pelo gerador
+          mkdir -p assets
+          cp logo_new.png assets/logo.png
+          cp logo_new.png assets/icon-only.png
+          cp logo_new.png assets/splash.png
+          cp logo_new.png assets/splash-dark.png
+          # Gera os assets para Android
+          npx @capacitor/assets generate --android
       - name: Build Android AAB
         script: |
           # Limpa o wrapper corrompido e recria um novo
