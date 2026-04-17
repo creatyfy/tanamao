@@ -19,34 +19,28 @@ workflows:
           yarn install
       - name: Build web assets
         script: |
-          yarn build
+          yarn build 2>&1 || (echo "BUILD FALHOU COM ERRO ACIMA" && exit 1)
       - name: Setup iOS platform
         script: |
-          # Verificar se o dist foi gerado
           if [ ! -d "dist" ]; then
             echo "ERRO: pasta dist não encontrada. O build web falhou."
             exit 1
           fi
           echo "dist encontrado:"
           ls dist/
-      
-          # Verificar se o Capacitor CLI está disponível
+
           echo "Capacitor CLI:"
           ./node_modules/.bin/cap --version
-      
-          # Remove pasta ios para garantir setup limpo
+
           rm -rf ios
-      
-          # Adiciona plataforma iOS
+
           ./node_modules/.bin/cap add ios
-      
-          # Sincroniza os assets web com o projeto iOS
+
           ./node_modules/.bin/cap sync ios
-      
-          # Verifica se o projeto Xcode foi criado
+
           echo "Estrutura ios criada:"
           find ios -name "*.xcodeproj" -o -name "*.xcworkspace" 2>/dev/null
-      
+
           if [ ! -d "$XCODE_PROJECT" ]; then
             echo "ERRO: Projeto Xcode não encontrado em $XCODE_PROJECT"
             exit 1
@@ -54,14 +48,8 @@ workflows:
           echo "Projeto Xcode encontrado: $XCODE_PROJECT"
       - name: Apply app icons
         script: |
-          # Capacitor 8 + Xcode 26 usa formato de ícone único (single icon):
-          # apenas AppIcon-512@2x.png (1024x1024) com idiom=universal, platform=ios
           DEST="ios/App/App/Assets.xcassets/AppIcon.appiconset"
-
-          # Copia o ícone 1024x1024 com o nome correto para o novo formato
           cp "assets/ios-icons/AppIcon-512@2x.png" "$DEST/AppIcon-512@2x.png"
-
-          # Atualiza o Contents.json para o formato do Capacitor 8 + Xcode 26
           cat > "$DEST/Contents.json" << 'EOF'
           {
             "images" : [
@@ -78,11 +66,8 @@ workflows:
             }
           }
           EOF
-
           echo "Ícone aplicado:"
           ls -la "$DEST/"
-          echo "Contents.json:"
-          cat "$DEST/Contents.json"
       - name: Resolve Swift Package Manager dependencies
         script: |
           xcodebuild -resolvePackageDependencies \
@@ -92,36 +77,18 @@ workflows:
       - name: Increment iOS build number
         script: |
           PLIST="ios/App/App/Info.plist"
-
-          # Build number crescente (evita erro de versão duplicada na App Store)
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0" "$PLIST"
-
-          # Resolve "Faltam dados de conformidade" — app não usa criptografia não-isenta
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
-
-          # Define nome correto do app (sem referência ao Capacitor)
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Tá Na Mão" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Tá Na Mão" "$PLIST"
-
-          # PERMISSÕES DE CÂMERA E FOTOS — obrigatórias para upload de foto de perfil no iOS/iPadOS
-          # Sem essas chaves, o app crasha ao tentar abrir o seletor de imagens (UIImagePickerController)
           /usr/libexec/PlistBuddy -c "Set :NSCameraUsageDescription 'Usado para tirar foto de perfil da loja ou do motoboy'" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Usado para tirar foto de perfil da loja ou do motoboy'" "$PLIST"
-
           /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryUsageDescription 'Usado para selecionar foto de perfil da loja, motoboy ou produto'" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Usado para selecionar foto de perfil da loja, motoboy ou produto'" "$PLIST"
-
           /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 'Usado para salvar fotos do app'" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 'Usado para salvar fotos do app'" "$PLIST"
-
-          echo "CFBundleVersion: $BUILD_NUMBER"
-          echo "CFBundleShortVersionString: 1.0"
-          echo "ITSAppUsesNonExemptEncryption: false"
-          echo "CFBundleDisplayName: Tá Na Mão"
-          echo "NSCameraUsageDescription: OK"
-          echo "NSPhotoLibraryUsageDescription: OK"
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles
