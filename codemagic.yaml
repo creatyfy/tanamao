@@ -12,22 +12,22 @@ workflows:
       vars:
         XCODE_PROJECT: "ios/App/App.xcodeproj"
         XCODE_SCHEME: "App"
-      node: 20.11.0
+      node: 22.13.0
     scripts:
       - name: Install and build
         script: |
           set -euo pipefail
           node --version
-          npm --version
-          npm install
-          npm run build
+          yarn --version
+          yarn install
+          yarn build
           echo "Build concluido. Conteudo do dist:"
           ls -la dist/
       - name: Setup iOS platform
         script: |
           set -euo pipefail
-          ./node_modules/.bin/cap add ios
-          ./node_modules/.bin/cap sync ios
+          npx cap add ios
+          npx cap sync ios
           if [ ! -d "$XCODE_PROJECT" ]; then
             echo "ERRO: Projeto Xcode não encontrado"
             find ios -name "*.xcodeproj" 2>/dev/null
@@ -102,18 +102,18 @@ workflows:
         - tanamao_keystore
       vars:
         PACKAGE_NAME: "com.tanamaoc.delivery"
-      node: 20.11.0
+      node: 22.13.0
     scripts:
       - name: Install and build
         script: |
           set -euo pipefail
-          npm install
-          npm run build
+          yarn install
+          yarn build
       - name: Setup Android platform
         script: |
           set -euo pipefail
-          ./node_modules/.bin/cap add android
-          ./node_modules/.bin/cap sync android
+          npx cap add android
+          npx cap sync android
       - name: Build Android AAB
         script: |
           cd android
