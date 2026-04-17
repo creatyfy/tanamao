@@ -174,28 +174,29 @@ workflows:
           ./gradlew bundleRelease
           cd ..
 
-          # Assinatura manual do AAB com jarsigner
-          echo "Realizando assinatura manual do AAB com jarsigner..."
-          jarsigner -verbose -sigalg SHA1withRSA -digestalg SHA1 \
-            -keystore tanamao-release.keystore \
-            -storepass tanamao123 \
-            android/app/build/outputs/bundle/release/app-release.aab \
-            tanamao
-
-          # Otimização do AAB com zipalign (opcional, mas recomendado)
-          echo "Otimizando AAB com zipalign..."
-          # Encontra o zipalign no Android SDK
-          ZIPALIGN_PATH=$(find $ANDROID_SDK_ROOT -name "zipalign" | head -n 1)
-          if [ -z "$ZIPALIGN_PATH" ]; then
-            echo "ERRO: zipalign não encontrado. Certifique-se de que o Android SDK Build-Tools está instalado."
+          # Assinatura manual do AAB com apksigner
+          echo "Realizando assinatura manual do AAB com apksigner..."
+          # Encontra o apksigner no Android SDK
+          APKSIGNER_PATH=$(find $ANDROID_SDK_ROOT -name "apksigner" | head -n 1)
+          if [ -z "$APKSIGNER_PATH" ]; then
+            echo "ERRO: apksigner não encontrado. Certifique-se de que o Android SDK Build-Tools está instalado."
             exit 1
           fi
-          $ZIPALIGN_PATH -f -p 4 \
-            android/app/build/outputs/bundle/release/app-release.aab \
-            android/app/build/outputs/bundle/release/app-release-signed.aab
           
+          $APKSIGNER_PATH sign \
+            --ks tanamao-release.keystore \
+            --ks-key-alias tanamao \
+            --ks-pass pass:tanamao123 \
+            --key-pass pass:tanamao123 \
+            --in android/app/build/outputs/bundle/release/app-release.aab \
+            --out android/app/build/outputs/bundle/release/app-release-signed.aab
+
           # Renomeia o arquivo assinado para o nome original esperado
           mv android/app/build/outputs/bundle/release/app-release-signed.aab \
             android/app/build/outputs/bundle/release/app-release.aab
+
+          # Verifica a assinatura do AAB
+          echo "Verificando assinatura do AAB..."
+          $APKSIGNER_PATH verify android/app/build/outputs/bundle/release/app-release.aab
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
