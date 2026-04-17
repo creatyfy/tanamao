@@ -45,7 +45,7 @@ workflows:
             -project App.xcodeproj \
             -scheme App
           cd ../..
-          npx cap sync ios --no-deps
+          npx cap sync ios
           if [ ! -d "$XCODE_PROJECT" ]; then
             echo "ERRO: Projeto Xcode não encontrado"
             exit 1
