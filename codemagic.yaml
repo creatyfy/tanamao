@@ -6,6 +6,8 @@ workflows:
     integrations:
       app_store_connect: Apple Codemagic
     environment:
+      groups:
+        - tanamao
       ios_signing:
         distribution_type: app_store
         bundle_identifier: com.tanamaoc.delivery
@@ -19,13 +21,8 @@ workflows:
           set -euo pipefail
           node --version
           npm --version
-          
-          # Instala dependências com NPM
           npm install
-          
-          # Executa o build com NPM
           npm run build
-          
           echo "Verificando pasta de build..."
           if [ -d "dist" ]; then
             echo "Pasta dist encontrada com sucesso."
@@ -51,16 +48,13 @@ workflows:
             exit 1
           fi
           echo "OK: $XCODE_PROJECT"
-
       - name: Generate app icons
         script: |
-          # Garante que a logo correta esteja nos locais esperados pelo gerador
           mkdir -p assets
           cp logo_new.png assets/logo.png
           cp logo_new.png assets/icon-only.png
           cp logo_new.png assets/splash.png
           cp logo_new.png assets/splash-dark.png
-          # Gera os assets para iOS
           npx @capacitor/assets generate --ios
       - name: Resolve Swift Package Manager dependencies
         script: |
@@ -106,7 +100,8 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
-
+      groups:
+        - tanamao
       vars:
         PACKAGE_NAME: "com.tanamaoc.delivery"
       node: 22.13.0
@@ -120,79 +115,53 @@ workflows:
       - name: Increment Android build number
         script: |
           cd android
-          # Incrementa versionCode
           sed -i '' 's/versionCode [0-9]*/versionCode 3/' app/build.gradle
-          # Incrementa versionName
           sed -i '' 's/versionName "[0-9]*\.[0-9]*"/versionName "2.1"/' app/build.gradle
           cd ..
       - name: Setup Android platform
         script: |
           set -euo pipefail
-          # Remove a plataforma Android para garantir um ambiente limpo
           rm -rf android
           npx cap add android
           npx cap sync android
-          # Limpa os diretórios de ícones existentes para evitar conflitos
           rm -rf android/app/src/main/res/mipmap-*
       - name: Generate Android icons
         script: |
           set -euo pipefail
-          # Garante que a logo correta esteja nos locais esperados pelo gerador
           mkdir -p assets
           cp logo_new.png assets/logo.png
           cp logo_new.png assets/icon-only.png
           cp logo_new.png assets/splash.png
           cp logo_new.png assets/splash-dark.png
-          # Gera os assets para Android
           npx @capacitor/assets generate --android
       - name: Build Android AAB
         script: |
-          # Limpa o cache do Gradle para evitar corrupção
           rm -rf android/.gradle
-          # Remove o wrapper corrompido
           rm -rf android/gradle/wrapper/gradle-wrapper.jar
-          
-          # Entra na pasta android para recriar o wrapper e executar o build
           cd android
-          # Recria o Gradle Wrapper (se necessário)
           gradle wrapper
-          # Garante permissão de execução para o gradlew recém-criado/baixado
           chmod +x gradlew
           cd ..
-          
-          # Garante que o keystore esteja na pasta android antes do build
           if [ -f "tanamao-release.keystore" ]; then
             echo "Keystore encontrado na raiz. Movendo para android/ ..."
             mv tanamao-release.keystore android/tanamao-release.keystore
           else
-            echo "ERRO: tanamao-release.keystore NÃO ENCONTRADO na raiz do projeto. O build NÃO SERÁ ASSINADO."
+            echo "ERRO: tanamao-release.keystore NÃO ENCONTRADO na raiz do projeto."
             exit 1
           fi
-
-          # Entra na pasta android e executa o build, que agora deve assinar automaticamente via gradle.properties
           cd android
           ./gradlew bundleRelease
           cd ..
-
-          # --- Verificação de Assinatura do AAB --- 
           echo "Verificando assinatura do AAB..."
-          # Instala o bundletool se não estiver presente
           if [ ! -f "bundletool.jar" ]; then
-              echo "bundletool não encontrado. Baixando..."
-              wget https://github.com/google/bundletool/releases/download/1.15.0/bundletool-all-1.15.0.jar -O bundletool.jar
+            wget https://github.com/google/bundletool/releases/download/1.15.0/bundletool-all-1.15.0.jar -O bundletool.jar
           fi
           BUNDLETOOL_CMD="java -jar bundletool.jar"
-
-          # Gera um APK universal a partir do AAB para verificação
           $BUNDLETOOL_CMD build-apks --bundle=android/app/build/outputs/bundle/release/app-release.aab --output=app.apks --mode=universal
-
-          # Descompacta o APK universal
           unzip -o app.apks universal.apk
-
-          # Verifica a assinatura do APK extraído
           APKSIGNER_PATH=$(find $ANDROID_SDK_ROOT -name "apksigner" | head -n 1)
           if [ -z "$APKSIGNER_PATH" ]; then
-            echo "ERRO: apksigner não encontrado. Certifique-se de que o Android SDK Build-Tools está instalado."
+            echo "ERRO: apksigner não encontrado."
             exit 1
           fi
           $APKSIGNER_PATH verify universal.apk
