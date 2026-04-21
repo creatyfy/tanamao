@@ -459,7 +459,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     try {
       const [prodRes, catRes] = await Promise.all([
         supabase.from('products').select('*').eq('store_id', store.id).eq('is_available', true),
-        supabase.from('product_categories').select('*').eq('product_categories.is_active', true).eq('store_id', store.id).order('sort_order')
+        supabase.from('product_categories').select('*').eq('is_active', true).eq('store_id', store.id).order('sort_order')
       ]);
       if (prodRes.data) setProducts(prodRes.data);
       if (catRes.data) setStoreCategories(catRes.data);
