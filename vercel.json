@@ -3,6 +3,7 @@
     { "src": "/app", "dest": "/index.html" },
     { "src": "/assets/(.*)", "dest": "/assets/$1" },
     { "src": "/logo.png", "dest": "/logo.png" },
+    { "src": "/logo2.png", "dest": "/logo2.png" },
     { "src": "/icon-(.*)", "dest": "/icon-$1" },
     { "src": "/manifest.json", "dest": "/manifest.json" },
     { "src": "/sw.js", "dest": "/sw.js" },
