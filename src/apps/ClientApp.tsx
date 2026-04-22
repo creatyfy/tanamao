@@ -1573,9 +1573,21 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
 
                 {pixCopyPaste && (
                   <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(pixCopyPaste!);
-                      showToast('Código PIX copiado!', 'success');
+                    onClick={async() => {
+                      try {
+                        await navigator.clipboard.writeText(pixCopyPaste!);
+                      } catch {
+                        const el = document.createElement('textarea');
+                        el.value = pixCopyPaste!;
+                        el.style.position = 'fixed';
+                        el.style.opacity = '0';
+                        document.body.appendChild(el);
+                        el.focus();
+                        el.select();
+                        document.execCommand('copy');
+                        document.body.removeChild(el);
+                      }
+                      showToat('Código PIX copiado!' , 'success');
                     }}
                     className="w-full bg-brand-light text-brand-primary py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 mb-4"
                   >
