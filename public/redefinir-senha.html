@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Redefinir Senha — Tá Na Mão</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root { --green: #16a34a; --green-light: #22c55e; --green-dark: #14532d; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: linear-gradient(150deg, #052e10 0%, #14532d 40%, #16a34a 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .card {
+      background: #fff;
+      border-radius: 28px;
+      padding: 3rem 2.5rem;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.3);
+    }
+    .icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1.5rem;
+      background: #dcfce7;
+    }
+    h1 {
+      font-family: 'Syne', sans-serif;
+      font-size: 1.75rem;
+      font-weight: 900;
+      color: var(--green-dark);
+      margin-bottom: 0.75rem;
+    }
+    p {
+      color: #6b7280;
+      font-size: 1rem;
+      line-height: 1.6;
+      margin-bottom: 1.5rem;
+    }
+    .highlight { color: var(--green-dark); font-weight: 600; }
+    .btn {
+      display: block;
+      background: var(--green);
+      color: #fff;
+      text-decoration: none;
+      border-radius: 50px;
+      padding: 1rem 2.5rem;
+      font-size: 1rem;
+      font-weight: 700;
+      width: 100%;
+      border: none;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.2s;
+      margin-bottom: 0.75rem;
+    }
+    .btn:hover { background: var(--green-light); transform: translateY(-1px); }
+    .btn-secondary {
+      display: block;
+      background: transparent;
+      color: var(--green);
+      text-decoration: none;
+      border-radius: 50px;
+      padding: 1rem 2.5rem;
+      font-size: 1rem;
+      font-weight: 600;
+      width: 100%;
+      border: 2px solid var(--green);
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 1rem;
+    }
+    .btn-secondary:hover { background: #f0fdf4; }
+    .info {
+      background: #f0fdf4;
+      border-radius: 16px;
+      padding: 1.25rem 1.5rem;
+      text-align: left;
+      margin-top: 1rem;
+    }
+    .info p {
+      font-size: 0.88rem;
+      color: var(--green-dark);
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    .info span {
+      font-size: 0.85rem;
+      color: #6b7280;
+      line-height: 1.6;
+      display: block;
+    }
+    .countdown {
+      font-size: 0.85rem;
+      color: #9ca3af;
+      margin-top: 1rem;
+    }
+    .countdown span { color: var(--green); font-weight: 700; }
+    .brand { margin-top: 1.5rem; font-size: 0.8rem; color: #9ca3af; }
+
+    /* Estado de erro */
+    #errorCard { display: none; }
+  </style>
+</head>
+<body>
+
+  <!-- Card principal -->
+  <div class="card" id="mainCard">
+    <div class="icon">
+      <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="#16a34a" stroke-width="2.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+      </svg>
+    </div>
+
+    <h1>Redefinir senha</h1>
+    <p>
+      Clique no botão abaixo para abrir o <span class="highlight">Tá Na Mão</span> e criar sua nova senha.
+    </p>
+
+    <a href="#" class="btn" id="openAppBtn">Abrir o App para redefinir</a>
+    <a href="https://tanamao-omega.vercel.app/app" class="btn-secondary">Abrir versão web</a>
+
+    <div class="info">
+      <p>⚠️ Link com prazo</p>
+      <span>Este link expira em 1 hora. Se expirar, solicite um novo link de redefinição no app.</span>
+    </div>
+
+    <p class="countdown">Abrindo o app automaticamente em <span id="timer">5</span>s...</p>
+    <p class="brand">Tá Na Mão — Delivery</p>
+  </div>
+
+  <!-- Card de erro -->
+  <div class="card" id="errorCard">
+    <div class="icon" style="background:#fee2e2">
+      <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="#dc2626" stroke-width="2.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+    </div>
+    <h1 style="color:#991b1b">Link inválido</h1>
+    <p>Este link de redefinição expirou ou já foi usado. Solicite um novo link no app.</p>
+    <a href="https://tanamao-omega.vercel.app/app" class="btn" style="background:#dc2626">Voltar ao App</a>
+    <p class="brand">Tá Na Mão — Delivery</p>
+  </div>
+
+  <script>
+    // Pega os parâmetros da URL
+    const hash = window.location.hash;
+    const hashParams = new URLSearchParams(hash.replace('#', ''));
+    const searchParams = new URLSearchParams(window.location.search);
+
+    const errorParam = hashParams.get('error') || searchParams.get('error');
+    const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
+    const refreshToken = hashParams.get('refresh_token') || searchParams.get('refresh_token');
+    const type = hashParams.get('type') || searchParams.get('type');
+
+    if (errorParam) {
+      // Mostra card de erro
+      document.getElementById('mainCard').style.display = 'none';
+      document.getElementById('errorCard').style.display = 'block';
+    } else {
+      // Monta deep link com os tokens para o app processar
+      let deepLink = 'com.tanamaoc.delivery://';
+      if (accessToken) {
+        deepLink += `#access_token=${accessToken}&refresh_token=${refreshToken}&type=${type || 'recovery'}`;
+      }
+
+      document.getElementById('openAppBtn').href = deepLink;
+
+      // Countdown e abertura automática
+      let count = 5;
+      const timerEl = document.getElementById('timer');
+      const interval = setInterval(() => {
+        count--;
+        timerEl.textContent = count;
+        if (count <= 0) {
+          clearInterval(interval);
+          window.location.href = deepLink;
+        }
+      }, 1000);
+
+      // Se clicar no botão, cancela o countdown
+      document.getElementById('openAppBtn').addEventListener('click', () => {
+        clearInterval(interval);
+        document.querySelector('.countdown').style.display = 'none';
+      });
+    }
+  </script>
+</body>
+</html>
