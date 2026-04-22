@@ -64,16 +64,28 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  // Verifica se o email do usuário foi confirmado
+  const isEmailConfirmed = (user: User) => {
+    return !!user.email_confirmed_at;
+  };
+
   useEffect(() => {
     // Tenta recuperar a sessão atual
     supabase.auth.getSession().then(({ data: { session }, error }) => {
-      // Se houver erro (ex: Refresh Token Inválido), limpa a sessão
       if (error) {
         console.error("Erro na sessão:", error.message);
         clearSession();
         return;
       }
-      
+
+      // Bloqueia sessão se email não confirmado
+      if (session?.user && !isEmailConfirmed(session.user)) {
+        console.warn('Email não confirmado. Bloqueando sessão.');
+        supabase.auth.signOut();
+        clearSession();
+        return;
+      }
+
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchProfile(session.user.id);
@@ -93,8 +105,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         return;
       }
 
-      // Se o token falhar ao atualizar ou o usuário sair, limpa tudo
       if (event === 'TOKEN_REFRESH_FAILED' || event === 'SIGNED_OUT') {
+        clearSession();
+        return;
+      }
+
+      // Bloqueia login se email não confirmado
+      if (session?.user && !isEmailConfirmed(session.user)) {
+        console.warn('Email não confirmado. Bloqueando login.');
+        supabase.auth.signOut();
         clearSession();
         return;
       }
@@ -130,7 +149,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const deleteAccount = async () => {
     if (!user) return;
     try {
-      // Marca o usuário como inativo e anonimiza os dados pessoais na tabela users
       await supabase
         .from('users')
         .update({
@@ -140,7 +158,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           avatar_url: null,
         })
         .eq('id', user.id);
-      // Faz logout após marcar como excluído
       await supabase.auth.signOut();
     } catch (error) {
       console.warn('Erro ao excluir conta:', error);
