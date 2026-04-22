@@ -19,7 +19,9 @@ nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:cen
 .hero{min-height:100vh;background:linear-gradient(150deg,#052e10 0%,#14532d 30%,#16a34a 70%,#22c55e 100%);display:flex;align-items:center;justify-content:center;text-align:center;padding:7rem 2rem 5rem;position:relative;overflow:hidden}
 .hero::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 70% 50%,rgba(34,197,94,0.3) 0%,transparent 60%),radial-gradient(ellipse at 30% 80%,rgba(250,204,21,0.1) 0%,transparent 50%)}
 .hero-content{position:relative;z-index:1;max-width:720px}
-.hero-logo{width:140px;height:140px;border-radius:50%;object-fit:cover;box-shadow:0 8px 40px rgba(0,0,0,0.4),0 0 0 4px rgba(255,255,255,0.2);margin-bottom:2rem;animation:pop 0.6s cubic-bezier(0.34,1.56,0.64,1) both}
+.hero-logo{width:140px;height:140px;border-radius:50%;object-fit:cover;object-position:center;box-shadow:0 8px 40px rgba(0,0,0,0.4),0 0 0 4px rgba(255,255,255,0.2);margin-bottom:2rem;
+  animation:pop 0.6s cubic-bezier(0.34,1.56,0.64,1) both;
+}
 @keyframes pop{from{transform:scale(0.5);opacity:0}to{transform:scale(1);opacity:1}}
 .hero-badge{display:inline-block;background:rgba(250,204,21,0.2);color:var(--yellow);border:1px solid rgba(250,204,21,0.4);border-radius:50px;padding:0.4rem 1.2rem;font-size:0.85rem;font-weight:600;margin-bottom:1.25rem}
 .hero h1{font-family:'Syne',sans-serif;font-size:clamp(2.8rem,6vw,4.2rem);font-weight:900;color:#fff;line-height:1.05;margin-bottom:1rem}
