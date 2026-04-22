@@ -219,7 +219,7 @@ export default function MobileAuth() {
         password: formData.password,
         options: { 
           data: { name: userName, role: roleMap[registerRole] },
-          emailRedirectTo: `${window.location.origin}/`
+          emailRedirectTo: `${window.location.origin}/confirmado`
         }
       });
 
