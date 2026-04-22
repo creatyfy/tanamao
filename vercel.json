@@ -1,6 +1,8 @@
 {
   "routes": [
     { "src": "/app", "dest": "/index.html" },
+    { "src": "/confirmado", "dest": "/confirmado.html" },
+    { "src": "/redefinir-senha", "dest": "/redefinir-senha.html" },
     { "src": "/assets/(.*)", "dest": "/assets/$1" },
     { "src": "/logo.png", "dest": "/logo.png" },
     { "src": "/logo2.png", "dest": "/logo2.png" },
