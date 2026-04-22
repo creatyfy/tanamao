@@ -48,6 +48,12 @@ workflows:
             exit 1
           fi
           echo "OK: $XCODE_PROJECT"
+      - name: Copy Firebase config
+        script: |
+          echo "Copiando GoogleService-Info.plist para o projeto iOS..."
+          cp assets/GoogleService-Info.plist ios/App/App/GoogleService-Info.plist
+          echo "GoogleService-Info.plist copiado com sucesso!"
+          ls -la ios/App/App/GoogleService-Info.plist
       - name: Generate app icons
         script: |
           mkdir -p assets
@@ -125,6 +131,17 @@ workflows:
           npx cap add android
           npx cap sync android
           rm -rf android/app/src/main/res/mipmap-*
+      - name: Copy Firebase config
+        script: |
+          echo "Copiando google-services.json para o projeto Android..."
+          cp android/app/google-services.json android/app/google-services.json.bak 2>/dev/null || true
+          if [ -f "assets/google-services.json" ]; then
+            cp assets/google-services.json android/app/google-services.json
+            echo "google-services.json copiado de assets/"
+          else
+            echo "google-services.json já está em android/app/ — mantendo."
+          fi
+          ls -la android/app/google-services.json
       - name: Generate Android icons
         script: |
           set -euo pipefail
