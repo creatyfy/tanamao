@@ -670,8 +670,16 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     }
   };
 
-  const filteredStores = stores.filter(s => storeFilter === 'approved' ? s.is_approved : !s.is_approved);
-  const filteredCouriers = couriers.filter(c => courierFilter === 'approved' ? c.is_approved : !c.is_approved);
+  const isStoreApproved = (store: any) => store.is_approved === true || store.status === 'active';
+  const isCourierApproved = (courier: any) => courier.is_approved === true || courier.status === 'active';
+
+  const pendingStoresCount = stores.filter(s => !isStoreApproved(s)).length;
+  const approvedStoresCount = stores.filter(s => isStoreApproved(s)).length;
+  const pendingCouriersCount = couriers.filter(c => !isCourierApproved(c)).length;
+  const approvedCouriersCount = couriers.filter(c => isCourierApproved(c)).length;
+
+  const filteredStores = stores.filter(s => storeFilter === 'approved' ? isStoreApproved(s) : !isStoreApproved(s));
+  const filteredCouriers = couriers.filter(c => courierFilter === 'approved' ? isCourierApproved(c) : !isCourierApproved(c));
 
   const formatTime = (dateString: string) => {
     return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(dateString));
@@ -1229,8 +1237,8 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-black text-gray-800">Gestão de Lojas</h2>
               <div className="flex bg-gray-200 p-1 rounded-xl">
-                <button onClick={() => setStoreFilter('pending')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${storeFilter === 'pending' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Em Análise ({stores.filter(s => !s.is_approved).length})</button>
-                <button onClick={() => setStoreFilter('approved')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${storeFilter === 'approved' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Aprovadas ({stores.filter(s => s.is_approved).length})</button>
+                <button onClick={() => setStoreFilter('pending')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${storeFilter === 'pending' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Em Análise ({pendingStoresCount})</button>
+                <button onClick={() => setStoreFilter('approved')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${storeFilter === 'approved' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Aprovadas ({approvedStoresCount})</button>
               </div>
             </div>
             
@@ -1260,7 +1268,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                         {store.commission_rate || 0}%
                       </td>
                       <td className="p-4">
-                        {store.is_approved ? <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">Aprovada</span> : <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">Em Análise</span>}
+                        {isStoreApproved(store) ? <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">Aprovada</span> : <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">Em Análise</span>}
                       </td>
                       <td className="p-4 text-right">
                         <div className="flex justify-end space-x-2">
@@ -1282,8 +1290,8 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-black text-gray-800">Gestão de Motoboys</h2>
               <div className="flex bg-gray-200 p-1 rounded-xl">
-                <button onClick={() => setCourierFilter('pending')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${courierFilter === 'pending' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Em Análise ({couriers.filter(c => !c.is_approved).length})</button>
-                <button onClick={() => setCourierFilter('approved')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${courierFilter === 'approved' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Aprovados ({couriers.filter(c => c.is_approved).length})</button>
+                <button onClick={() => setCourierFilter('pending')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${courierFilter === 'pending' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Em Análise ({pendingCouriersCount})</button>
+                <button onClick={() => setCourierFilter('approved')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${courierFilter === 'approved' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Aprovados ({approvedCouriersCount})</button>
               </div>
             </div>
 
@@ -1316,7 +1324,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                         <p className="text-xs">{courier.license_plate || 'Sem placa'}</p>
                       </td>
                       <td className="p-4">
-                        {courier.is_approved ? <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">Aprovado</span> : <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">Em Análise</span>}
+                        {isCourierApproved(courier) ? <span className="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold">Aprovado</span> : <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-bold">Em Análise</span>}
                       </td>
                       <td className="p-4 text-right">
                         <div className="flex justify-end space-x-2">
