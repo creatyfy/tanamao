@@ -82,6 +82,9 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const { user, profile, deleteAccount } = useAuth();
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
+  const [editingCpf, setEditingCpf] = useState(false);
+  const [cpfInput, setCpfInput] = useState('');
+  const [cpfLoading, setCpfLoading] = useState(false);
   const { permission: notifPermission, requestPermission, sendNotification } = usePushNotifications();
   const [currentScreen, setCurrentScreen] = useState('home');
   const [loading, setLoading] = useState(true);
@@ -437,6 +440,28 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     });
   };
 
+  const handleSaveCpf = async () => {
+    if (!user) return;
+
+    const cleanCpf = cpfInput.replace(/\D/g, '');
+    if (cleanCpf.length !== 11) {
+      showToast('CPF inválido. Digite um CPF com 11 dígitos.', 'warning');
+      return;
+    }
+
+    setCpfLoading(true);
+    try {
+      const { error } = await supabase.from('users').update({ cpf: cleanCpf }).eq('id', user.id);
+      if (error) throw error;
+      showToast('CPF salvo com sucesso!', 'success');
+      window.location.reload();
+    } catch (error) {
+      showToast('Erro ao salvar CPF. Tente novamente.', 'error');
+    } finally {
+      setCpfLoading(false);
+    }
+  };
+
   const toggleFavorite = async (e: React.MouseEvent, storeId: number) => {
     e.stopPropagation();
     if (!user) return;
@@ -592,6 +617,11 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
 
   const handleCheckout = async () => {
     if (!user || !selectedStore || !userAddress) return;
+    if ((paymentMethod === 'pix' || paymentMethod === 'card') && !profile?.cpf) {
+      showToast('Você precisa informar seu CPF para pagar com PIX ou cartão. Acesse seu Perfil para atualizar.', 'warning');
+      setCurrentScreen('profile');
+      return;
+    }
     
     // Bloqueia se a loja fechou depois que o cliente abriu o cardápio
     if (!selectedStore.is_open) {
@@ -1342,6 +1372,37 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                 )}
               </div>
             </div>
+
+            {!profile?.cpf && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-4">
+                <p className="text-sm font-bold text-yellow-800 mb-3">CPF não cadastrado — necessário para PIX e cartão</p>
+                {!editingCpf ? (
+                  <button
+                    onClick={() => setEditingCpf(true)}
+                    className="bg-yellow-500 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-yellow-600 transition-colors"
+                  >
+                    Informar CPF
+                  </button>
+                ) : (
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={cpfInput}
+                      onChange={(e) => setCpfInput(e.target.value)}
+                      placeholder="Digite seu CPF"
+                      className="w-full px-4 py-3 border border-yellow-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-yellow-400 bg-white"
+                    />
+                    <button
+                      onClick={handleSaveCpf}
+                      disabled={cpfLoading}
+                      className="w-full bg-yellow-500 text-white py-3 rounded-xl font-bold hover:bg-yellow-600 transition-colors disabled:opacity-50 flex justify-center items-center"
+                    >
+                      {cpfLoading ? <Loader2 size={18} className="animate-spin" /> : 'Salvar CPF'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <button onClick={onExit} className="w-full bg-white border border-red-100 text-red-500 py-4 rounded-xl font-bold flex justify-center items-center shadow-sm hover:bg-red-50 transition-colors">
               <LogOut size={20} className="mr-2"/> Sair da Conta
