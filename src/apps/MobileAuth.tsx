@@ -195,7 +195,7 @@ export default function MobileAuth() {
     if (!emailClean) throw new Error('Por favor, informe seu e-mail.');
 
     const { error } = await supabase.auth.resetPasswordForEmail(emailClean, {
-      redirectTo: 'com.tanamaoc.delivery://reset-password',
+      redirectTo: 'https://tanamao.website/redefinir-senha',
     });
     
     if (error) throw error;
