@@ -202,6 +202,48 @@ export default function MobileAuth() {
       return;
     }
 
+    // Fluxo de recuperação: pode existir perfil em `users`, mas sem o registro específico
+    // em `stores`/`couriers` quando o usuário confirmou e-mail mas não concluiu o formulário.
+    if (profile.role === 'store_owner') {
+      const { data: store } = await supabase
+        .from('stores')
+        .select('id')
+        .eq('owner_id', data.user.id)
+        .maybeSingle();
+
+      if (!store) {
+        setRegisterRole('store');
+        setFormData(prev => ({
+          ...prev,
+          email: data.user.email || emailClean,
+          ownerName: data.user.user_metadata?.name || prev.ownerName,
+        }));
+        setAuthMode('register');
+        setErrorMsg('Falta concluir o cadastro da loja. Preencha os dados abaixo e clique em Cadastrar.');
+        return;
+      }
+    }
+
+    if (profile.role === 'courier') {
+      const { data: courier } = await supabase
+        .from('couriers')
+        .select('id')
+        .eq('user_id', data.user.id)
+        .maybeSingle();
+
+      if (!courier) {
+        setRegisterRole('courier');
+        setFormData(prev => ({
+          ...prev,
+          email: data.user.email || emailClean,
+          fullName: data.user.user_metadata?.name || prev.fullName,
+        }));
+        setAuthMode('register');
+        setErrorMsg('Falta concluir o cadastro de motoboy. Preencha os dados abaixo e clique em Cadastrar.');
+        return;
+      }
+    }
+
     if (!profile.is_active && (profile.role === 'store_owner' || profile.role === 'courier')) {
       await supabase.auth.signOut();
       throw new Error('Cadastro em análise. Você poderá entrar após aprovação do admin.');

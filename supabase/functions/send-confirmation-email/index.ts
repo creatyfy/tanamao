@@ -23,6 +23,9 @@ serve(async (req) => {
       })
     }
 
+    const role = user?.user_metadata?.role as string | undefined
+    const isStoreOrCourier = role === 'store_owner' || role === 'courier'
+    const completionLabel = role === 'store_owner' ? 'da loja' : 'de motoboy'
     const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY')!
 
     const res = await fetch('https://api.resend.com/emails', {
@@ -63,9 +66,16 @@ serve(async (req) => {
                           <span style="font-size:32px;">✉️</span>
                         </div>
                         <h2 style="margin:0 0 12px;color:#14532d;font-size:22px;font-weight:800;">Confirme seu email</h2>
-                        <p style="margin:0 0 32px;color:#6b7280;font-size:15px;line-height:1.6;">
-                          Clique no botão abaixo para confirmar seu cadastro e começar a usar o <strong style="color:#14532d;">Tá Na Mão</strong>.
+                        <p style="margin:0 0 12px;color:#6b7280;font-size:15px;line-height:1.6;">
+                          Clique no botão abaixo para confirmar seu cadastro no <strong style="color:#14532d;">Tá Na Mão</strong>.
                         </p>
+                        ${isStoreOrCourier ? `
+                        <p style="margin:0 0 24px;color:#4b5563;font-size:14px;line-height:1.6;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:12px 14px;">
+                          Após confirmar, volte ao app em <strong>tanamao.website/app</strong>, faça login e conclua seu cadastro ${completionLabel}.
+                        </p>` : `
+                        <p style="margin:0 0 24px;color:#6b7280;font-size:15px;line-height:1.6;">
+                          Depois da confirmação, você já poderá acessar sua conta normalmente.
+                        </p>`}
                         <a href="${confirmationUrl}" 
                            style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;border-radius:50px;padding:16px 40px;font-size:16px;font-weight:700;letter-spacing:0.3px;">
                           Confirmar Email
