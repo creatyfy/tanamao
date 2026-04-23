@@ -117,9 +117,21 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     setLoading(true);
     try {
       const [storesRes, couriersRes, clientsRes] = await Promise.all([
-        supabase.from('stores').select('*, users:owner_id(name, email, phone), addresses(*)').limit(200),
-        supabase.from('couriers').select('*, users:user_id(name, email, phone, avatar_url)').limit(200),
-        supabase.from('users').select('*').eq('role', 'client')
+        supabase
+          .from('stores')
+          .select('*, users:owner_id(name, email, phone), addresses(*)')
+          .order('created_at', { ascending: false })
+          .limit(200),
+        supabase
+          .from('couriers')
+          .select('*, users:user_id(name, email, phone, avatar_url)')
+          .order('created_at', { ascending: false })
+          .limit(200),
+        supabase
+          .from('users')
+          .select('*')
+          .eq('role', 'client')
+          .order('created_at', { ascending: false })
       ]);
       
       if (storesRes.data) setStores(storesRes.data);
