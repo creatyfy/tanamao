@@ -179,9 +179,20 @@ export default function MobileAuth() {
 
     const { data: profile } = await supabase.from('users').select('id').eq('id', data.user.id).maybeSingle();
     if (!profile) {
+      const metaRole = data.user.user_metadata?.role;
+      const inferredRole: 'client' | 'store' | 'courier' =
+        metaRole === 'store_owner' ? 'store' : metaRole === 'courier' ? 'courier' : 'client';
+
       // O usuário confirmou o e-mail mas não concluiu o cadastro na tabela users.
       // Mantemos a sessão ativa e direcionamos para a tela de registro suavemente.
-      setFormData(prev => ({ ...prev, email: data.user.email || emailClean }));
+      setRegisterRole(inferredRole);
+      setFormData(prev => ({
+        ...prev,
+        email: data.user.email || emailClean,
+        name: inferredRole === 'client' ? (data.user.user_metadata?.name || prev.name) : prev.name,
+        ownerName: inferredRole === 'store' ? (data.user.user_metadata?.name || prev.ownerName) : prev.ownerName,
+        fullName: inferredRole === 'courier' ? (data.user.user_metadata?.name || prev.fullName) : prev.fullName,
+      }));
       setAuthMode('register');
       setErrorMsg('Seu cadastro está incompleto. Por favor, preencha os dados abaixo para finalizar.');
       return;
