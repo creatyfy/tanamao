@@ -19,7 +19,7 @@ serve(async (req) => {
 
     // Busca dados da entidade
     let name: string, email: string, phone: string, cpfCnpj: string,
-        pixKey: string, street: string, number: string,
+        pixKey: string | null, street: string, number: string,
         neighborhood: string, zipCode: string, state: string
 
     if (entityType === 'store') {
@@ -33,7 +33,7 @@ serve(async (req) => {
       email = data.users?.email
       phone = (data.users?.phone || '').replace(/\D/g, '')
       cpfCnpj = (data.cnpj || '').replace(/\D/g, '')
-      pixKey = data.pix_key || email
+      pixKey = data.pix_key?.trim() || null
       street = data.addresses?.street || 'Não informado'
       number = data.addresses?.number || 'S/N'
       neighborhood = data.addresses?.neighborhood || 'Não informado'
@@ -50,7 +50,7 @@ serve(async (req) => {
       email = data.users?.email
       phone = (data.users?.phone || '').replace(/\D/g, '')
       cpfCnpj = (data.cpf || '').replace(/\D/g, '')
-      pixKey = data.pix_key || email
+      pixKey = data.pix_key?.trim() || null
       street = data.addresses?.street || 'Não informado'
       number = data.addresses?.number || 'S/N'
       neighborhood = data.addresses?.neighborhood || 'Não informado'
@@ -71,7 +71,7 @@ serve(async (req) => {
       email,
       mobilePhone: phone,
       cpfCnpj,
-      companyType: entityType === 'store' ? 'MEI' : undefined,
+      companyType: entityType === 'store' && cpfCnpj.length === 14 ? 'MEI' : undefined,
       address: street,
       addressNumber: number,
       province: neighborhood,
@@ -98,6 +98,7 @@ serve(async (req) => {
     }
 
     if (!accountRes.ok) {
+      console.error('Asaas error', accountRes.status, JSON.stringify(account))
       console.error('Asaas account creation failed', {
         status: accountRes.status,
         statusText: accountRes.statusText,
@@ -111,21 +112,25 @@ serve(async (req) => {
     const accountId = account.id
 
     // 2. Configura saque automático toda segunda-feira para a chave PIX
-    const transferConfig = {
-      bankAccountType: 'PIX',
-      pixAddressKey: pixKey,
-      scheduleOffset: 1, // 1 = toda segunda-feira
-      enabled: true,
-    }
+    if (pixKey) {
+      const transferConfig = {
+        bankAccountType: 'PIX',
+        pixAddressKey: pixKey,
+        scheduleOffset: 1, // 1 = toda segunda-feira
+        enabled: true,
+      }
 
-    await fetch(`${ASAAS_BASE_URL}/accounts/${accountId}/transferSettings`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'access_token': ASAAS_API_KEY,
-      },
-      body: JSON.stringify(transferConfig)
-    })
+      await fetch(`${ASAAS_BASE_URL}/accounts/${accountId}/transferSettings`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'access_token': ASAAS_API_KEY,
+        },
+        body: JSON.stringify(transferConfig)
+      })
+    } else {
+      console.log('Asaas transferSettings skipped: pixKey ausente')
+    }
 
     // 3. Salva no banco
     const updateData = { asaas_account_id: accountId, asaas_wallet_id: walletId }
