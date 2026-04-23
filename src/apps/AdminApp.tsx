@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Store, Bike, LogOut, CheckCircle, XCircle, Loader2, Users, Eye, X, MapPin, FileText, DollarSign, Clock, CreditCard, User, ShoppingBag, Package, MessageSquare, Ticket, Star, Trash2, Search, Percent, BarChart3, BellRing } from 'lucide-react';
+import { LayoutDashboard, Store, Bike, LogOut, CheckCircle, XCircle, Loader2, Users, Eye, X, MapPin, FileText, DollarSign, Clock, CreditCard, User, ShoppingBag, Package, MessageSquare, Ticket, Star, Trash2, Search, Percent, BarChart3, BellRing, RefreshCw } from 'lucide-react';
 import { Toast } from '../components/Toast';
 
 export default function AdminApp({ onExit }: { onExit: () => void }) {
@@ -562,6 +562,53 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     }
   };
 
+  const handleBackfillAsaasStores = async () => {
+    const pendingStores = stores.filter((store) => isStoreApproved(store) && !store.asaas_wallet_id);
+
+    if (pendingStores.length === 0) {
+      showToast('Nenhuma loja aprovada pendente de conta Asaas.', 'warning');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      let successCount = 0;
+      const failures: string[] = [];
+
+      for (const store of pendingStores) {
+        try {
+          const { data: result, error: asaasErr } = await supabase.functions.invoke('create-asaas-account', {
+            body: { entityType: 'store', entityId: store.id }
+          });
+
+          if (asaasErr || !result?.success) {
+            const asaasMessage = result?.error || await extractEdgeFunctionErrorMessage(asaasErr);
+            failures.push(`${store.name || `#${store.id}`}: ${asaasMessage}`);
+            continue;
+          }
+
+          successCount += 1;
+        } catch (error: any) {
+          failures.push(`${store.name || `#${store.id}`}: ${error?.message || 'erro desconhecido'}`);
+        }
+      }
+
+      await fetchData();
+
+      if (failures.length === 0) {
+        showToast(`Subcontas Asaas criadas para ${successCount} loja(s)!`);
+      } else if (successCount === 0) {
+        showToast(`Falha ao criar subcontas. Exemplo: ${failures[0]}`, 'error');
+      } else {
+        showToast(`Criadas ${successCount} subconta(s). ${failures.length} falharam. Exemplo: ${failures[0]}`, 'warning');
+      }
+    } catch (error) {
+      showToast('Erro ao criar subcontas Asaas em lote.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleRejectStore = (storeId: number, ownerId: string) => {
     setConfirmModal({
       isOpen: true,
@@ -717,6 +764,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
 
   const filteredStores = stores.filter(s => storeFilter === 'approved' ? isStoreApproved(s) : !isStoreApproved(s));
   const filteredCouriers = couriers.filter(c => courierFilter === 'approved' ? isCourierApproved(c) : !isCourierApproved(c));
+  const approvedStoresWithoutAsaasCount = stores.filter(s => isStoreApproved(s) && !s.asaas_wallet_id).length;
 
   const formatTime = (dateString: string) => {
     return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(dateString));
@@ -1273,9 +1321,21 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
           <div className="max-w-6xl mx-auto">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-black text-gray-800">Gestão de Lojas</h2>
-              <div className="flex bg-gray-200 p-1 rounded-xl">
-                <button onClick={() => setStoreFilter('pending')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${storeFilter === 'pending' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Em Análise ({pendingStoresCount})</button>
-                <button onClick={() => setStoreFilter('approved')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${storeFilter === 'approved' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Aprovadas ({approvedStoresCount})</button>
+              <div className="flex items-center gap-3">
+                <div className="flex bg-gray-200 p-1 rounded-xl">
+                  <button onClick={() => setStoreFilter('pending')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${storeFilter === 'pending' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Em Análise ({pendingStoresCount})</button>
+                  <button onClick={() => setStoreFilter('approved')} className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${storeFilter === 'approved' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Aprovadas ({approvedStoresCount})</button>
+                </div>
+
+                <button
+                  onClick={handleBackfillAsaasStores}
+                  disabled={loading || approvedStoresWithoutAsaasCount === 0}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  title="Cria subcontas Asaas para lojas aprovadas sem vínculo"
+                >
+                  {loading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                  Vincular Asaas pendentes ({approvedStoresWithoutAsaasCount})
+                </button>
               </div>
             </div>
             
