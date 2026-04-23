@@ -296,6 +296,33 @@ export default function MobileAuth() {
         .maybeSingle();
 
       if (!courier) {
+        const draft = data.user.user_metadata?.registration_draft;
+        if (draft && typeof draft === 'object') {
+          const cleanCpf = typeof data.user.user_metadata?.cpf === 'string'
+            ? data.user.user_metadata.cpf.replace(/\D/g, '')
+            : (typeof draft.cpf === 'string' ? draft.cpf.replace(/\D/g, '') : '00000000000');
+
+          const { error: courierInsertError } = await supabase.from('couriers').insert({
+            user_id: data.user.id,
+            cpf: cleanCpf,
+            vehicle_type: draft.vehicleType || 'motorcycle',
+            vehicle_brand: draft.vehicleBrand || null,
+            vehicle_model: draft.vehicleModel || null,
+            vehicle_year: draft.vehicleYear ? parseInt(draft.vehicleYear) : new Date().getFullYear(),
+            license_plate: draft.licensePlate || null,
+            pix_key: draft.pixKey || null,
+            operation_city: draft.operationCity || draft.city || 'Não informado',
+            status: 'pending',
+            is_approved: false
+          });
+
+          if (!courierInsertError) {
+            await supabase.from('users').update({ is_active: false }).eq('id', data.user.id);
+            await supabase.auth.signOut();
+            throw new Error('Cadastro de motoboy finalizado e enviado para análise do admin.');
+          }
+        }
+
         setRegisterRole('courier');
         setFormData(prev => ({
           ...prev,
@@ -361,6 +388,14 @@ export default function MobileAuth() {
         acceptsCard: formData.acceptsCard,
         acceptsCash: formData.acceptsCash,
         pixKey: formData.pixKey,
+        cpf: formData.cpf,
+        fullName: formData.fullName,
+        vehicleType: formData.vehicleType,
+        vehicleBrand: formData.vehicleBrand,
+        vehicleModel: formData.vehicleModel,
+        vehicleYear: formData.vehicleYear,
+        licensePlate: formData.licensePlate,
+        operationCity: formData.operationCity,
       };
 
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
