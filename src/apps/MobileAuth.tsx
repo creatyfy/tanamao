@@ -145,19 +145,33 @@ export default function MobileAuth() {
 
     const roleToCheck = profile?.role || fallbackRole;
     const isPartnerRole = roleToCheck === 'store_owner' || roleToCheck === 'courier';
-    const isPendingApproval =
-      !error &&
-      !!profile &&
-      profile.is_active === false &&
-      isPartnerRole;
-
-    if (isPendingApproval) {
-      setShowPendingApproval(true);
-      setErrorMsg('');
-      return true;
+    if (error || !profile || !isPartnerRole || profile.is_active !== false) {
+      return false;
     }
 
-    return false;
+    // Só mostramos "Cadastro em análise" quando o registro específico do parceiro
+    // realmente existe. Isso evita travar usuário inativo sem row em stores/couriers.
+    if (roleToCheck === 'store_owner') {
+      const { data: store } = await supabase
+        .from('stores')
+        .select('id')
+        .eq('owner_id', userId)
+        .maybeSingle();
+      if (!store) return false;
+    }
+
+    if (roleToCheck === 'courier') {
+      const { data: courier } = await supabase
+        .from('couriers')
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (!courier) return false;
+    }
+
+    setShowPendingApproval(true);
+    setErrorMsg('');
+    return true;
   };
 
   useEffect(() => {
