@@ -524,7 +524,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
         });
         if (asaasErr || !result?.success) {
           console.error('Erro ao criar subconta Asaas da loja:', asaasErr, result);
-          showToast('Loja aprovada, mas houve erro ao criar conta de pagamentos. Tente reprocessar.', 'warning');
+          showToast(`Loja aprovada, mas houve erro ao criar conta de pagamentos: ${asaasErr?.message || result?.error || 'erro desconhecido'}`, 'warning');
         } else {
           showToast('Loja aprovada e conta de pagamentos criada!');
         }
@@ -599,7 +599,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
         });
         if (asaasErr || !result?.success) {
           console.error('Erro ao criar subconta Asaas do motoboy:', asaasErr, result);
-          showToast('Motoboy aprovado, mas houve erro ao criar conta de pagamentos. Tente reprocessar.', 'warning');
+          showToast(`Motoboy aprovado, mas houve erro ao criar conta de pagamentos: ${asaasErr?.message || result?.error || 'erro desconhecido'}`, 'warning');
         } else {
           showToast('Motoboy aprovado e conta de pagamentos criada!');
         }
@@ -1779,7 +1779,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                     });
                     setLoading(false);
                     if (error || !result?.success) {
-                      showToast('Erro ao criar conta Asaas. Verifique os dados da loja.', 'error');
+                      showToast(`Erro ao criar conta Asaas: ${error?.message || result?.error || 'erro desconhecido'}`, 'error');
                     } else {
                       showToast('Conta de pagamentos criada com sucesso!');
                       fetchData();
@@ -1891,7 +1891,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                     });
                     setLoading(false);
                     if (error || !result?.success) {
-                      showToast('Erro ao criar conta Asaas. Verifique os dados do motoboy.', 'error');
+                      showToast(`Erro ao criar conta Asaas: ${error?.message || result?.error || 'erro desconhecido'}`, 'error');
                     } else {
                       showToast('Conta de pagamentos criada com sucesso!');
                       fetchData();
