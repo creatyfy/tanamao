@@ -505,6 +505,26 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     }
   };
 
+  const extractEdgeFunctionErrorMessage = async (
+    error: any,
+    fallback = 'erro desconhecido'
+  ) => {
+    if (!error) return fallback;
+
+    try {
+      const response = error?.context;
+      if (response && typeof response.clone === 'function') {
+        const payload = await response.clone().json();
+        if (payload?.error) return payload.error;
+        if (payload?.message) return payload.message;
+      }
+    } catch {
+      // ignora erro de parse e segue com mensagem padrão
+    }
+
+    return error?.message || fallback;
+  };
+
   const handleApproveStore = async (storeId: number, ownerId: string) => {
     setLoading(true);
     try {
@@ -523,8 +543,9 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
           body: { entityType: 'store', entityId: storeId }
         });
         if (asaasErr || !result?.success) {
+          const asaasMessage = result?.error || await extractEdgeFunctionErrorMessage(asaasErr);
           console.error('Erro ao criar subconta Asaas da loja:', asaasErr, result);
-          showToast(`Loja aprovada, mas houve erro ao criar conta de pagamentos: ${asaasErr?.message || result?.error || 'erro desconhecido'}`, 'warning');
+          showToast(`Loja aprovada, mas houve erro ao criar conta de pagamentos: ${asaasMessage}`, 'warning');
         } else {
           showToast('Loja aprovada e conta de pagamentos criada!');
         }
@@ -598,8 +619,9 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
           body: { entityType: 'courier', entityId: courierId }
         });
         if (asaasErr || !result?.success) {
+          const asaasMessage = result?.error || await extractEdgeFunctionErrorMessage(asaasErr);
           console.error('Erro ao criar subconta Asaas do motoboy:', asaasErr, result);
-          showToast(`Motoboy aprovado, mas houve erro ao criar conta de pagamentos: ${asaasErr?.message || result?.error || 'erro desconhecido'}`, 'warning');
+          showToast(`Motoboy aprovado, mas houve erro ao criar conta de pagamentos: ${asaasMessage}`, 'warning');
         } else {
           showToast('Motoboy aprovado e conta de pagamentos criada!');
         }
@@ -1779,7 +1801,8 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                     });
                     setLoading(false);
                     if (error || !result?.success) {
-                      showToast(`Erro ao criar conta Asaas: ${error?.message || result?.error || 'erro desconhecido'}`, 'error');
+                      const asaasMessage = result?.error || await extractEdgeFunctionErrorMessage(error);
+                      showToast(`Erro ao criar conta Asaas: ${asaasMessage}`, 'error');
                     } else {
                       showToast('Conta de pagamentos criada com sucesso!');
                       fetchData();
@@ -1891,7 +1914,8 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                     });
                     setLoading(false);
                     if (error || !result?.success) {
-                      showToast(`Erro ao criar conta Asaas: ${error?.message || result?.error || 'erro desconhecido'}`, 'error');
+                      const asaasMessage = result?.error || await extractEdgeFunctionErrorMessage(error);
+                      showToast(`Erro ao criar conta Asaas: ${asaasMessage}`, 'error');
                     } else {
                       showToast('Conta de pagamentos criada com sucesso!');
                       fetchData();
