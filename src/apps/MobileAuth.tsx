@@ -58,21 +58,80 @@ export default function MobileAuth() {
     fullName: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', operationCity: ''
   });
 
+  const restorePendingRegistrationFromMetadata = async (user: any, fallbackEmail?: string) => {
+    const metaRole = user?.user_metadata?.role;
+    const isPendingRole = metaRole === 'store_owner' || metaRole === 'courier';
+    if (!user?.id || !isPendingRole) return false;
+
+    const { data: existingProfile } = await supabase
+      .from('users')
+      .select('id')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (existingProfile) return false;
+
+    const draft = user.user_metadata?.registration_draft;
+    if (!draft || typeof draft !== 'object') return false;
+
+    const inferredRole: 'store' | 'courier' = metaRole === 'store_owner' ? 'store' : 'courier';
+    setRegisterRole(inferredRole);
+    setFormData(prev => ({
+      ...prev,
+      email: user.email || fallbackEmail || prev.email,
+      phone: draft.phone || prev.phone,
+      cep: draft.cep || prev.cep,
+      street: draft.street || prev.street,
+      number: draft.number || prev.number,
+      complement: draft.complement || prev.complement,
+      neighborhood: draft.neighborhood || prev.neighborhood,
+      city: draft.city || prev.city,
+      state: draft.state || prev.state,
+      storeName: draft.storeName || prev.storeName,
+      ownerName: draft.ownerName || user.user_metadata?.name || prev.ownerName,
+      cnpj: draft.cnpj || prev.cnpj,
+      description: draft.description || prev.description,
+      category: draft.category || prev.category,
+      prepTime: draft.prepTime || prev.prepTime,
+      minOrder: draft.minOrder || prev.minOrder,
+      deliveryFee: draft.deliveryFee || prev.deliveryFee,
+      acceptsPix: draft.acceptsPix ?? prev.acceptsPix,
+      acceptsCard: draft.acceptsCard ?? prev.acceptsCard,
+      acceptsCash: draft.acceptsCash ?? prev.acceptsCash,
+      pixKey: draft.pixKey || prev.pixKey,
+      cpf: draft.cpf || user.user_metadata?.cpf || prev.cpf,
+      fullName: draft.fullName || user.user_metadata?.name || prev.fullName,
+      vehicleType: draft.vehicleType || prev.vehicleType,
+      vehicleBrand: draft.vehicleBrand || prev.vehicleBrand,
+      vehicleModel: draft.vehicleModel || prev.vehicleModel,
+      vehicleYear: draft.vehicleYear || prev.vehicleYear,
+      licensePlate: draft.licensePlate || prev.licensePlate,
+      operationCity: draft.operationCity || draft.city || prev.operationCity,
+    }));
+    setAuthMode('register');
+    showToast('E-mail confirmado! Clique em Cadastrar para concluir.', 'success');
+    return true;
+  };
+
   useEffect(() => {
     // Verifica se o usuário acabou de confirmar o e-mail e precisa concluir o cadastro
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        const pending = localStorage.getItem('pendingRegistration');
-        if (pending) {
-          try {
-            const parsed = JSON.parse(pending);
-            setRegisterRole(parsed.role);
-            setFormData(parsed.formData);
-            setAuthMode('register');
-            showToast('E-mail confirmado! Clique em Cadastrar para concluir.', 'success');
-            localStorage.removeItem('pendingRegistration');
-          } catch (e) {}
-        }
+        restorePendingRegistrationFromMetadata(session.user).then((restoredByMetadata) => {
+          if (restoredByMetadata) return;
+
+          const pending = localStorage.getItem('pendingRegistration');
+          if (pending) {
+            try {
+              const parsed = JSON.parse(pending);
+              setRegisterRole(parsed.role);
+              setFormData(parsed.formData);
+              setAuthMode('register');
+              showToast('E-mail confirmado! Clique em Cadastrar para concluir.', 'success');
+              localStorage.removeItem('pendingRegistration');
+            } catch (e) {}
+          }
+        });
       }
     });
 
@@ -183,12 +242,17 @@ export default function MobileAuth() {
       .eq('id', data.user.id)
       .maybeSingle();
     if (!profile) {
-      const metaRole = data.user.user_metadata?.role;
-      const inferredRole: 'client' | 'store' | 'courier' =
-        metaRole === 'store_owner' ? 'store' : metaRole === 'courier' ? 'courier' : 'client';
+      const restoredByMetadata = await restorePendingRegistrationFromMetadata(data.user, emailClean);
+      if (restoredByMetadata) {
+        setErrorMsg('Seu cadastro está incompleto. Por favor, revise os dados e clique em Cadastrar para finalizar.');
+        return;
+      }
 
       // O usuário confirmou o e-mail mas não concluiu o cadastro na tabela users.
       // Mantemos a sessão ativa e direcionamos para a tela de registro suavemente.
+      const metaRole = data.user.user_metadata?.role;
+      const inferredRole: 'client' | 'store' | 'courier' =
+        metaRole === 'store_owner' ? 'store' : metaRole === 'courier' ? 'courier' : 'client';
       setRegisterRole(inferredRole);
       setFormData(prev => ({
         ...prev,
