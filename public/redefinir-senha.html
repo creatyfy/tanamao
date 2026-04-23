@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Redefinir Senha — Tá Na Mão</title>
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800;900&family=Inter:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     :root { --green: #16a34a; --green-light: #22c55e; --green-dark: #14532d; }
@@ -35,6 +36,7 @@
       justify-content: center;
       margin: 0 auto 1.5rem;
       background: #dcfce7;
+      font-size: 32px;
     }
     h1 {
       font-family: 'Syne', sans-serif;
@@ -43,13 +45,25 @@
       color: var(--green-dark);
       margin-bottom: 0.75rem;
     }
-    p {
+    p.subtitle {
       color: #6b7280;
       font-size: 1rem;
       line-height: 1.6;
-      margin-bottom: 1.5rem;
+      margin-bottom: 2rem;
     }
-    .highlight { color: var(--green-dark); font-weight: 600; }
+    input {
+      width: 100%;
+      border: 2px solid #e5e7eb;
+      border-radius: 14px;
+      padding: 14px 16px;
+      font-size: 1rem;
+      font-family: 'Inter', sans-serif;
+      outline: none;
+      transition: border-color 0.2s;
+      margin-bottom: 1rem;
+      color: #1a1a1a;
+    }
+    input:focus { border-color: var(--green); }
     .btn {
       display: block;
       background: var(--green);
@@ -63,137 +77,122 @@
       border: none;
       cursor: pointer;
       transition: background 0.2s, transform 0.2s;
-      margin-bottom: 0.75rem;
+      font-family: 'Inter', sans-serif;
     }
     .btn:hover { background: var(--green-light); transform: translateY(-1px); }
-    .btn-secondary {
-      display: block;
-      background: transparent;
-      color: var(--green);
-      text-decoration: none;
-      border-radius: 50px;
-      padding: 1rem 2.5rem;
-      font-size: 1rem;
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+    .error {
+      background: #fee2e2;
+      color: #dc2626;
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 0.9rem;
       font-weight: 600;
-      width: 100%;
-      border: 2px solid var(--green);
-      cursor: pointer;
-      transition: all 0.2s;
       margin-bottom: 1rem;
-    }
-    .btn-secondary:hover { background: #f0fdf4; }
-    .info {
-      background: #f0fdf4;
-      border-radius: 16px;
-      padding: 1.25rem 1.5rem;
+      display: none;
       text-align: left;
-      margin-top: 1rem;
     }
-    .info p {
-      font-size: 0.88rem;
-      color: var(--green-dark);
-      font-weight: 600;
-      margin-bottom: 0.5rem;
-    }
-    .info span {
-      font-size: 0.85rem;
-      color: #6b7280;
-      line-height: 1.6;
-      display: block;
-    }
-    .countdown {
-      font-size: 0.85rem;
-      color: #9ca3af;
-      margin-top: 1rem;
-    }
-    .countdown span { color: var(--green); font-weight: 700; }
-    .brand { margin-top: 1.5rem; font-size: 0.8rem; color: #9ca3af; }
-
-    /* Estado de erro */
-    #errorCard { display: none; }
+    .brand { margin-top: 2rem; font-size: 0.8rem; color: #9ca3af; }
   </style>
 </head>
 <body>
+  <div class="card">
 
-  <!-- Card principal -->
-  <div class="card" id="mainCard">
-    <div class="icon">
-      <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="#16a34a" stroke-width="2.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-      </svg>
+    <!-- Erro de token inválido -->
+    <div id="errorCard" style="display:none">
+      <div class="icon" style="background:#fee2e2">❌</div>
+      <h1 style="color:#991b1b">Link inválido</h1>
+      <p class="subtitle">Este link expirou ou já foi usado. Solicite um novo link no app.</p>
+      <a href="https://tanamao.website/app" class="btn" style="background:#dc2626">Voltar ao App</a>
+      <p class="brand">Tá Na Mão — Delivery</p>
     </div>
 
-    <h1>Redefinir senha</h1>
-    <p>
-      Clique no botão abaixo para abrir o <span class="highlight">Tá Na Mão</span> e criar sua nova senha.
-    </p>
-
-    <a href="#" class="btn" id="openAppBtn">Abrir o App para redefinir</a>
-    <a href="https://tanamao-omega.vercel.app/app" class="btn-secondary">Abrir versão web</a>
-
-    <div class="info">
-      <p>⚠️ Link com prazo</p>
-      <span>Este link expira em 1 hora. Se expirar, solicite um novo link de redefinição no app.</span>
+    <!-- Formulário -->
+    <div id="formCard">
+      <div class="icon">🔒</div>
+      <h1>Nova senha</h1>
+      <p class="subtitle">Digite e confirme sua nova senha abaixo.</p>
+      <div id="errorMsg" class="error"></div>
+      <input type="password" id="password" placeholder="Nova senha (mín. 6 caracteres)"/>
+      <input type="password" id="confirmPassword" placeholder="Confirmar nova senha"/>
+      <button class="btn" id="submitBtn" onclick="handleReset()">Salvar nova senha</button>
+      <p class="brand">Tá Na Mão — Delivery</p>
     </div>
 
-    <p class="countdown">Abrindo o app automaticamente em <span id="timer">5</span>s...</p>
-    <p class="brand">Tá Na Mão — Delivery</p>
-  </div>
-
-  <!-- Card de erro -->
-  <div class="card" id="errorCard">
-    <div class="icon" style="background:#fee2e2">
-      <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="#dc2626" stroke-width="2.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
-      </svg>
+    <!-- Sucesso -->
+    <div id="successCard" style="display:none">
+      <div class="icon">✅</div>
+      <h1>Senha alterada!</h1>
+      <p class="subtitle">Sua senha foi atualizada com sucesso. Agora faça login normalmente.</p>
+      <a href="https://tanamao.website/app" class="btn">Fazer Login</a>
+      <p class="brand">Tá Na Mão — Delivery</p>
     </div>
-    <h1 style="color:#991b1b">Link inválido</h1>
-    <p>Este link de redefinição expirou ou já foi usado. Solicite um novo link no app.</p>
-    <a href="https://tanamao-omega.vercel.app/app" class="btn" style="background:#dc2626">Voltar ao App</a>
-    <p class="brand">Tá Na Mão — Delivery</p>
+
   </div>
 
   <script>
-    // Pega os parâmetros da URL
-    const hash = window.location.hash;
-    const hashParams = new URLSearchParams(hash.replace('#', ''));
-    const searchParams = new URLSearchParams(window.location.search);
+    const SUPABASE_URL = 'https://fgjlyvkdkhxvzsgxuuad.supabase.co'
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnamx5dmtka2h4dnpzZ3h1dWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2MDIzNjEsImV4cCI6MjA1OTE3ODM2MX0.hfFbkO3TgkHFQRQOsVn-RHoNIYaLXoDEa0s5FgTsFKo'
 
-    const errorParam = hashParams.get('error') || searchParams.get('error');
-    const accessToken = hashParams.get('access_token') || searchParams.get('access_token');
-    const refreshToken = hashParams.get('refresh_token') || searchParams.get('refresh_token');
-    const type = hashParams.get('type') || searchParams.get('type');
+    const { createClient } = supabase
+    const client = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
-    if (errorParam) {
-      // Mostra card de erro
-      document.getElementById('mainCard').style.display = 'none';
-      document.getElementById('errorCard').style.display = 'block';
+    // Pega tokens da URL
+    const hash = window.location.hash
+    const params = new URLSearchParams(hash.replace('#', ''))
+    const accessToken = params.get('access_token')
+    const refreshToken = params.get('refresh_token')
+    const errorParam = params.get('error')
+
+    if (errorParam || !accessToken) {
+      document.getElementById('formCard').style.display = 'none'
+      document.getElementById('errorCard').style.display = 'block'
     } else {
-      // Monta deep link com os tokens para o app processar
-      let deepLink = 'com.tanamaoc.delivery://';
-      if (accessToken) {
-        deepLink += `#access_token=${accessToken}&refresh_token=${refreshToken}&type=${type || 'recovery'}`;
+      // Seta a sessão com o token recebido
+      client.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken || ''
+      }).catch(() => {
+        document.getElementById('formCard').style.display = 'none'
+        document.getElementById('errorCard').style.display = 'block'
+      })
+    }
+
+    async function handleReset() {
+      const password = document.getElementById('password').value
+      const confirmPassword = document.getElementById('confirmPassword').value
+      const errorMsg = document.getElementById('errorMsg')
+      const submitBtn = document.getElementById('submitBtn')
+
+      errorMsg.style.display = 'none'
+
+      if (password.length < 6) {
+        errorMsg.textContent = 'A senha deve ter pelo menos 6 caracteres.'
+        errorMsg.style.display = 'block'
+        return
       }
 
-      document.getElementById('openAppBtn').href = deepLink;
+      if (password !== confirmPassword) {
+        errorMsg.textContent = 'As senhas não coincidem.'
+        errorMsg.style.display = 'block'
+        return
+      }
 
-      // Countdown e abertura automática
-      let count = 5;
-      const timerEl = document.getElementById('timer');
-      const interval = setInterval(() => {
-        count--;
-        timerEl.textContent = count;
-        if (count <= 0) {
-          clearInterval(interval);
-          window.location.href = deepLink;
-        }
-      }, 1000);
+      submitBtn.disabled = true
+      submitBtn.textContent = 'Salvando...'
 
-      // Se clicar no botão, cancela o countdown
-      document.getElementById('openAppBtn').addEventListener('click', () => {
-        clearInterval(interval);
-        document.querySelector('.countdown').style.display = 'none';
-      });
+      const { error } = await client.auth.updateUser({ password })
+
+      if (error) {
+        errorMsg.textContent = 'Erro ao redefinir senha. Solicite um novo link.'
+        errorMsg.style.display = 'block'
+        submitBtn.disabled = false
+        submitBtn.textContent = 'Salvar nova senha'
+        return
+      }
+
+      document.getElementById('formCard').style.display = 'none'
+      document.getElementById('successCard').style.display = 'block'
     }
   </script>
 </body>
