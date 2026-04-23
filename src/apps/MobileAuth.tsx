@@ -212,6 +212,70 @@ export default function MobileAuth() {
         .maybeSingle();
 
       if (!store) {
+        const draft = data.user.user_metadata?.registration_draft;
+        if (draft && typeof draft === 'object') {
+          const cleanCep = typeof draft.cep === 'string' ? draft.cep.replace(/\D/g, '') : '00000000';
+          const cleanPhone = typeof draft.phone === 'string' ? draft.phone.replace(/\D/g, '') : null;
+          const cleanCnpj = typeof draft.cnpj === 'string' ? draft.cnpj.replace(/\D/g, '') : null;
+          const ownerName = data.user.user_metadata?.name || 'Nova Loja';
+
+          const { data: existingAddress } = await supabase
+            .from('addresses')
+            .select('id')
+            .eq('user_id', data.user.id)
+            .maybeSingle();
+
+          let addressId = existingAddress?.id || null;
+          const addressPayload = {
+            user_id: data.user.id,
+            street: draft.street || 'Não informado',
+            number: draft.number || 'S/N',
+            complement: draft.complement || null,
+            neighborhood: draft.neighborhood || 'Não informado',
+            city: draft.city || 'Não informado',
+            state: draft.state || 'SP',
+            zip_code: cleanCep
+          };
+
+          if (addressId) {
+            await supabase.from('addresses').update(addressPayload).eq('id', addressId);
+          } else {
+            const { data: newAddress, error: addressError } = await supabase
+              .from('addresses')
+              .insert(addressPayload)
+              .select('id')
+              .single();
+            if (!addressError) addressId = newAddress.id;
+          }
+
+          const { error: storeInsertError } = await supabase.from('stores').insert({
+            owner_id: data.user.id,
+            name: draft.storeName || ownerName,
+            slug: `store-${data.user.id.substring(0, 8)}`,
+            cnpj: cleanCnpj,
+            phone: cleanPhone,
+            description: draft.description || null,
+            global_category_id: draft.category ? parseInt(draft.category) : null,
+            avg_prep_time_min: draft.prepTime ? parseInt(draft.prepTime) : 30,
+            min_order_value: draft.minOrder ? parseFloat(draft.minOrder) : 0,
+            delivery_fee: draft.deliveryFee ? parseFloat(draft.deliveryFee) : 0,
+            accepts_pix: draft.acceptsPix ?? true,
+            accepts_card: draft.acceptsCard ?? true,
+            accepts_cash: draft.acceptsCash ?? false,
+            address_id: addressId,
+            status: 'pending',
+            is_approved: false,
+            commission_rate: 4,
+            pix_key: draft.pixKey || null
+          });
+
+          if (!storeInsertError) {
+            await supabase.from('users').update({ is_active: false }).eq('id', data.user.id);
+            await supabase.auth.signOut();
+            throw new Error('Cadastro da loja finalizado e enviado para análise do admin.');
+          }
+        }
+
         setRegisterRole('store');
         setFormData(prev => ({
           ...prev,
@@ -276,11 +340,39 @@ export default function MobileAuth() {
     let userId = session?.user?.id;
 
     if (!userId) {
+      const registrationDraft = {
+        phone: formData.phone,
+        cep: formData.cep,
+        street: formData.street,
+        number: formData.number,
+        complement: formData.complement,
+        neighborhood: formData.neighborhood,
+        city: formData.city,
+        state: formData.state,
+        storeName: formData.storeName,
+        ownerName: formData.ownerName,
+        cnpj: formData.cnpj,
+        description: formData.description,
+        category: formData.category,
+        prepTime: formData.prepTime,
+        minOrder: formData.minOrder,
+        deliveryFee: formData.deliveryFee,
+        acceptsPix: formData.acceptsPix,
+        acceptsCard: formData.acceptsCard,
+        acceptsCash: formData.acceptsCash,
+        pixKey: formData.pixKey,
+      };
+
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: emailClean,
         password: formData.password,
         options: { 
-          data: { name: userName, role: roleMap[registerRole], cpf : formData.cpf ? formData.cpf.replace(/\D/g, '') : null },
+          data: {
+            name: userName,
+            role: roleMap[registerRole],
+            cpf: formData.cpf ? formData.cpf.replace(/\D/g, '') : null,
+            registration_draft: (registerRole === 'store' || registerRole === 'courier') ? registrationDraft : null
+          },
           emailRedirectTo: `${window.location.origin}/confirmado`
         }
       });
