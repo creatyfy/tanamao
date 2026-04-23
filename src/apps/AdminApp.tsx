@@ -98,6 +98,9 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   }, [activeTab, dashboardFilter, customStartDate, customEndDate, dashboardStoreFilter]);
 
   useEffect(() => {
+    if (activeTab === 'stores' || activeTab === 'couriers' || activeTab === 'clients') {
+      fetchData();
+    }
     if (activeTab === 'orders') {
       setOrdersPage(0);
       setAdminOrders([]);
@@ -670,8 +673,8 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     }
   };
 
-  const isStoreApproved = (store: any) => store.is_approved === true || store.status === 'active';
-  const isCourierApproved = (courier: any) => courier.is_approved === true || courier.status === 'active';
+  const isStoreApproved = (store: any) => store.is_approved === true;
+  const isCourierApproved = (courier: any) => courier.is_approved === true;
 
   const pendingStoresCount = stores.filter(s => !isStoreApproved(s)).length;
   const approvedStoresCount = stores.filter(s => isStoreApproved(s)).length;
