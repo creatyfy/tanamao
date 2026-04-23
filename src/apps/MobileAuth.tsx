@@ -251,6 +251,16 @@ export default function MobileAuth() {
     }
   };
 
+  const isRateLimitError = (message: string, status?: number) => {
+    const normalizedMessage = message.toLowerCase();
+    return status === 429
+      || normalizedMessage.includes('rate limit')
+      || normalizedMessage.includes('too many requests')
+      || normalizedMessage.includes('for security purposes')
+      || normalizedMessage.includes('over_email_send_rate_limit')
+      || normalizedMessage.includes('over request rate limit');
+  };
+
   const handleAuthError = (err: any) => {
     // Apenas loga erros reais do sistema para não poluir o console de monitoramento
     if (!err.message || err.status >= 500) {
@@ -265,8 +275,8 @@ export default function MobileAuth() {
       msg = 'Por favor, confirme seu e-mail antes de fazer login.';
     } else if (msg.includes('Failed to fetch')) {
       msg = 'Erro de conexão. Verifique sua internet.';
-    } else if (msg.includes('rate limit')) {
-      msg = 'Muitas tentativas. Aguarde um momento.';
+    } else if (isRateLimitError(msg, err.status)) {
+      msg = 'Muitas tentativas para este e-mail/rede. Aguarde 1-2 minutos e tente novamente.';
     } else if (msg.includes('duplicate key')) {
       msg = 'Alguns dados fornecidos (como RG, CNPJ ou Placa) já estão em uso por outra conta.';
     } else if (msg.includes('too long')) {
