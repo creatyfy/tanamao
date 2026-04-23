@@ -1635,9 +1635,17 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                 {pixCopyPaste && (
                   <button
                     onClick={async() => {
+                      let copied = false;
                       try {
-                        await navigator.clipboard.writeText(pixCopyPaste!);
+                        if (navigator.clipboard?.writeText) {
+                          await navigator.clipboard.writeText(pixCopyPaste!);
+                          copied = true;
+                        }
                       } catch {
+                        copied = false;
+                      }
+
+                      if (!copied) {
                         const el = document.createElement('textarea');
                         el.value = pixCopyPaste!;
                         el.style.position = 'fixed';
@@ -1645,10 +1653,11 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                         document.body.appendChild(el);
                         el.focus();
                         el.select();
-                        document.execCommand('copy');
+                        copied = document.execCommand('copy');
                         document.body.removeChild(el);
                       }
-                      showToat('Código PIX copiado!' , 'success');
+
+                      showToast(copied ? 'Código PIX copiado!' : 'Não foi possível copiar automaticamente. Toque e segure no código ou use o QR Code.', copied ? 'success' : 'warning');
                     }}
                     className="w-full bg-brand-light text-brand-primary py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 mb-4"
                   >
