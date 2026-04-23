@@ -111,6 +111,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const [userAddress, setUserAddress] = useState<any>(null);
   const [userAddresses, setUserAddresses] = useState<any[]>([]);
   const [showAddressModal, setShowAddressModal] = useState(false);
+  const [cityFilter, setCityFilter] = useState('');
   const [addressForm, setAddressForm] = useState({ cep: '', street: '', number: '', complement: '', neighborhood: '', city: '', state: '' });
   const [cepLoading, setCepLoading] = useState(false);
 
@@ -285,28 +286,76 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     }
   };
 
+  const getApproximateCityFromLocation = async () => {
+    if (!navigator.geolocation) return null;
+
+    const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: false,
+        timeout: 8000,
+        maximumAge: 300000
+      });
+    }).catch(() => null);
+
+    if (!position) return null;
+
+    const { latitude, longitude } = position.coords;
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&accept-language=pt-BR`);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const city = data?.address?.city || data?.address?.town || data?.address?.village || data?.address?.municipality;
+    return city || null;
+  };
+
   const fetchHomeData = async () => {
     setLoading(true);
     try {
       await loadCategories();
 
-      const [storeRes, addrRes, orderRes, prodRes, favRes] = await Promise.all([
-        supabase.from('stores').select('*, addresses!inner(city, state, neighborhood)').eq('is_approved', true).eq('status', 'active'),
+      const [addrRes, orderRes, prodRes, favRes] = await Promise.all([
         supabase.from('addresses').select('*').eq('user_id', user!.id).limit(1).maybeSingle(),
         supabase.from('orders').select('*, order_items(*), stores(name, logo_url, avg_prep_time_min), couriers(users(name, avatar_url), vehicle_type, license_plate)').eq('client_id', user!.id).not('status', 'in', '("delivered","cancelled")').order('created_at', { ascending: false }).limit(1).maybeSingle(),
         supabase.from('products').select('store_id, name, description').eq('is_available', true),
         supabase.from('favorite_stores').select('store_id').eq('user_id', user!.id)
       ]);
-      
-      if (storeRes.data) setStores(storeRes.data);
+
       if (addrRes.data) setUserAddress(addrRes.data);
       if (prodRes.data) setAllProducts(prodRes.data);
       if (favRes.data) setFavoriteStoreIds(favRes.data.map(f => f.store_id));
-      
+
+      let effectiveCity = addrRes.data?.city || '';
+
+      if (!effectiveCity) {
+        const approxCity = await getApproximateCityFromLocation();
+        if (approxCity) {
+          effectiveCity = approxCity;
+          showToast(`Mostrando lojas próximas de ${approxCity}. Cadastre seu endereço para melhorar a precisão.`, 'warning');
+        }
+      }
+
+      setCityFilter(effectiveCity);
+
+      if (!effectiveCity) {
+        setStores([]);
+        setShowAddressModal(true);
+        showToast('Informe seu endereço para visualizar lojas da sua cidade.', 'warning');
+      } else {
+        const { data: filteredStores, error: storeErr } = await supabase
+          .from('stores')
+          .select('*, addresses!inner(city, state, neighborhood)')
+          .eq('is_approved', true)
+          .eq('status', 'active')
+          .ilike('addresses.city', effectiveCity);
+
+        if (storeErr) throw storeErr;
+        setStores(filteredStores || []);
+      }
+
       if (orderRes.data) {
         setActiveOrder(orderRes.data);
         subscribeToOrder(orderRes.data.id);
-        
+
         if (orderRes.data.status === 'delivering' && orderRes.data.courier_id && !orderRes.data.own_delivery) {
           subscribeToCourierLocation(orderRes.data.courier_id);
         }
@@ -401,8 +450,10 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       if (error) throw error;
       
       setUserAddress(data);
+      setCityFilter(data.city || '');
       setShowAddressModal(false);
       showToast('Endereço salvo com sucesso!');
+      await fetchHomeData();
       
       if (currentScreen === 'profile') {
         fetchAddresses();
@@ -979,7 +1030,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       : true;
 
     // Filtro por cidade inteligente (ignora acentos e maiúsculas)
-    const clientCity = normalizeString(userAddress?.city);
+    const clientCity = normalizeString(userAddress?.city || cityFilter);
     const storeCity = normalizeString(store.addresses?.city);
     
     const matchCity = (clientCity && storeCity)
