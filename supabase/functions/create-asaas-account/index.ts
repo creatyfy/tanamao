@@ -34,15 +34,6 @@ serve(async (req) => {
   const requestId = crypto.randomUUID()
 
   try {
-    const body = await req.json()
-    const { entityType, entityId } = body ?? {}
-
-    console.log(`[${requestId}] create-asaas-account called`, { entityType, entityId })
-
-    if (!entityType || !entityId || !['store', 'courier'].includes(entityType)) {
-      throw new Error('Parâmetros inválidos. Esperado: entityType (store|courier) e entityId.')
-    }
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const supabaseServiceRole = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
     const asaasApiKey = Deno.env.get('ASAAS_API_KEY')
@@ -53,6 +44,31 @@ serve(async (req) => {
     }
 
     const supabase = createClient(supabaseUrl, supabaseServiceRole)
+    const authHeader = req.headers.get('authorization') || req.headers.get('Authorization')
+    const token = authHeader?.replace('Bearer ', '')?.trim()
+
+    if (!token) throw new Error('Não autorizado: token ausente')
+
+    const { data: authData, error: authError } = await supabase.auth.getUser(token)
+    if (authError || !authData?.user) throw new Error('Não autorizado: token inválido')
+
+    const { data: actor, error: actorError } = await supabase
+      .from('users')
+      .select('role')
+      .eq('id', authData.user.id)
+      .single()
+
+    if (actorError) throw new Error(`Não foi possível validar permissões: ${actorError.message}`)
+    if (actor?.role !== 'admin') throw new Error('Apenas administradores podem criar subcontas Asaas')
+
+    const body = await req.json()
+    const { entityType, entityId } = body ?? {}
+
+    console.log(`[${requestId}] create-asaas-account called`, { actorId: authData.user.id, entityType, entityId })
+
+    if (!entityType || !entityId || !['store', 'courier'].includes(entityType)) {
+      throw new Error('Parâmetros inválidos. Esperado: entityType (store|courier) e entityId.')
+    }
 
     // Busca dados da entidade
     let name: string
@@ -216,8 +232,13 @@ serve(async (req) => {
     })
   } catch (error: any) {
     console.error(`[${requestId}] create-asaas-account error:`, error)
+    const status = error?.message?.includes('Não autorizado')
+      ? 401
+      : error?.message?.includes('Apenas administradores')
+        ? 403
+        : 500
     return new Response(JSON.stringify({ success: false, error: error?.message || 'Erro interno' }), {
-      status: 500,
+      status,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   }
