@@ -177,7 +177,11 @@ export default function MobileAuth() {
     
     if (signInError) throw signInError;
 
-    const { data: profile } = await supabase.from('users').select('id').eq('id', data.user.id).maybeSingle();
+    const { data: profile } = await supabase
+      .from('users')
+      .select('id, role, is_active')
+      .eq('id', data.user.id)
+      .maybeSingle();
     if (!profile) {
       const metaRole = data.user.user_metadata?.role;
       const inferredRole: 'client' | 'store' | 'courier' =
@@ -196,6 +200,11 @@ export default function MobileAuth() {
       setAuthMode('register');
       setErrorMsg('Seu cadastro está incompleto. Por favor, preencha os dados abaixo para finalizar.');
       return;
+    }
+
+    if (!profile.is_active && (profile.role === 'store_owner' || profile.role === 'courier')) {
+      await supabase.auth.signOut();
+      throw new Error('Cadastro em análise. Você poderá entrar após aprovação do admin.');
     }
 
     window.location.reload();
