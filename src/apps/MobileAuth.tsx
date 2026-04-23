@@ -114,19 +114,22 @@ export default function MobileAuth() {
     return true;
   };
 
-  const checkPendingApproval = async (userId?: string) => {
+  const checkPendingApproval = async (userId?: string, fallbackRole?: string) => {
     if (!userId) return false;
 
-    const { data: profile } = await supabase
+    const { data: profile, error } = await supabase
       .from('users')
       .select('role, is_active')
       .eq('id', userId)
       .maybeSingle();
 
+    const roleToCheck = profile?.role || fallbackRole;
+    const isPartnerRole = roleToCheck === 'store_owner' || roleToCheck === 'courier';
     const isPendingApproval =
+      !error &&
       !!profile &&
-      !profile.is_active &&
-      (profile.role === 'store_owner' || profile.role === 'courier');
+      profile.is_active === false &&
+      isPartnerRole;
 
     if (isPendingApproval) {
       setShowPendingApproval(true);
@@ -263,6 +266,10 @@ export default function MobileAuth() {
     
     if (signInError) throw signInError;
 
+    const metaRole = data.user.user_metadata?.role;
+    const hasPendingApproval = await checkPendingApproval(data.user.id, metaRole);
+    if (hasPendingApproval) return;
+
     const { data: profile } = await supabase
       .from('users')
       .select('id, role, is_active')
@@ -277,7 +284,6 @@ export default function MobileAuth() {
 
       // O usuário confirmou o e-mail mas não concluiu o cadastro na tabela users.
       // Mantemos a sessão ativa e direcionamos para a tela de registro suavemente.
-      const metaRole = data.user.user_metadata?.role;
       const inferredRole: 'client' | 'store' | 'courier' =
         metaRole === 'store_owner' ? 'store' : metaRole === 'courier' ? 'courier' : 'client';
       setRegisterRole(inferredRole);

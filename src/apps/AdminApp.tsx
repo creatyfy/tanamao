@@ -134,6 +134,10 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
           .order('created_at', { ascending: false })
       ]);
       
+      if (storesRes.error) throw storesRes.error;
+      if (couriersRes.error) throw couriersRes.error;
+      if (clientsRes.error) throw clientsRes.error;
+
       if (storesRes.data) setStores(storesRes.data);
       if (couriersRes.data) setCouriers(couriersRes.data);
       if (clientsRes.data) setClients(clientsRes.data);
@@ -707,8 +711,8 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     }
   };
 
-  const isStoreApproved = (store: any) => store.is_approved === true;
-  const isCourierApproved = (courier: any) => courier.is_approved === true;
+  const isStoreApproved = (store: any) => store.is_approved === true || store.status === 'active';
+  const isCourierApproved = (courier: any) => courier.is_approved === true || courier.status === 'active';
 
   const pendingStoresCount = stores.filter(s => !isStoreApproved(s)).length;
   const approvedStoresCount = stores.filter(s => isStoreApproved(s)).length;
