@@ -59,6 +59,26 @@ export default function MobileAuth() {
     fullName: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', operationCity: ''
   });
 
+  const resendConfirmationLink = async (email: string) => {
+    const cleanEmail = email.trim();
+    if (!cleanEmail) return false;
+
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: cleanEmail,
+      options: {
+        emailRedirectTo: `${window.location.origin}/confirmado`
+      }
+    });
+
+    if (error) {
+      console.warn('Falha ao reenviar link de confirmação:', error.message);
+      return false;
+    }
+
+    return true;
+  };
+
   const restorePendingRegistrationFromMetadata = async (user: any, fallbackEmail?: string) => {
     const metaRole = user?.user_metadata?.role;
     const isPendingRole = metaRole === 'store_owner' || metaRole === 'courier';
@@ -263,8 +283,16 @@ export default function MobileAuth() {
       email: emailClean, 
       password: formData.password 
     });
-    
-    if (signInError) throw signInError;
+
+    if (signInError) {
+      if (signInError.message?.includes('Email not confirmed')) {
+        const resent = await resendConfirmationLink(emailClean);
+        if (resent) {
+          throw new Error('Seu link expirou ou o e-mail ainda não foi confirmado. Reenviamos um novo link de confirmação. Após confirmar, faça login novamente.');
+        }
+      }
+      throw signInError;
+    }
 
     const metaRole = data.user.user_metadata?.role;
     const hasPendingApproval = await checkPendingApproval(data.user.id, metaRole);
@@ -515,7 +543,15 @@ export default function MobileAuth() {
             email: emailClean,
             password: formData.password
           });
-          if (signInError) throw new Error('Este e-mail já está cadastrado. Se for você, a senha está incorreta.');
+          if (signInError) {
+            if (signInError.message?.includes('Email not confirmed')) {
+              const resent = await resendConfirmationLink(emailClean);
+              if (resent) {
+                throw new Error('Seu cadastro já existe, mas o link de confirmação expirou ou não foi confirmado. Reenviamos um novo link para seu e-mail.');
+              }
+            }
+            throw new Error('Este e-mail já está cadastrado. Se for você, a senha está incorreta.');
+          }
           userId = signInData.user.id;
         } else {
           throw signUpError;
