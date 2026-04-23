@@ -42,7 +42,7 @@ serve(async (req) => {
     } else {
       const { data } = await supabase
         .from('couriers')
-        .select('*, users:user_id(name, email, phone), addresses!inner(*)')
+        .select('*, users:user_id(name, email, phone), addresses(*)')
         .eq('id', entityId)
         .single()
       if (!data) throw new Error('Motoboy não encontrado')
@@ -56,6 +56,10 @@ serve(async (req) => {
       neighborhood = data.addresses?.neighborhood || 'Não informado'
       zipCode = (data.addresses?.zip_code || '00000000').replace(/\D/g, '')
       state = data.addresses?.state || 'SP'
+    }
+
+    if (cpfCnpj.length < 11) {
+      throw new Error('CPF/CNPJ inválido ou ausente para criar conta Asaas')
     }
 
     const ASAAS_API_KEY = Deno.env.get('ASAAS_API_KEY')!
@@ -74,6 +78,8 @@ serve(async (req) => {
       postalCode: zipCode,
     }
 
+    console.log('Asaas account payload:', accountPayload)
+
     const accountRes = await fetch(`${ASAAS_BASE_URL}/accounts`, {
       method: 'POST',
       headers: {
@@ -83,8 +89,23 @@ serve(async (req) => {
       body: JSON.stringify(accountPayload)
     })
 
-    const account = await accountRes.json()
-    if (!accountRes.ok) throw new Error(`Erro ao criar conta: ${JSON.stringify(account)}`)
+    const accountBodyText = await accountRes.text()
+    let account: any = null
+    try {
+      account = accountBodyText ? JSON.parse(accountBodyText) : null
+    } catch {
+      account = { raw: accountBodyText }
+    }
+
+    if (!accountRes.ok) {
+      console.error('Asaas account creation failed', {
+        status: accountRes.status,
+        statusText: accountRes.statusText,
+        payload: accountPayload,
+        response: account,
+      })
+      throw new Error(`Erro ao criar conta no Asaas (HTTP ${accountRes.status}): ${JSON.stringify(account)}`)
+    }
 
     const walletId = account.walletId
     const accountId = account.id
