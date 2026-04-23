@@ -218,7 +218,7 @@ export default function MobileAuth() {
         email: emailClean,
         password: formData.password,
         options: { 
-          data: { name: userName, role: roleMap[registerRole] },
+          data: { name: userName, role: roleMap[registerRole], cpf : formData.cpf ? formData.cpf.replace(/\D/g, '') : null },
           emailRedirectTo: `${window.location.origin}/confirmado`
         }
       });
