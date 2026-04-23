@@ -36,6 +36,7 @@ export default function MobileAuth() {
   const [authMode, setAuthMode] = useState<'login' | 'register' | 'forgot_password'>('login');
   const [registerRole, setRegisterRole] = useState<'client' | 'store' | 'courier'>('client');
   const [loading, setLoading] = useState(false);
+  const [showPendingApproval, setShowPendingApproval] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   
@@ -113,11 +114,36 @@ export default function MobileAuth() {
     return true;
   };
 
+  const checkPendingApproval = async (userId?: string) => {
+    if (!userId) return false;
+
+    const { data: profile } = await supabase
+      .from('users')
+      .select('role, is_active')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const isPendingApproval =
+      !!profile &&
+      !profile.is_active &&
+      (profile.role === 'store_owner' || profile.role === 'courier');
+
+    if (isPendingApproval) {
+      setShowPendingApproval(true);
+      setErrorMsg('');
+      return true;
+    }
+
+    return false;
+  };
+
   useEffect(() => {
     // Verifica se o usuário acabou de confirmar o e-mail e precisa concluir o cadastro
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        restorePendingRegistrationFromMetadata(session.user).then((restoredByMetadata) => {
+        checkPendingApproval(session.user.id).then((isPending) => {
+          if (isPending) return;
+          restorePendingRegistrationFromMetadata(session.user).then((restoredByMetadata) => {
           if (restoredByMetadata) return;
 
           const pending = localStorage.getItem('pendingRegistration');
@@ -131,6 +157,7 @@ export default function MobileAuth() {
               localStorage.removeItem('pendingRegistration');
             } catch (e) {}
           }
+        });
         });
       }
     });
@@ -400,8 +427,8 @@ export default function MobileAuth() {
     }
 
     if (!profile.is_active && (profile.role === 'store_owner' || profile.role === 'courier')) {
-      await supabase.auth.signOut();
-      throw new Error('Cadastro em análise. Você poderá entrar após aprovação do admin.');
+      setShowPendingApproval(true);
+      return;
     }
 
     window.location.reload();
@@ -649,6 +676,29 @@ export default function MobileAuth() {
       setLoading(false);
     }
   };
+
+  if (showPendingApproval) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center" style={{paddingTop: 'max(1.5rem, env(safe-area-inset-top, 0px))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))'}}>
+        <div className="w-24 h-24 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mb-6 shadow-inner">
+          <Clock size={48} />
+        </div>
+        <h2 className="text-2xl font-black text-brand-dark mb-2">Cadastro em Análise</h2>
+        <p className="text-gray-600 mb-8 font-medium max-w-sm">Seu perfil está sendo analisado pela nossa equipe. Você terá acesso ao app assim que for aprovado!</p>
+        <button
+          type="button"
+          onClick={async () => {
+            await supabase.auth.signOut();
+            setShowPendingApproval(false);
+            setAuthMode('login');
+          }}
+          className="px-8 py-4 bg-brand-primary text-white rounded-2xl font-bold w-full max-w-xs shadow-lg hover:bg-green-600 transition-colors"
+        >
+          Voltar ao Login
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-md mx-auto h-screen bg-white flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[850px] sm:my-8 border-4 border-gray-900" style={{paddingBottom: 'env(safe-area-inset-bottom, 0px)', paddingTop: 'env(safe-area-inset-top, 0px)'}}>
