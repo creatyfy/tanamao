@@ -94,9 +94,16 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
     const SUPABASE_URL = 'https://fgjlyvkdkhxvzsgxuuad.supabase.co'
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnamx5dmtka2h4dnpzZ3h1dWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2MDIzNjEsImV4cCI6MjA1OTE3ODM2MX0.hfFbkO3TgkHFQRQOsVn-RHoNIYaLXoDEa0s5FgTsFKo'
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
+    })
 
     function show(id) {
       ['loadingCard','formCard','successCard','errorCard'].forEach(i => {
@@ -115,42 +122,42 @@
     const token = allParams.get('token')
     const type = allParams.get('type')
     const errorParam = allParams.get('error')
+    const code = allParams.get('code')
 
-    console.log('Params:', { accessToken, refreshToken, tokenHash, token, type, errorParam })
+    console.log('Params:', { accessToken, refreshToken, tokenHash, token, type, code, errorParam })
 
     async function initSession() {
-      // Caso 1: token_hash (novo formato Supabase PKCE)
-      if (tokenHash && type) {
-        const res = await fetch(`${SUPABASE_URL}/auth/v1/verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
-          body: JSON.stringify({ token_hash: tokenHash, type })
-        })
-        const data = await res.json()
-        if (data.access_token) {
-          window._supabaseToken = data.access_token
+      // Caso 1: formato PKCE com code na URL
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+        if (!error && data?.session?.access_token) {
           show('formCard')
           return
         }
       }
 
-      // Caso 2: access_token direto na URL (formato antigo)
-      if (accessToken) {
-        window._supabaseToken = accessToken
-        show('formCard')
-        return
+      // Caso 2: token_hash + type
+      if (tokenHash && type) {
+        const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
+        if (!error && data?.session?.access_token) {
+          show('formCard')
+          return
+        }
       }
 
-      // Caso 3: token simples
+      // Caso 3: access_token direto na URL (formato antigo)
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+        if (!error) {
+          show('formCard')
+          return
+        }
+      }
+
+      // Caso 4: token simples
       if (token && type === 'recovery') {
-        const res = await fetch(`${SUPABASE_URL}/auth/v1/verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_ANON_KEY },
-          body: JSON.stringify({ token, type: 'recovery', email: '' })
-        })
-        const data = await res.json()
-        if (data.access_token) {
-          window._supabaseToken = data.access_token
+        const { data, error } = await supabase.auth.verifyOtp({ token, type: 'recovery' })
+        if (!error && data?.session?.access_token) {
           show('formCard')
           return
         }
@@ -187,21 +194,10 @@
       submitBtn.disabled = true
       submitBtn.textContent = 'Salvando...'
 
-      const res = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${window._supabaseToken}`
-        },
-        body: JSON.stringify({ password })
-      })
+      const { error } = await supabase.auth.updateUser({ password })
 
-      const data = await res.json()
-      console.log('Update response:', data)
-
-      if (!res.ok || data.error) {
-        errorMsg.textContent = 'Erro ao redefinir senha. Solicite um novo link.'
+      if (error) {
+        errorMsg.textContent = error.message || 'Erro ao redefinir senha. Solicite um novo link.'
         errorMsg.style.display = 'block'
         submitBtn.disabled = false
         submitBtn.textContent = 'Salvar nova senha'
