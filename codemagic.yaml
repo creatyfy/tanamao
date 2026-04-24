@@ -130,8 +130,11 @@ workflows:
           if [ -f "assets/google-services.json" ]; then
             cp assets/google-services.json android/app/google-services.json
             echo "google-services.json copiado de assets/"
+          elif [ -f "android/app/google-services.json" ]; then
+            echo "google-services.json já existe em android/app/"
           else
-            echo "google-services.json já está em android/app/ — mantendo."
+            echo "ERRO: google-services.json não encontrado em assets/ nem em android/app/"
+            exit 1
           fi
           ls -la android/app/google-services.json
       - name: Generate Android icons
