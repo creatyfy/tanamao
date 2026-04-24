@@ -164,7 +164,7 @@ workflows:
             exit 1
           fi
           echo "Keystore encontrado"
-          mv tanamao-release.keystore android/tanamao-release.keystore
+          cp tanamao-release.keystore android/app/tanamao-release.keystore
 
           cd android
 
@@ -179,7 +179,7 @@ workflows:
           chmod +x gradlew
           echo "Iniciando build do AAB assinado..."
           ./gradlew bundleRelease \
-            -Pandroid.injected.signing.store.file=tanamao-release.keystore \
+            -Pandroid.injected.signing.store.file=$(pwd)/app/tanamao-release.keystore \
             -Pandroid.injected.signing.store.password="tanamao123" \
             -Pandroid.injected.signing.key.alias="tanamao" \
             -Pandroid.injected.signing.key.password="tanamao123" \
@@ -201,7 +201,7 @@ workflows:
             --bundle=android/app/build/outputs/bundle/release/app-release.aab \
             --output=app.apks \
             --mode=universal \
-            --ks=android/tanamao-release.keystore \
+            --ks=android/app/tanamao-release.keystore \
             --ks-pass=pass:tanamao123 \
             --ks-key-alias=tanamao \
             --key-pass=pass:tanamao123
