@@ -554,8 +554,7 @@ export default function MobileAuth() {
           data: {
             name: userName,
             role: roleMap[registerRole],
-            cpf: formData.cpf ? formData.cpf.replace(/\D/g, '') : null,
-            registration_draft: (registerRole === 'store' || registerRole === 'courier') ? registrationDraft : null
+            cpf: formData.cpf ? formData.cpf.replace(/\D/g, '') : null
           },
           emailRedirectTo: `${window.location.origin}/confirmado`
         }
@@ -581,6 +580,15 @@ export default function MobileAuth() {
           throw signUpError;
         }
       } else {
+        if (signUpData.user?.id && (registerRole === 'store' || registerRole === 'courier')) {
+          await supabase.from('registration_drafts').upsert({
+            user_id: signUpData.user.id,
+            draft: registrationDraft,
+            role: roleMap[registerRole],
+            created_at: new Date().toISOString()
+          }, { onConflict: 'user_id' });
+        }
+
         // Se a confirmação de e-mail estiver ativada, a sessão será nula
         if (!signUpData.session) {
           const safeFormData = { ...formData, password: 'dummy_password_not_used' };

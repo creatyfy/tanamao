@@ -24,7 +24,12 @@ function App() {
       setPartnerCheckLoading(true);
 
       try {
-        const draft = user.user_metadata?.registration_draft;
+        const { data: draftRow } = await supabase
+          .from('registration_drafts')
+          .select('draft')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        const draft = draftRow?.draft;
         const cleanPhone = typeof draft?.phone === 'string' ? draft.phone.replace(/\D/g, '') : profile.phone;
         const cleanCep = typeof draft?.cep === 'string' ? draft.cep.replace(/\D/g, '') : '00000000';
         let needsPendingScreen = !profile.is_active;
@@ -91,6 +96,9 @@ function App() {
               .maybeSingle();
 
             storeData = insertedStore || null;
+            if (storeData?.id) {
+              await supabase.from('registration_drafts').delete().eq('user_id', user.id);
+            }
           }
 
           const isStoreApproved = storeData?.is_approved === true || storeData?.status === 'active';
@@ -138,6 +146,9 @@ function App() {
             if (courierInsertError) console.error('Erro ao criar courier:', courierInsertError);
 
             courierData = insertedCourier || null;
+            if (courierData?.id) {
+              await supabase.from('registration_drafts').delete().eq('user_id', user.id);
+            }
           }
 
           const isCourierApproved = courierData?.is_approved === true || courierData?.status === 'active';
