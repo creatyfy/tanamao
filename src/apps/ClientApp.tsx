@@ -877,6 +877,12 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     finally { setActionLoading(false); }
   };
 
+  const handleBackToHomeAfterCancellation = () => {
+    setActiveOrder(null);
+    setCurrentScreen('home');
+    setCart([]);
+  };
+
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatInput.trim() || !activeOrder) return;
@@ -2013,7 +2019,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                 {activeOrder.cancel_reason && (
                   <p className="text-xs text-red-500 font-bold mt-2 bg-red-100/50 p-2 rounded-lg">Motivo: {activeOrder.cancel_reason}</p>
                 )}
-                <button onClick={() => setCurrentScreen('home')} className="mt-5 bg-red-600 text-white px-6 py-2.5 rounded-full font-bold text-sm shadow-md hover:bg-red-700 transition-colors">
+                <button onClick={handleBackToHomeAfterCancellation} className="mt-5 bg-red-600 text-white px-6 py-2.5 rounded-full font-bold text-sm shadow-md hover:bg-red-700 transition-colors">
                   Voltar ao Início
                 </button>
               </div>

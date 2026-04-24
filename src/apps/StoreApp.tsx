@@ -347,27 +347,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         fetchProducts(storeData.id);
         fetchProductCategories(storeData.id);
         
-        if (storeOrdersChannelRef.current) {
-          supabase.removeChannel(storeOrdersChannelRef.current);
-          storeOrdersChannelRef.current = null;
-        }
-
-        const channelOrders = supabase.channel(`store_orders_${storeData.id}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `store_id=eq.${storeData.id}` }, (payload) => {
-            
-            if (payload.eventType === 'INSERT' && payload.new.status === 'pending') {
-              playNotificationSound();
-              sendNotification('🔔 Novo Pedido Recebido!', {
-                body: `Pedido #${payload.new.id} no valor de R$ ${payload.new.total.toFixed(2)}. Acesse o painel para aceitar.`,
-              });
-            }
-
-            fetchOrders(storeData.id);
-            setLastUpdate(Date.now());
-          }).subscribe();
-
-        storeOrdersChannelRef.current = channelOrders;
-
         if (storeChatsChannelRef.current) {
           supabase.removeChannel(storeChatsChannelRef.current);
           storeChatsChannelRef.current = null;
@@ -453,6 +432,54 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       .order('created_at', { ascending: false });
     if (data) setOrders(data);
   };
+
+  useEffect(() => {
+    if (!store?.id) return;
+
+    if (storeOrdersChannelRef.current) {
+      supabase.removeChannel(storeOrdersChannelRef.current);
+      storeOrdersChannelRef.current = null;
+    }
+
+    const channelOrders = supabase.channel(`store_orders_${store.id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders', filter: `store_id=eq.${store.id}` }, (payload) => {
+        if (payload.new.status === 'pending') {
+          playNotificationSound();
+          sendNotification('🔔 Novo Pedido Recebido!', {
+            body: `Pedido #${payload.new.id} no valor de R$ ${payload.new.total.toFixed(2)}. Acesse o painel para aceitar.`,
+          });
+        }
+        fetchOrders(store.id);
+        setLastUpdate(Date.now());
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `store_id=eq.${store.id}` }, () => {
+        fetchOrders(store.id);
+        setLastUpdate(Date.now());
+      })
+      .subscribe();
+
+    storeOrdersChannelRef.current = channelOrders;
+
+    return () => {
+      if (storeOrdersChannelRef.current) {
+        supabase.removeChannel(storeOrdersChannelRef.current);
+        storeOrdersChannelRef.current = null;
+      }
+    };
+  }, [store?.id, sendNotification]);
+
+  useEffect(() => {
+    return () => {
+      if (storeChatsChannelRef.current) {
+        supabase.removeChannel(storeChatsChannelRef.current);
+        storeChatsChannelRef.current = null;
+      }
+      if (storeOrdersChannelRef.current) {
+        supabase.removeChannel(storeOrdersChannelRef.current);
+        storeOrdersChannelRef.current = null;
+      }
+    };
+  }, []);
 
   const fetchProducts = async (storeId: number) => {
     const { data } = await supabase.from('products')
