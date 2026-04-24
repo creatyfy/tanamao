@@ -157,14 +157,15 @@ workflows:
       - name: Build Android AAB
         script: |
           set -euo pipefail
-
-          # Verifica keystore
-          if [ ! -f "tanamao-release.keystore" ]; then
-            echo "ERRO: tanamao-release.keystore NAO ENCONTRADO na raiz do projeto."
+          
+          # Decodificar keystore da variável de ambiente
+          if [ -z "${CM_KEYSTORE:-}" ]; then
+            echo "ERRO: CM_KEYSTORE não está definida nas variáveis do Codemagic"
             exit 1
           fi
-          echo "Keystore encontrado na raiz"
+          echo "$CM_KEYSTORE" | base64 -d > tanamao-release.keystore
           mv tanamao-release.keystore android/tanamao-release.keystore
+          echo "Keystore decodificado com sucesso"
 
           cd android
 
@@ -178,7 +179,12 @@ workflows:
 
           chmod +x gradlew
           echo "Iniciando build do AAB..."
-          ./gradlew bundleRelease --no-daemon
+          ./gradlew bundleRelease \
+            -Pandroid.injected.signing.store.file=tanamao-release.keystore \
+            -Pandroid.injected.signing.store.password="${CM_KEYSTORE_PASSWORD}" \
+            -Pandroid.injected.signing.key.alias="${CM_KEY_ALIAS}" \
+            -Pandroid.injected.signing.key.password="${CM_KEY_PASSWORD}" \
+            --no-daemon
 
           # Verifica se AAB foi gerado
           if [ ! -f "app/build/outputs/bundle/release/app-release.aab" ]; then
