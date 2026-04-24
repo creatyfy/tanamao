@@ -110,10 +110,15 @@ function App() {
           if (!courierData) {
             const safeDraft = draft && typeof draft === 'object' ? draft : {};
             const cpfFromMeta = typeof user.user_metadata?.cpf === 'string' ? user.user_metadata.cpf : null;
-            const fallbackCpf = user.id.replace(/\D/g, '').padEnd(11, '0').slice(0, 11);
-            const cleanCpf = (cpfFromMeta || safeDraft.cpf || profile.cpf || '').toString().replace(/\D/g, '') || fallbackCpf;
+            const cleanCpf = (cpfFromMeta || safeDraft.cpf || profile.cpf || '').toString().replace(/\D/g, '');
+            if (!cleanCpf || cleanCpf.length !== 11) {
+              console.error('CPF inválido para criação de courier');
+              if (!cancelled) setForcePendingApproval(true);
+              if (!cancelled) setPartnerCheckLoading(false);
+              return;
+            }
 
-            const { data: insertedCourier } = await supabase
+            const { data: insertedCourier, error: courierInsertError } = await supabase
               .from('couriers')
               .insert({
                 user_id: user.id,
@@ -130,6 +135,7 @@ function App() {
               })
               .select('id, is_approved, status')
               .maybeSingle();
+            if (courierInsertError) console.error('Erro ao criar courier:', courierInsertError);
 
             courierData = insertedCourier || null;
           }
