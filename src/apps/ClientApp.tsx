@@ -878,6 +878,10 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   };
 
   const handleBackToHomeAfterCancellation = () => {
+    if (orderChannelRef.current) {
+      supabase.removeChannel(orderChannelRef.current);
+      orderChannelRef.current = null;
+    }
     setActiveOrder(null);
     setCurrentScreen('home');
     setCart([]);
