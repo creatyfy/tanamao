@@ -37,8 +37,9 @@ function App() {
             .maybeSingle();
 
           let storeData = store;
-          if (!storeData && draft && typeof draft === 'object') {
-            const cleanCnpj = typeof draft.cnpj === 'string' ? draft.cnpj.replace(/\D/g, '') : null;
+          if (!storeData) {
+            const safeDraft = draft && typeof draft === 'object' ? draft : {};
+            const cleanCnpj = typeof safeDraft.cnpj === 'string' ? safeDraft.cnpj.replace(/\D/g, '') : null;
             const { data: existingAddress } = await supabase
               .from('addresses')
               .select('id')
@@ -48,12 +49,12 @@ function App() {
             let addressId = existingAddress?.id || null;
             const addressPayload = {
               user_id: user.id,
-              street: draft.street || 'Não informado',
-              number: draft.number || 'S/N',
-              complement: draft.complement || null,
-              neighborhood: draft.neighborhood || 'Não informado',
-              city: draft.city || 'Não informado',
-              state: draft.state || 'SP',
+              street: safeDraft.street || 'Não informado',
+              number: safeDraft.number || 'S/N',
+              complement: safeDraft.complement || null,
+              neighborhood: safeDraft.neighborhood || 'Não informado',
+              city: safeDraft.city || 'Não informado',
+              state: safeDraft.state || 'SP',
               zip_code: cleanCep
             };
 
@@ -68,23 +69,23 @@ function App() {
               .from('stores')
               .insert({
                 owner_id: user.id,
-                name: draft.storeName || user.user_metadata?.name || profile.name || 'Nova Loja',
+                name: safeDraft.storeName || user.user_metadata?.name || profile.name || 'Nova Loja',
                 slug: `store-${user.id.substring(0, 8)}`,
                 cnpj: cleanCnpj,
                 phone: cleanPhone,
-                description: draft.description || null,
-                global_category_id: draft.category ? parseInt(draft.category) : null,
-                avg_prep_time_min: draft.prepTime ? parseInt(draft.prepTime) : 30,
-                min_order_value: draft.minOrder ? parseFloat(draft.minOrder) : 0,
-                delivery_fee: draft.deliveryFee ? parseFloat(draft.deliveryFee) : 0,
-                accepts_pix: draft.acceptsPix ?? true,
-                accepts_card: draft.acceptsCard ?? true,
-                accepts_cash: draft.acceptsCash ?? false,
+                description: safeDraft.description || null,
+                global_category_id: safeDraft.category ? parseInt(safeDraft.category) : null,
+                avg_prep_time_min: safeDraft.prepTime ? parseInt(safeDraft.prepTime) : 30,
+                min_order_value: safeDraft.minOrder ? parseFloat(safeDraft.minOrder) : 0,
+                delivery_fee: safeDraft.deliveryFee ? parseFloat(safeDraft.deliveryFee) : 0,
+                accepts_pix: safeDraft.acceptsPix ?? true,
+                accepts_card: safeDraft.acceptsCard ?? true,
+                accepts_cash: safeDraft.acceptsCash ?? false,
                 address_id: addressId,
                 status: 'pending',
                 is_approved: false,
                 commission_rate: 4,
-                pix_key: draft.pixKey || null
+                pix_key: safeDraft.pixKey || null
               })
               .select('id, is_approved, status')
               .maybeSingle();
@@ -106,22 +107,23 @@ function App() {
             .maybeSingle();
 
           let courierData = courier;
-          if (!courierData && draft && typeof draft === 'object') {
+          if (!courierData) {
+            const safeDraft = draft && typeof draft === 'object' ? draft : {};
             const cpfFromMeta = typeof user.user_metadata?.cpf === 'string' ? user.user_metadata.cpf : null;
-            const cleanCpf = (cpfFromMeta || draft.cpf || '').toString().replace(/\D/g, '') || '00000000000';
+            const cleanCpf = (cpfFromMeta || safeDraft.cpf || profile.cpf || '').toString().replace(/\D/g, '') || '00000000000';
 
             const { data: insertedCourier } = await supabase
               .from('couriers')
               .insert({
                 user_id: user.id,
                 cpf: cleanCpf,
-                vehicle_type: draft.vehicleType || 'motorcycle',
-                vehicle_brand: draft.vehicleBrand || null,
-                vehicle_model: draft.vehicleModel || null,
-                vehicle_year: draft.vehicleYear ? parseInt(draft.vehicleYear) : new Date().getFullYear(),
-                license_plate: draft.licensePlate || null,
-                pix_key: draft.pixKey || null,
-                operation_city: draft.operationCity || draft.city || 'Não informado',
+                vehicle_type: safeDraft.vehicleType || 'motorcycle',
+                vehicle_brand: safeDraft.vehicleBrand || null,
+                vehicle_model: safeDraft.vehicleModel || null,
+                vehicle_year: safeDraft.vehicleYear ? parseInt(safeDraft.vehicleYear) : new Date().getFullYear(),
+                license_plate: safeDraft.licensePlate || null,
+                pix_key: safeDraft.pixKey || null,
+                operation_city: safeDraft.operationCity || safeDraft.city || 'Não informado',
                 status: 'pending',
                 is_approved: false
               })
