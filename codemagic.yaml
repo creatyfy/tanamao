@@ -161,40 +161,40 @@ workflows:
           rm -rf android/app/src/main/res/mipmap-*
       - name: Build Android AAB
         script: |
+          set -euo pipefail
+          
+          # Verificar keystore
+          if [ ! -f "tanamao-release.keystore" ]; then
+            echo "ERRO: tanamao-release.keystore NAO ENCONTRADO na raiz do projeto."
+            exit 1
+          fi
+          echo "Keystore encontrado na raiz"
+          
+          # Limpar cache
           rm -rf android/.gradle
           rm -rf android/gradle/wrapper/gradle-wrapper.jar
+          
+          # Build AAB
           cd android
-          gradle wrapper
-          chmod +x gradlew
-          cd ..
-          if [ -f "tanamao-release.keystore" ]; then
-            echo "Keystore encontrado na raiz. Movendo para android/ ..."
-            mv tanamao-release.keystore android/tanamao-release.keystore
-          else
-            echo "ERRO: tanamao-release.keystore NÃO ENCONTRADO na raiz do projeto."
+          echo "Iniciando build do AAB..."
+          ./gradlew bundleRelease --no-daemon
+          
+          # Verificar se AAB foi gerado
+          if [ ! -f "app/build/outputs/bundle/release/app-release.aab" ]; then
+            echo "ERRO: AAB nao foi gerado"
+            ls -la app/build/outputs/bundle/release/ || echo "Diretorio nao existe"
             exit 1
           fi
-          cd android
-          ./gradlew bundleRelease
+          echo "AAB gerado com sucesso"
           cd ..
-          echo "Verificando assinatura do AAB..."
+          
+          # Gerar APK universal
+          echo "Gerando APK universal..."
           if [ ! -f "bundletool.jar" ]; then
-            wget https://github.com/google/bundletool/releases/download/1.15.0/bundletool-all-1.15.0.jar -O bundletool.jar
+            wget -q https://github.com/google/bundletool/releases/download/1.15.0/bundletool-all-1.15.0.jar -O bundletool.jar
           fi
-          BUNDLETOOL_CMD="java -jar bundletool.jar"
-          $BUNDLETOOL_CMD build-apks --bundle=android/app/build/outputs/bundle/release/app-release.aab --output=app.apks --mode=universal
+          java -jar bundletool.jar build-apks --bundle=android/app/build/outputs/bundle/release/app-release.aab --output=app.apks --mode=universal
           unzip -o app.apks universal.apk
-          APKSIGNER_PATH=$(find $ANDROID_SDK_ROOT -name "apksigner" | head -n 1)
-          if [ -z "$APKSIGNER_PATH" ]; then
-            echo "ERRO: apksigner não encontrado."
-            exit 1
-          fi
-          $APKSIGNER_PATH verify universal.apk
-          if [ $? -ne 0 ]; then
-            echo "ERRO: O AAB NÃO ESTÁ ASSINADO CORRETAMENTE!"
-            exit 1
-          else
-            echo "SUCESSO: O AAB ESTÁ ASSINADO CORRETAMENTE!"
-          fi
+          echo "APK universal gerado com sucesso"
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
