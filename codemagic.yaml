@@ -118,12 +118,6 @@ workflows:
           set -euo pipefail
           npm install
           npm run build
-      - name: Increment Android build number
-        script: |
-          cd android
-          sed -i '' 's/versionCode [0-9]*/versionCode 6/' app/build.gradle
-          sed -i '' 's/versionName "[0-9]*\.[0-9]*"/versionName "2.2"/' app/build.gradle
-          cd ..
       - name: Setup Android platform
         script: |
           set -euo pipefail
@@ -139,11 +133,7 @@ workflows:
           else
             echo "google-services.json já está em android/app/ — mantendo."
           fi
-          if [ -f "android/app/google-services.json" ]; then
-            ls -la android/app/google-services.json
-          else
-            echo "AVISO: google-services.json não encontrado em android/app/"
-          fi
+          ls -la android/app/google-services.json
       - name: Generate Android icons
         script: |
           set -euo pipefail
@@ -157,44 +147,59 @@ workflows:
           cp logo_new.png assets/splash.png
           cp logo_new.png assets/splash-dark.png
           npx @capacitor/assets generate --android
-          # Limpar mipmap antigos SOMENTE APÓS gerar os novos
-          rm -rf android/app/src/main/res/mipmap-*
+      - name: Increment Android build number
+        script: |
+          sed -i '' 's/versionCode [0-9]*/versionCode 6/' android/app/build.gradle
+          sed -i '' 's/versionName "[0-9]*\.[0-9]*"/versionName "2.2"/' android/app/build.gradle
       - name: Build Android AAB
         script: |
           set -euo pipefail
-          
-          # Verificar keystore
+
+          # Verifica keystore
           if [ ! -f "tanamao-release.keystore" ]; then
             echo "ERRO: tanamao-release.keystore NAO ENCONTRADO na raiz do projeto."
             exit 1
           fi
           echo "Keystore encontrado na raiz"
-          
-          # Limpar cache
-          rm -rf android/.gradle
-          rm -rf android/gradle/wrapper/gradle-wrapper.jar
-          
-          # Build AAB
+          mv tanamao-release.keystore android/tanamao-release.keystore
+
           cd android
+
+          # Garante que o gradle wrapper existe
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "gradle-wrapper.jar não encontrado, baixando..."
+            mkdir -p gradle/wrapper
+            curl -sL "https://github.com/gradle/gradle/raw/v8.5.0/gradle/wrapper/gradle-wrapper.jar" \
+              -o gradle/wrapper/gradle-wrapper.jar
+          fi
+
+          chmod +x gradlew
           echo "Iniciando build do AAB..."
           ./gradlew bundleRelease --no-daemon
-          
-          # Verificar se AAB foi gerado
+
+          # Verifica se AAB foi gerado
           if [ ! -f "app/build/outputs/bundle/release/app-release.aab" ]; then
-            echo "ERRO: AAB nao foi gerado"
-            ls -la app/build/outputs/bundle/release/ || echo "Diretorio nao existe"
+            echo "ERRO: AAB não foi gerado"
             exit 1
           fi
-          echo "AAB gerado com sucesso"
+          echo "AAB gerado com sucesso!"
           cd ..
-          
-          # Gerar APK universal
-          echo "Gerando APK universal..."
+
+          # Gera APK universal para teste
+          echo "Gerando APK universal para teste..."
           if [ ! -f "bundletool.jar" ]; then
             wget -q https://github.com/google/bundletool/releases/download/1.15.0/bundletool-all-1.15.0.jar -O bundletool.jar
           fi
-          java -jar bundletool.jar build-apks --bundle=android/app/build/outputs/bundle/release/app-release.aab --output=app.apks --mode=universal
+          java -jar bundletool.jar build-apks \
+            --bundle=android/app/build/outputs/bundle/release/app-release.aab \
+            --output=app.apks \
+            --mode=universal \
+            --ks=android/tanamao-release.keystore \
+            --ks-pass=pass:tanamao123 \
+            --ks-key-alias=tanamao \
+            --key-pass=pass:tanamao123
           unzip -o app.apks universal.apk
-          echo "APK universal gerado com sucesso"
+          echo "APK universal gerado com sucesso!"
     artifacts:
       - android/app/build/outputs/bundle/release/*.aab
+      - universal.apk
