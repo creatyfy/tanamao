@@ -27,60 +27,33 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
-      const playRing = (startTime: number) => {
-        // Primeiro toque do par (440Hz + 480Hz sobrepostos = som de telefone analógico)
-        const osc1 = audioCtx.createOscillator();
-        const osc2 = audioCtx.createOscillator();
+      const playDing = (freq: number, startTime: number) => {
+        const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
+        const compressor = audioCtx.createDynamicsCompressor();
 
-        osc1.connect(gain);
-        osc2.connect(gain);
-        gain.connect(audioCtx.destination);
+        osc.connect(gain);
+        gain.connect(compressor);
+        compressor.connect(audioCtx.destination);
 
-        osc1.type = 'sine';
-        osc2.type = 'sine';
-        osc1.frequency.setValueAtTime(440, startTime);
-        osc2.frequency.setValueAtTime(480, startTime);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, startTime);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.95, startTime + 0.3);
 
         gain.gain.setValueAtTime(0, startTime);
-        gain.gain.linearRampToValueAtTime(0.4, startTime + 0.05);
-        gain.gain.setValueAtTime(0.4, startTime + 0.4);
-        gain.gain.linearRampToValueAtTime(0, startTime + 0.45);
+        gain.gain.linearRampToValueAtTime(0.6, startTime + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.8);
 
-        osc1.start(startTime);
-        osc1.stop(startTime + 0.5);
-        osc2.start(startTime);
-        osc2.stop(startTime + 0.5);
-
-        // Segundo toque do par (0.2s depois)
-        const osc3 = audioCtx.createOscillator();
-        const osc4 = audioCtx.createOscillator();
-        const gain2 = audioCtx.createGain();
-
-        osc3.connect(gain2);
-        osc4.connect(gain2);
-        gain2.connect(audioCtx.destination);
-
-        osc3.type = 'sine';
-        osc4.type = 'sine';
-        osc3.frequency.setValueAtTime(440, startTime + 0.5);
-        osc4.frequency.setValueAtTime(480, startTime + 0.5);
-
-        gain2.gain.setValueAtTime(0, startTime + 0.5);
-        gain2.gain.linearRampToValueAtTime(0.4, startTime + 0.55);
-        gain2.gain.setValueAtTime(0.4, startTime + 0.9);
-        gain2.gain.linearRampToValueAtTime(0, startTime + 0.95);
-
-        osc3.start(startTime + 0.5);
-        osc3.stop(startTime + 1.0);
-        osc4.start(startTime + 0.5);
-        osc4.stop(startTime + 1.0);
+        osc.start(startTime);
+        osc.stop(startTime + 0.8);
       };
 
-      // Toca 3 pares de toque com pausa de 2s entre cada par
-      playRing(audioCtx.currentTime); // Par 1
-      playRing(audioCtx.currentTime + 3.0); // Par 2
-      playRing(audioCtx.currentTime + 6.0); // Par 3
+      // Sequência ding-dong repetida 2 vezes como o iFood
+      const t = audioCtx.currentTime;
+      playDing(1200, t); // Ding (agudo)
+      playDing(900, t + 0.35); // Dong (grave)
+      playDing(1200, t + 1.0); // Ding (repetição)
+      playDing(900, t + 1.35); // Dong (repetição)
     } catch (e) {
       console.warn('Audio não suportado:', e);
     }
