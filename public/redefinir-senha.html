@@ -96,6 +96,17 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
+    // Pega parâmetros tanto da hash quanto da query string
+    const hashParams = new URLSearchParams(window.location.hash.replace('#', ''))
+    const queryParams = new URLSearchParams(window.location.search)
+
+    const code = queryParams.get('code')
+    const accessToken = hashParams.get('access_token') || queryParams.get('access_token')
+    const refreshToken = hashParams.get('refresh_token') || queryParams.get('refresh_token') || ''
+    const tokenHash = hashParams.get('token_hash') || queryParams.get('token_hash')
+    const type = hashParams.get('type') || queryParams.get('type')
+    const errorParam = hashParams.get('error') || queryParams.get('error')
+
     const SUPABASE_URL = 'https://fgjlyvkdkhxvzsgxuuad.supabase.co'
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnamx5dmtka2h4dnpzZ3h1dWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2MDIzNjEsImV4cCI6MjA1OTE3ODM2MX0.hfFbkO3TgkHFQRQOsVn-RHoNIYaLXoDEa0s5FgTsFKo'
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -111,76 +122,47 @@
       })
     }
 
-    // Pega todos os parâmetros da URL (query string + hash)
-    const hash = window.location.hash.replace(/^#/, '')
-    const search = window.location.search.replace(/^\?/, '')
-    const hashParams = new URLSearchParams(hash)
-    const allParams = new URLSearchParams(search)
-
-    // Também copia os parâmetros da hash sem sobrescrever o que já veio na query string
-    for (const [key, value] of hashParams.entries()) {
-      if (!allParams.has(key)) allParams.set(key, value)
-    }
-
-    const accessToken = allParams.get('access_token')
-    const refreshToken = allParams.get('refresh_token') || ''
-    const tokenHash = allParams.get('token_hash')
-    const token = allParams.get('token')
-    const type = allParams.get('type')
-    const errorParam = allParams.get('error')
-    const code = allParams.get('code')
-
-    console.log('Params:', { accessToken, refreshToken, tokenHash, token, type, code, errorParam })
-
     async function initSession() {
       try {
-        // Caso 1: formato PKCE com code na URL
+        // Formato PKCE - code na query string
         if (code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-          if (!error && data?.session?.access_token) {
+          if (!error && data?.session) {
             show('formCard')
             return
           }
         }
 
-        // Caso 2: token_hash + type
+        // Formato token_hash (OTP)
         if (tokenHash && type) {
-          const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
-          if (!error && data?.session?.access_token) {
+          const { data, error } = await supabase.auth.verifyOtp({ 
+            token_hash: tokenHash, 
+            type: type 
+          })
+          if (!error && data?.session) {
             show('formCard')
             return
           }
         }
 
-        // Caso 3: access_token direto na URL (formato antigo)
-        if (accessToken && refreshToken) {
-          const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+        // Formato access_token direto na hash
+        if (accessToken) {
+          const { error } = await supabase.auth.setSession({ 
+            access_token: accessToken, 
+            refresh_token: refreshToken 
+          })
           if (!error) {
             show('formCard')
             return
           }
         }
 
-        // Caso 4: token simples
-        if (token && type === 'recovery') {
-          const { data, error } = await supabase.auth.verifyOtp({ token, type: 'recovery' })
-          if (!error && data?.session?.access_token) {
-            show('formCard')
-            return
-          }
-        }
-
+        // Nenhum formato reconhecido
         show('errorCard')
-      } catch (err) {
-        console.error('Falha ao validar link de redefinição:', err)
+      } catch (e) {
+        console.error('initSession error:', e)
         show('errorCard')
       }
-    }
-
-    if (errorParam) {
-      show('errorCard')
-    } else {
-      initSession()
     }
 
     async function handleReset() {
@@ -216,6 +198,12 @@
       }
 
       show('successCard')
+    }
+
+    if (errorParam) {
+      show('errorCard')
+    } else {
+      initSession()
     }
   </script>
 </body>
