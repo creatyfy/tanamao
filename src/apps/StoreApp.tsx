@@ -27,24 +27,60 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
 
-      const playTone = (freq: number, start: number, duration: number, volume: number) => {
-        const osc = audioCtx.createOscillator();
+      const playRing = (startTime: number) => {
+        // Primeiro toque do par (440Hz + 480Hz sobrepostos = som de telefone analógico)
+        const osc1 = audioCtx.createOscillator();
+        const osc2 = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
-        osc.connect(gain);
+
+        osc1.connect(gain);
+        osc2.connect(gain);
         gain.connect(audioCtx.destination);
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + start);
-        gain.gain.setValueAtTime(volume, audioCtx.currentTime + start);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + start + duration);
-        osc.start(audioCtx.currentTime + start);
-        osc.stop(audioCtx.currentTime + start + duration);
+
+        osc1.type = 'sine';
+        osc2.type = 'sine';
+        osc1.frequency.setValueAtTime(440, startTime);
+        osc2.frequency.setValueAtTime(480, startTime);
+
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.4, startTime + 0.05);
+        gain.gain.setValueAtTime(0.4, startTime + 0.4);
+        gain.gain.linearRampToValueAtTime(0, startTime + 0.45);
+
+        osc1.start(startTime);
+        osc1.stop(startTime + 0.5);
+        osc2.start(startTime);
+        osc2.stop(startTime + 0.5);
+
+        // Segundo toque do par (0.2s depois)
+        const osc3 = audioCtx.createOscillator();
+        const osc4 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+
+        osc3.connect(gain2);
+        osc4.connect(gain2);
+        gain2.connect(audioCtx.destination);
+
+        osc3.type = 'sine';
+        osc4.type = 'sine';
+        osc3.frequency.setValueAtTime(440, startTime + 0.5);
+        osc4.frequency.setValueAtTime(480, startTime + 0.5);
+
+        gain2.gain.setValueAtTime(0, startTime + 0.5);
+        gain2.gain.linearRampToValueAtTime(0.4, startTime + 0.55);
+        gain2.gain.setValueAtTime(0.4, startTime + 0.9);
+        gain2.gain.linearRampToValueAtTime(0, startTime + 0.95);
+
+        osc3.start(startTime + 0.5);
+        osc3.stop(startTime + 1.0);
+        osc4.start(startTime + 0.5);
+        osc4.stop(startTime + 1.0);
       };
 
-      // Sequência chamativa tipo "novo pedido!"
-      playTone(523, 0.0, 0.15, 0.4); // C5
-      playTone(659, 0.15, 0.15, 0.4); // E5
-      playTone(784, 0.30, 0.15, 0.4); // G5
-      playTone(1047, 0.45, 0.3, 0.5); // C6 - nota final mais longa
+      // Toca 3 pares de toque com pausa de 2s entre cada par
+      playRing(audioCtx.currentTime); // Par 1
+      playRing(audioCtx.currentTime + 3.0); // Par 2
+      playRing(audioCtx.currentTime + 6.0); // Par 3
     } catch (e) {
       console.warn('Audio não suportado:', e);
     }
