@@ -111,10 +111,16 @@
       })
     }
 
-    // Pega todos os parâmetros da URL (hash e query string)
-    const hash = window.location.hash.replace('#', '')
-    const search = window.location.search.replace('?', '')
-    const allParams = new URLSearchParams(hash || search)
+    // Pega todos os parâmetros da URL (query string + hash)
+    const hash = window.location.hash.replace(/^#/, '')
+    const search = window.location.search.replace(/^\?/, '')
+    const hashParams = new URLSearchParams(hash)
+    const allParams = new URLSearchParams(search)
+
+    // Também copia os parâmetros da hash sem sobrescrever o que já veio na query string
+    for (const [key, value] of hashParams.entries()) {
+      if (!allParams.has(key)) allParams.set(key, value)
+    }
 
     const accessToken = allParams.get('access_token')
     const refreshToken = allParams.get('refresh_token') || ''
@@ -127,43 +133,48 @@
     console.log('Params:', { accessToken, refreshToken, tokenHash, token, type, code, errorParam })
 
     async function initSession() {
-      // Caso 1: formato PKCE com code na URL
-      if (code) {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-        if (!error && data?.session?.access_token) {
-          show('formCard')
-          return
+      try {
+        // Caso 1: formato PKCE com code na URL
+        if (code) {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+          if (!error && data?.session?.access_token) {
+            show('formCard')
+            return
+          }
         }
-      }
 
-      // Caso 2: token_hash + type
-      if (tokenHash && type) {
-        const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
-        if (!error && data?.session?.access_token) {
-          show('formCard')
-          return
+        // Caso 2: token_hash + type
+        if (tokenHash && type) {
+          const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
+          if (!error && data?.session?.access_token) {
+            show('formCard')
+            return
+          }
         }
-      }
 
-      // Caso 3: access_token direto na URL (formato antigo)
-      if (accessToken && refreshToken) {
-        const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
-        if (!error) {
-          show('formCard')
-          return
+        // Caso 3: access_token direto na URL (formato antigo)
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+          if (!error) {
+            show('formCard')
+            return
+          }
         }
-      }
 
-      // Caso 4: token simples
-      if (token && type === 'recovery') {
-        const { data, error } = await supabase.auth.verifyOtp({ token, type: 'recovery' })
-        if (!error && data?.session?.access_token) {
-          show('formCard')
-          return
+        // Caso 4: token simples
+        if (token && type === 'recovery') {
+          const { data, error } = await supabase.auth.verifyOtp({ token, type: 'recovery' })
+          if (!error && data?.session?.access_token) {
+            show('formCard')
+            return
+          }
         }
-      }
 
-      show('errorCard')
+        show('errorCard')
+      } catch (err) {
+        console.error('Falha ao validar link de redefinição:', err)
+        show('errorCard')
+      }
     }
 
     if (errorParam) {
