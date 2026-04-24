@@ -14,7 +14,6 @@ export function usePushNotifications() {
     if (isNative()) {
       initNativePush();
     } else {
-      // Web: usa Web Notifications API
       if ('Notification' in window) {
         setPermission(Notification.permission as any);
       }
@@ -25,20 +24,21 @@ export function usePushNotifications() {
     try {
       const { PushNotifications } = await import('@capacitor/push-notifications');
 
-      // Verifica permissão atual
-      const permResult = await PushNotifications.checkPermissions();
+      // Pede permissão automaticamente
+      const permResult = await PushNotifications.requestPermissions();
 
       if (permResult.receive === 'granted') {
         setPermission('granted');
-        await registerForPush();
+        await PushNotifications.register();
       } else {
-        setPermission('default');
+        setPermission('denied');
+        return;
       }
 
       // Listener: token gerado
       PushNotifications.addListener('registration', async (token) => {
         console.log('FCM Token:', token.value);
-        await saveToken(token.value, isNative() ? detectPlatform() : 'web');
+        await saveToken(token.value, detectPlatform());
       });
 
       // Listener: erro no registro
