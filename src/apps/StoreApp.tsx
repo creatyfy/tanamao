@@ -393,6 +393,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       }
     } catch (error) {
       console.error('Erro ao carregar loja:', error);
+      console.error('Erro completo ao carregar dados da loja:', error);
       showToast('Erro ao carregar dados da loja', 'error');
     } finally {
       setLoading(false);
