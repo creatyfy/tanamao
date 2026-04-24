@@ -23,6 +23,32 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => setToast({ message, type });
+  const playNotificationSound = () => {
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+      const playTone = (freq: number, start: number, duration: number, volume: number) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime + start);
+        gain.gain.setValueAtTime(volume, audioCtx.currentTime + start);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + start + duration);
+        osc.start(audioCtx.currentTime + start);
+        osc.stop(audioCtx.currentTime + start + duration);
+      };
+
+      // Sequência chamativa tipo "novo pedido!"
+      playTone(523, 0.0, 0.15, 0.4); // C5
+      playTone(659, 0.15, 0.15, 0.4); // E5
+      playTone(784, 0.30, 0.15, 0.4); // G5
+      playTone(1047, 0.45, 0.3, 0.5); // C6 - nota final mais longa
+    } catch (e) {
+      console.warn('Audio não suportado:', e);
+    }
+  };
   
   const [store, setStore] = useState<Store | null>(null);
   const [orders, setOrders] = useState<any[]>([]);
@@ -294,6 +320,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `store_id=eq.${storeData.id}` }, (payload) => {
             
             if (payload.eventType === 'INSERT' && payload.new.status === 'pending') {
+              playNotificationSound();
               sendNotification('🔔 Novo Pedido Recebido!', {
                 body: `Pedido #${payload.new.id} no valor de R$ ${payload.new.total.toFixed(2)}. Acesse o painel para aceitar.`,
               });
