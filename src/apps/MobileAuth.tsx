@@ -449,7 +449,7 @@ export default function MobileAuth() {
         if (draft && typeof draft === 'object') {
           const cleanCpf = typeof data.user.user_metadata?.cpf === 'string'
             ? data.user.user_metadata.cpf.replace(/\D/g, '')
-            : (typeof draft.cpf === 'string' ? draft.cpf.replace(/\D/g, '') : '00000000000');
+            : (typeof draft.cpf === 'string' ? draft.cpf.replace(/\D/g, '') : data.user.id.replace(/\D/g, '').padEnd(11, '0').slice(0, 11));
 
           const { error: courierInsertError } = await supabase.from('couriers').insert({
             user_id: data.user.id,
@@ -622,10 +622,15 @@ export default function MobileAuth() {
       } catch (err) { console.warn('Erro ao processar banner:', err); }
     }
 
+    const generateFallbackCpf = (seed: string) => {
+      const digits = seed.replace(/\D/g, '');
+      return (digits || '0').padEnd(11, '0').slice(0, 11);
+    };
+
     const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : null;
     const cleanCep = formData.cep ? formData.cep.replace(/\D/g, '') : '00000000';
     const cleanCnpj = formData.cnpj ? formData.cnpj.replace(/\D/g, '') : null;
-    const cleanCpf = formData.cpf ? formData.cpf.replace(/\D/g, '') : '00000000000';
+    const cleanCpf = formData.cpf ? formData.cpf.replace(/\D/g, '') : generateFallbackCpf(userId);
     const isActive = registerRole === 'client';
 
     const userData: any = {

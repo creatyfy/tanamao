@@ -110,7 +110,8 @@ function App() {
           if (!courierData) {
             const safeDraft = draft && typeof draft === 'object' ? draft : {};
             const cpfFromMeta = typeof user.user_metadata?.cpf === 'string' ? user.user_metadata.cpf : null;
-            const cleanCpf = (cpfFromMeta || safeDraft.cpf || profile.cpf || '').toString().replace(/\D/g, '') || '00000000000';
+            const fallbackCpf = user.id.replace(/\D/g, '').padEnd(11, '0').slice(0, 11);
+            const cleanCpf = (cpfFromMeta || safeDraft.cpf || profile.cpf || '').toString().replace(/\D/g, '') || fallbackCpf;
 
             const { data: insertedCourier } = await supabase
               .from('couriers')
