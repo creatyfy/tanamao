@@ -118,42 +118,42 @@ workflows:
           set -euo pipefail
           npm install
           npm run build
-    - name: Increment Android build number
-      script: |
-        cd android
-        sed -i '' 's/versionCode [0-9]*/versionCode 6/' app/build.gradle
-        sed -i '' 's/versionName "[0-9]*\.[0-9]*"/versionName "2.2"/' app/build.gradle
-        cd ..
-    - name: Setup Android platform
-      script: |
-        set -euo pipefail
-        rm -rf android
-        npx cap add android
-        npx cap sync android
-    - name: Copy Firebase config
-      script: |
-        if [ -f "assets/google-services.json" ]; then
-          cp assets/google-services.json android/app/google-services.json
-          echo "google-services.json copiado de assets/"
-        else
-          echo "google-services.json já está em android/app/ — mantendo."
-        fi
-        ls -la android/app/google-services.json
-    - name: Generate Android icons
-      script: |
-        set -euo pipefail
-        mkdir -p assets
-        if [ ! -f "logo_new.png" ]; then
-          echo "ERRO: logo_new.png não encontrado na raiz do projeto."
-          exit 1
-        fi
-        cp logo_new.png assets/logo.png
-        cp logo_new.png assets/icon-only.png
-        cp logo_new.png assets/splash.png
-        cp logo_new.png assets/splash-dark.png
-        npx @capacitor/assets generate --android
-        # Limpar mipmap antigos SOMENTE APÓS gerar os novos
-        rm -rf android/app/src/main/res/mipmap-*
+      - name: Increment Android build number
+        script: |
+          cd android
+          sed -i '' 's/versionCode [0-9]*/versionCode 6/' app/build.gradle
+          sed -i '' 's/versionName "[0-9]*\.[0-9]*"/versionName "2.2"/' app/build.gradle
+          cd ..
+      - name: Setup Android platform
+        script: |
+          set -euo pipefail
+          rm -rf android
+          npx cap add android
+          npx cap sync android
+      - name: Copy Firebase config
+        script: |
+          if [ -f "assets/google-services.json" ]; then
+            cp assets/google-services.json android/app/google-services.json
+            echo "google-services.json copiado de assets/"
+          else
+            echo "google-services.json já está em android/app/ — mantendo."
+          fi
+          ls -la android/app/google-services.json
+      - name: Generate Android icons
+        script: |
+          set -euo pipefail
+          mkdir -p assets
+          if [ ! -f "logo_new.png" ]; then
+            echo "ERRO: logo_new.png não encontrado na raiz do projeto."
+            exit 1
+          fi
+          cp logo_new.png assets/logo.png
+          cp logo_new.png assets/icon-only.png
+          cp logo_new.png assets/splash.png
+          cp logo_new.png assets/splash-dark.png
+          npx @capacitor/assets generate --android
+          # Limpar mipmap antigos SOMENTE APÓS gerar os novos
+          rm -rf android/app/src/main/res/mipmap-*
       - name: Build Android AAB
         script: |
           rm -rf android/.gradle
