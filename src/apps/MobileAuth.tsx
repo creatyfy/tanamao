@@ -92,7 +92,12 @@ export default function MobileAuth() {
 
     if (existingProfile) return false;
 
-    const draft = user.user_metadata?.registration_draft;
+    const { data: draftRow } = await supabase
+      .from('registration_drafts')
+      .select('draft')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    const draft = draftRow?.draft;
     if (!draft || typeof draft !== 'object') return false;
 
     const inferredRole: 'store' | 'courier' = metaRole === 'store_owner' ? 'store' : 'courier';
@@ -361,7 +366,12 @@ export default function MobileAuth() {
         .maybeSingle();
 
       if (!store) {
-        const draft = data.user.user_metadata?.registration_draft;
+        const { data: draftRow } = await supabase
+          .from('registration_drafts')
+          .select('draft')
+          .eq('user_id', data.user.id)
+          .maybeSingle();
+        const draft = draftRow?.draft;
         if (draft && typeof draft === 'object') {
           const cleanCep = typeof draft.cep === 'string' ? draft.cep.replace(/\D/g, '') : '00000000';
           const cleanPhone = typeof draft.phone === 'string' ? draft.phone.replace(/\D/g, '') : null;
@@ -445,7 +455,12 @@ export default function MobileAuth() {
         .maybeSingle();
 
       if (!courier) {
-        const draft = data.user.user_metadata?.registration_draft;
+        const { data: draftRow } = await supabase
+          .from('registration_drafts')
+          .select('draft')
+          .eq('user_id', data.user.id)
+          .maybeSingle();
+        const draft = draftRow?.draft;
         if (draft && typeof draft === 'object') {
           const cleanCpf = typeof data.user.user_metadata?.cpf === 'string'
             ? data.user.user_metadata.cpf.replace(/\D/g, '')
