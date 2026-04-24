@@ -1,4 +1,4 @@
-package com.tanamaoc.delivery;
+package com.tanamao.delivery;
 
 import android.os.Bundle;
 import android.view.View;

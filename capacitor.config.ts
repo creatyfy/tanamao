@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.tanamaoc.delivery',
+  appId: 'com.tanamao.delivery',
   appName: 'Tá Na Mão',
   webDir: 'dist',
   android: {
