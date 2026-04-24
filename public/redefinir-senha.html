@@ -96,6 +96,10 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
+    console.log('URL completa:', window.location.href)
+    console.log('Hash:', window.location.hash)
+    console.log('Search:', window.location.search)
+
     // Pega parâmetros tanto da hash quanto da query string
     const hashParams = new URLSearchParams(window.location.hash.replace('#', ''))
     const queryParams = new URLSearchParams(window.location.search)
