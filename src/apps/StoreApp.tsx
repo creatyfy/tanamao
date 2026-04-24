@@ -23,40 +23,53 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => setToast({ message, type });
-  const playNotificationSound = () => {
-    try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  const audioLoopRef = React.useRef<boolean>(false);
+  const audioLoopTimeoutRef = React.useRef<number | null>(null);
 
-      const playDing = (freq: number, startTime: number) => {
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        const compressor = audioCtx.createDynamicsCompressor();
-
-        osc.connect(gain);
-        gain.connect(compressor);
-        compressor.connect(audioCtx.destination);
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, startTime);
-        osc.frequency.exponentialRampToValueAtTime(freq * 0.95, startTime + 0.3);
-
-        gain.gain.setValueAtTime(0, startTime);
-        gain.gain.linearRampToValueAtTime(0.6, startTime + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.8);
-
-        osc.start(startTime);
-        osc.stop(startTime + 0.8);
-      };
-
-      // Sequência ding-dong repetida 2 vezes como o iFood
-      const t = audioCtx.currentTime;
-      playDing(1200, t); // Ding (agudo)
-      playDing(900, t + 0.35); // Dong (grave)
-      playDing(1200, t + 1.0); // Ding (repetição)
-      playDing(900, t + 1.35); // Dong (repetição)
-    } catch (e) {
-      console.warn('Audio não suportado:', e);
+  const stopNotificationSound = () => {
+    audioLoopRef.current = false;
+    if (audioLoopTimeoutRef.current) {
+      clearTimeout(audioLoopTimeoutRef.current);
+      audioLoopTimeoutRef.current = null;
     }
+  };
+
+  const playNotificationSound = () => {
+    if (audioLoopRef.current) return;
+    audioLoopRef.current = true;
+    
+    const playLoop = () => {
+      if (!audioLoopRef.current) return;
+      try {
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const playDing = (freq: number, startTime: number) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, startTime);
+          osc.frequency.exponentialRampToValueAtTime(freq * 0.95, startTime + 0.3);
+          gain.gain.setValueAtTime(0, startTime);
+          gain.gain.linearRampToValueAtTime(0.8, startTime + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.8);
+          osc.start(startTime);
+          osc.stop(startTime + 0.8);
+        };
+        const t = audioCtx.currentTime;
+        playDing(1200, t);
+        playDing(900, t + 0.35);
+        playDing(1200, t + 0.7);
+        playDing(900, t + 1.05);
+        audioLoopTimeoutRef.current = window.setTimeout(() => {
+          audioCtx.close();
+          playLoop();
+        }, 3000);
+      } catch (e) {
+        console.warn('Audio não suportado:', e);
+      }
+    };
+    playLoop();
   };
   
   const [store, setStore] = useState<Store | null>(null);
@@ -442,7 +455,16 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   }, [store?.id, sendNotification]);
 
   useEffect(() => {
+    if (!store?.id) return;
+    const interval = setInterval(() => {
+      fetchOrders(store.id);
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [store?.id]);
+
+  useEffect(() => {
     return () => {
+      stopNotificationSound();
       if (storeChatsChannelRef.current) {
         supabase.removeChannel(storeChatsChannelRef.current);
         storeChatsChannelRef.current = null;
@@ -487,6 +509,17 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAcceptOrder = async (order: any) => {
+    stopNotificationSound();
+    await updateOrderStatus(order.id, 'preparing');
+    printOrder(order);
+  };
+
+  const handleRejectOrder = async (orderId: number) => {
+    stopNotificationSound();
+    await updateOrderStatus(orderId, 'cancelled');
   };
 
   const printOrder = (order: any) => {
@@ -1384,16 +1417,13 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                         </div>
                         <div className="flex space-x-2">
                           <button 
-                            onClick={async () => {
-                              await updateOrderStatus(order.id, 'preparing');
-                              printOrder(order);
-                            }} 
+                            onClick={() => handleAcceptOrder(order)} 
                             disabled={actionLoading === order.id} 
                             className="flex-1 bg-brand-primary text-white py-2.5 rounded-xl text-sm font-bold flex justify-center items-center"
                           >
                             {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : 'Aceitar e Preparar'}
                           </button>
-                          <button onClick={() => updateOrderStatus(order.id, 'cancelled')} disabled={actionLoading === order.id} className="px-4 bg-gray-100 text-gray-500 py-2.5 rounded-xl text-sm font-bold">Recusar</button>
+                          <button onClick={() => handleRejectOrder(order.id)} disabled={actionLoading === order.id} className="px-4 bg-gray-100 text-gray-500 py-2.5 rounded-xl text-sm font-bold">Recusar</button>
                         </div>
                       </div>
                     ))}
@@ -1613,8 +1643,8 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                                     isOpen: true,
                                     title: 'Cancelar Pedido',
                                     message: 'Tem certeza que deseja cancelar este pedido? O cliente será notificado.',
-                                    onConfirm: () => {
-                                      updateOrderStatus(order.id, 'cancelled');
+                                    onConfirm: async () => {
+                                      await handleRejectOrder(order.id);
                                       setActiveChatOrderId(null);
                                       setConfirmModal(null);
                                     }
