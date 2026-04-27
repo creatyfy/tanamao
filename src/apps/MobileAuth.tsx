@@ -560,6 +560,7 @@ export default function MobileAuth() {
         vehicleYear: formData.vehicleYear,
         licensePlate: formData.licensePlate,
         operationCity: formData.operationCity,
+        birthDate: formData.birthDate,
       };
 
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
@@ -862,6 +863,9 @@ export default function MobileAuth() {
                       <InputField icon={Store} name="storeName" placeholder="Nome da loja" required value={formData.storeName} onChange={handleChange} />
                       <InputField icon={User} name="ownerName" placeholder="Nome do responsável" required value={formData.ownerName} onChange={handleChange} />
                       <InputField icon={FileText} name="cnpj" placeholder="CPF ou CNPJ" required value={formData.cnpj} onChange={handleChange} />
+                      {formData.cnpj.replace(/\D/g, '').length === 11 && (
+                        <InputField icon={Calendar} name="birthDate" placeholder="Data de Nascimento" type="date" required value={formData.birthDate} onChange={handleChange} />
+                      )}
                       <InputField icon={Phone} name="phone" placeholder="Telefone / WhatsApp" required value={formData.phone} onChange={handleChange} />
                       <InputField icon={Mail} name="email" placeholder="E-mail de acesso" type="email" required value={formData.email} onChange={handleChange} />
                       <InputField icon={Lock} name="password" placeholder="Senha de acesso" type="password" required value={formData.password} onChange={handleChange} />
