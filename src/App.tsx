@@ -90,7 +90,8 @@ function App() {
                 status: 'pending',
                 is_approved: false,
                 commission_rate: 4,
-                pix_key: safeDraft.pixKey || null
+                pix_key: safeDraft.pixKey || null,
+                birth_date: safeDraft.birthDate || null
               })
               .select('id, is_approved, status')
               .maybeSingle();
@@ -139,7 +140,8 @@ function App() {
                 pix_key: safeDraft.pixKey || null,
                 operation_city: safeDraft.operationCity || safeDraft.city || 'Não informado',
                 status: 'pending',
-                is_approved: false
+                is_approved: false,
+                birth_date: safeDraft.birthDate || null
               })
               .select('id, is_approved, status')
               .maybeSingle();
