@@ -526,6 +526,29 @@ export default function MobileAuth() {
     const roleMap: Record<string, string> = { client: 'client', store: 'store_owner', courier: 'courier' };
     const userName = registerRole === 'store' ? formData.ownerName : (registerRole === 'courier' ? formData.fullName : formData.name);
 
+    // Validações obrigatórias
+    if (registerRole === 'store') {
+      const cleanCnpj = formData.cnpj.replace(/\D/g, '');
+      if (!cleanCnpj || (cleanCnpj.length !== 11 && cleanCnpj.length !== 14)) {
+        throw new Error('CPF ou CNPJ inválido. Informe um CPF (11 dígitos) ou CNPJ (14 dígitos) válido.');
+      }
+      if (cleanCnpj.length === 11 && !formData.birthDate) {
+        throw new Error('Data de nascimento é obrigatória para cadastro com CPF.');
+      }
+      if (!formData.pixKey.trim()) {
+        throw new Error('Chave PIX é obrigatória.');
+      }
+    }
+    if (registerRole === 'courier') {
+      const cleanCpf = formData.cpf.replace(/\D/g, '');
+      if (!cleanCpf || cleanCpf.length !== 11) {
+        throw new Error('CPF inválido. Informe um CPF com 11 dígitos.');
+      }
+      if (!formData.birthDate) {
+        throw new Error('Data de nascimento é obrigatória.');
+      }
+    }
+
     // Verifica se já existe uma sessão ativa (caso o usuário tenha voltado do link de confirmação de e-mail)
     const { data: { session } } = await supabase.auth.getSession();
     let userId = session?.user?.id;
