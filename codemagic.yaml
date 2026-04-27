@@ -72,7 +72,7 @@ workflows:
         script: |
           PLIST="ios/App/App/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.5" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.5" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Tá Na Mão" "$PLIST" 2>/dev/null || \
@@ -109,7 +109,7 @@ workflows:
       groups:
         - tanamao
       vars:
-        PACKAGE_NAME: "com.tanamaoc.delivery"
+        PACKAGE_NAME: "com.tanamao.delivery"
       node: 22.13.0
       java: 21
     scripts:
@@ -158,7 +158,6 @@ workflows:
         script: |
           set -euo pipefail
 
-          # Keystore já está no repositório — usar diretamente
           if [ ! -f "tanamao-release.keystore" ]; then
             echo "ERRO: tanamao-release.keystore não encontrado na raiz do projeto"
             exit 1
@@ -168,7 +167,6 @@ workflows:
 
           cd android
 
-          # Garante que o gradle wrapper existe
           if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
             echo "gradle-wrapper.jar não encontrado, baixando..."
             mkdir -p gradle/wrapper
@@ -192,7 +190,6 @@ workflows:
           echo "AAB gerado com sucesso!"
           cd ..
 
-          # Gera APK universal para teste
           echo "Gerando APK universal para teste..."
           if [ ! -f "bundletool.jar" ]; then
             wget -q https://github.com/google/bundletool/releases/download/1.15.0/bundletool-all-1.15.0.jar -O bundletool.jar
