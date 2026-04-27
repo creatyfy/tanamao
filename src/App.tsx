@@ -45,6 +45,22 @@ function App() {
           if (!storeData) {
             const safeDraft = draft && typeof draft === 'object' ? draft : {};
             const cleanCnpj = typeof safeDraft.cnpj === 'string' ? safeDraft.cnpj.replace(/\D/g, '') : null;
+
+            // Validação: bloqueia criação se dados obrigatórios estiverem faltando
+            const missingFields: string[] = [];
+            if (!cleanCnpj || (cleanCnpj.length !== 11 && cleanCnpj.length !== 14)) missingFields.push('CPF/CNPJ');
+            if (!safeDraft.street || safeDraft.street === 'Não informado') missingFields.push('Endereço');
+            if (!safeDraft.neighborhood || safeDraft.neighborhood === 'Não informado') missingFields.push('Bairro');
+            if (!safeDraft.city || safeDraft.city === 'Não informado') missingFields.push('Cidade');
+            if (!safeDraft.cep || safeDraft.cep.replace(/\D/g, '').length < 8) missingFields.push('CEP');
+            if (cleanCnpj?.length === 11 && !safeDraft.birthDate) missingFields.push('Data de nascimento');
+
+            if (missingFields.length > 0) {
+              console.error('Cadastro de loja incompleto, campos faltando:', missingFields);
+              if (!cancelled) setForcePendingApproval(true);
+              if (!cancelled) setPartnerCheckLoading(false);
+              return;
+            }
             const { data: existingAddress } = await supabase
               .from('addresses')
               .select('id')
@@ -122,6 +138,22 @@ function App() {
             const cleanCpf = (cpfFromMeta || safeDraft.cpf || profile.cpf || '').toString().replace(/\D/g, '');
             if (!cleanCpf || cleanCpf.length !== 11) {
               console.error('CPF inválido para criação de courier');
+              if (!cancelled) setForcePendingApproval(true);
+              if (!cancelled) setPartnerCheckLoading(false);
+              return;
+            }
+
+            // Validação: bloqueia criação se dados obrigatórios estiverem faltando
+            const missingCourierFields: string[] = [];
+            if (!safeDraft.street || safeDraft.street === 'Não informado') missingCourierFields.push('Endereço');
+            if (!safeDraft.neighborhood || safeDraft.neighborhood === 'Não informado') missingCourierFields.push('Bairro');
+            if (!safeDraft.city || safeDraft.city === 'Não informado') missingCourierFields.push('Cidade');
+            if (!safeDraft.cep || safeDraft.cep.replace(/\D/g, '').length < 8) missingCourierFields.push('CEP');
+            if (!safeDraft.birthDate) missingCourierFields.push('Data de nascimento');
+            if (!safeDraft.pixKey) missingCourierFields.push('Chave PIX');
+
+            if (missingCourierFields.length > 0) {
+              console.error('Cadastro de motoboy incompleto, campos faltando:', missingCourierFields);
               if (!cancelled) setForcePendingApproval(true);
               if (!cancelled) setPartnerCheckLoading(false);
               return;
