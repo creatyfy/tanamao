@@ -6,6 +6,7 @@ import { UserProfile } from '../types';
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
+  refreshProfile: () => Promise<void>;
   loading: boolean;
   isPasswordRecovery: boolean;
   signOut: () => Promise<void>;
@@ -167,7 +168,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, isPasswordRecovery, signOut, deleteAccount, clearRecovery }}>
+    <AuthContext.Provider value={{ user, profile, loading, isPasswordRecovery, signOut, deleteAccount, clearRecovery, refreshProfile: () => user ? fetchProfile(user.id) : Promise.resolve() }}>
       {children}
     </AuthContext.Provider>
   );
