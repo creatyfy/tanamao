@@ -261,12 +261,15 @@ function App() {
         }
 
         if (needsPendingScreen) {
-          if (profile.is_active) {
-            await supabase.from('users').update({ is_active: false }).eq('id', user.id);
-          }
+          // Só desativa se não estiver aprovado no banco
+          // (evita desativar usuário aprovado com cache desatualizado)
           if (!cancelled) setForcePendingApproval(true);
-        } else if (!cancelled) {
-          setForcePendingApproval(false);
+        } else {
+          // Usuário aprovado — garantir que is_active está true
+          if (!profile.is_active) {
+            await supabase.from('users').update({ is_active: true }).eq('id', user.id);
+          }
+          if (!cancelled) setForcePendingApproval(false);
         }
       } catch (error) {
         console.error('Erro ao validar cadastro de parceiro:', error);
