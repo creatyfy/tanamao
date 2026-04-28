@@ -92,11 +92,15 @@ export default function MobileAuth() {
 
     if (existingProfile) return false;
 
-    const { data: draftRow } = await supabase
+    const { data: draftRow, error: draftError } = await supabase
       .from('registration_drafts')
       .select('draft')
       .eq('user_id', user.id)
       .maybeSingle();
+    if (draftError) {
+      console.error('Erro ao restaurar registration_drafts:', draftError);
+      return false;
+    }
     const draft = draftRow?.draft;
     if (!draft || typeof draft !== 'object') return false;
 
@@ -366,11 +370,14 @@ export default function MobileAuth() {
         .maybeSingle();
 
       if (!store) {
-        const { data: draftRow } = await supabase
+        const { data: draftRow, error: draftError } = await supabase
           .from('registration_drafts')
           .select('draft')
           .eq('user_id', data.user.id)
           .maybeSingle();
+        if (draftError) {
+          throw new Error(`Erro ao carregar rascunho de loja: ${draftError.message}`);
+        }
         const draft = draftRow?.draft;
         if (draft && typeof draft === 'object') {
           const parseDraftInt = (value: any) => {
@@ -431,7 +438,11 @@ export default function MobileAuth() {
           };
 
           if (addressId) {
-            await supabase.from('addresses').update(addressPayload).eq('id', addressId);
+            const { error: addressUpdateError } = await supabase
+              .from('addresses')
+              .update(addressPayload)
+              .eq('id', addressId);
+            if (addressUpdateError) throw new Error(`Erro ao atualizar endereço: ${addressUpdateError.message}`);
           } else {
             const { data: newAddress, error: addressError } = await supabase
               .from('addresses')
@@ -459,7 +470,8 @@ export default function MobileAuth() {
             status: 'pending',
             is_approved: false,
             commission_rate: 4,
-            pix_key: draft.pixKey || null
+            pix_key: draft.pixKey || null,
+            birth_date: draft.birthDate || null
           });
 
           if (!storeInsertError) {
@@ -489,11 +501,14 @@ export default function MobileAuth() {
         .maybeSingle();
 
       if (!courier) {
-        const { data: draftRow } = await supabase
+        const { data: draftRow, error: draftError } = await supabase
           .from('registration_drafts')
           .select('draft')
           .eq('user_id', data.user.id)
           .maybeSingle();
+        if (draftError) {
+          throw new Error(`Erro ao carregar rascunho de motoboy: ${draftError.message}`);
+        }
         const draft = draftRow?.draft;
         if (draft && typeof draft === 'object') {
           const cleanCpf = typeof data.user.user_metadata?.cpf === 'string'
@@ -511,7 +526,8 @@ export default function MobileAuth() {
             pix_key: draft.pixKey || null,
             operation_city: draft.operationCity || draft.city || 'Não informado',
             status: 'pending',
-            is_approved: false
+            is_approved: false,
+            birth_date: draft.birthDate || null
           });
 
           if (!courierInsertError) {
@@ -802,7 +818,11 @@ export default function MobileAuth() {
       const { data: existingAddr } = await supabase.from('addresses').select('id').eq('user_id', userId).maybeSingle();
       if (existingAddr) {
         addressId = existingAddr.id;
-        await supabase.from('addresses').update(addressData).eq('id', addressId);
+        const { error: updateAddressError } = await supabase
+          .from('addresses')
+          .update(addressData)
+          .eq('id', addressId);
+        if (updateAddressError) throw new Error(`Erro ao atualizar endereço: ${updateAddressError.message}`);
       } else {
         const { data: newAddr, error: addrErr } = await supabase.from('addresses').insert(addressData).select().single();
         if (addrErr) throw new Error(`Erro ao salvar endereço: ${addrErr.message}`);
@@ -838,9 +858,13 @@ export default function MobileAuth() {
 
       const { data: existingStore } = await supabase.from('stores').select('id').eq('owner_id', userId).maybeSingle();
       if (existingStore) {
-        await supabase.from('stores').update(storeData).eq('id', existingStore.id);
+        const { error: updateStoreError } = await supabase
+          .from('stores')
+          .update({ ...storeData, birth_date: formData.birthDate || null })
+          .eq('id', existingStore.id);
+        if (updateStoreError) throw new Error(`Erro ao atualizar loja: ${updateStoreError.message}`);
       } else {
-        const { error: storeErr } = await supabase.from('stores').insert(storeData);
+        const { error: storeErr } = await supabase.from('stores').insert({ ...storeData, birth_date: formData.birthDate || null });
         if (storeErr) throw new Error(`Erro ao criar loja: ${storeErr.message}`);
       }
     } 
@@ -861,9 +885,13 @@ export default function MobileAuth() {
 
       const { data: existingCourier } = await supabase.from('couriers').select('id').eq('user_id', userId).maybeSingle();
       if (existingCourier) {
-        await supabase.from('couriers').update(courierData).eq('id', existingCourier.id);
+        const { error: updateCourierError } = await supabase
+          .from('couriers')
+          .update({ ...courierData, birth_date: formData.birthDate || null })
+          .eq('id', existingCourier.id);
+        if (updateCourierError) throw new Error(`Erro ao atualizar motoboy: ${updateCourierError.message}`);
       } else {
-        const { error: courierErr } = await supabase.from('couriers').insert(courierData);
+        const { error: courierErr } = await supabase.from('couriers').insert({ ...courierData, birth_date: formData.birthDate || null });
         if (courierErr) throw new Error(`Erro ao criar motoboy: ${courierErr.message}`);
       }
     }

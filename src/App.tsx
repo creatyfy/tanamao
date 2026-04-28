@@ -35,11 +35,14 @@ function App() {
       setPartnerCheckLoading(true);
 
       try {
-        const { data: draftRow } = await supabase
+        const { data: draftRow, error: draftError } = await supabase
           .from('registration_drafts')
           .select('draft')
           .eq('user_id', user.id)
           .maybeSingle();
+        if (draftError) {
+          throw new Error(`Falha ao carregar registration_drafts: ${draftError.message}`);
+        }
         const draft = draftRow?.draft;
         const cleanPhone = typeof draft?.phone === 'string' ? draft.phone.replace(/\D/g, '') : profile.phone;
         const cleanCep = typeof draft?.cep === 'string' ? draft.cep.replace(/\D/g, '') : '00000000';
@@ -94,13 +97,22 @@ function App() {
             };
 
             if (addressId) {
-              await supabase.from('addresses').update(addressPayload).eq('id', addressId);
+              const { error: addressUpdateError } = await supabase
+                .from('addresses')
+                .update(addressPayload)
+                .eq('id', addressId);
+              if (addressUpdateError) throw addressUpdateError;
             } else {
-              const { data: newAddress } = await supabase.from('addresses').insert(addressPayload).select('id').single();
+              const { data: newAddress, error: addressInsertError } = await supabase
+                .from('addresses')
+                .insert(addressPayload)
+                .select('id')
+                .single();
+              if (addressInsertError) throw addressInsertError;
               addressId = newAddress?.id || null;
             }
 
-            const { data: insertedStore } = await supabase
+            const { data: insertedStore, error: storeInsertError } = await supabase
               .from('stores')
               .insert({
                 owner_id: user.id,
@@ -125,10 +137,15 @@ function App() {
               })
               .select('id, is_approved, status')
               .maybeSingle();
+            if (storeInsertError) throw storeInsertError;
 
             storeData = insertedStore || null;
             if (storeData?.id) {
-              await supabase.from('registration_drafts').delete().eq('user_id', user.id);
+              const { error: deleteDraftError } = await supabase
+                .from('registration_drafts')
+                .delete()
+                .eq('user_id', user.id);
+              if (deleteDraftError) console.warn('Falha ao limpar registration_drafts da loja:', deleteDraftError);
             }
           }
 
@@ -191,11 +208,15 @@ function App() {
               })
               .select('id, is_approved, status')
               .maybeSingle();
-            if (courierInsertError) console.error('Erro ao criar courier:', courierInsertError);
+            if (courierInsertError) throw courierInsertError;
 
             courierData = insertedCourier || null;
             if (courierData?.id) {
-              await supabase.from('registration_drafts').delete().eq('user_id', user.id);
+              const { error: deleteDraftError } = await supabase
+                .from('registration_drafts')
+                .delete()
+                .eq('user_id', user.id);
+              if (deleteDraftError) console.warn('Falha ao limpar registration_drafts do motoboy:', deleteDraftError);
             }
           }
 
