@@ -283,6 +283,43 @@ function App() {
     return () => { cancelled = true; };
   }, [user, profile]);
 
+  // Polling: verifica aprovação a cada 15 segundos quando está na tela de análise
+  useEffect(() => {
+    if (!forcePendingApproval && profile?.is_active) return;
+    if (!user || !profile) return;
+    if (profile.role !== 'store_owner' && profile.role !== 'courier') return;
+
+    const checkApproval = async () => {
+      if (profile.role === 'store_owner') {
+        const { data } = await supabase
+          .from('stores')
+          .select('is_approved, status')
+          .eq('owner_id', user.id)
+          .maybeSingle();
+        if (data?.is_approved === true || data?.status === 'active') {
+          await supabase.from('users').update({ is_active: true }).eq('id', user.id);
+          await refreshProfile();
+          setForcePendingApproval(false);
+        }
+      } else if (profile.role === 'courier') {
+        const { data } = await supabase
+          .from('couriers')
+          .select('is_approved, status')
+          .eq('user_id', user.id)
+          .maybeSingle();
+        if (data?.is_approved === true || data?.status === 'active') {
+          await supabase.from('users').update({ is_active: true }).eq('id', user.id);
+          await refreshProfile();
+          setForcePendingApproval(false);
+        }
+      }
+    };
+
+    const interval = setInterval(checkApproval, 15000);
+    checkApproval(); // verifica imediatamente
+    return () => clearInterval(interval);
+  }, [forcePendingApproval, profile?.is_active, user?.id, profile?.role]);
+
   if (loading || partnerCheckLoading) {
     return (
       <div className="w-full h-screen flex flex-col items-center justify-center bg-brand-primary text-white" style={{paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)'}}>
