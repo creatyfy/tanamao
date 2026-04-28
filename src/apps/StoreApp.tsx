@@ -1047,61 +1047,72 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     }
   };
 
-  const handleUpdateStoreSettings = async (e: React.FormEvent) => {
+  const handleUpdateStoreSettings = async (
+    e: React.FormEvent,
+    section: 'profile' | 'delivery' | 'payment' = 'profile'
+  ) => {
     e.preventDefault();
     if (!store || !user) return;
     setSettingsLoading(true);
 
     try {
-      let updatedLogoUrl = settingsForm.logo_url;
-      let updatedBannerUrl = settingsForm.banner_url; 
+      const storeUpdateData: any = {};
 
-      if (logoFile) {
-        const fileExt = logoFile.name.split('.').pop();
-        const fileName = `store_logo_${store.id}_${Date.now()}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from('stores')
-          .upload(fileName, logoFile, { cacheControl: '3600', upsert: true });
+      if (section === 'profile') {
+        let updatedLogoUrl = settingsForm.logo_url;
+        let updatedBannerUrl = settingsForm.banner_url;
 
-        if (uploadError) {
-          console.error("Upload error:", uploadError);
-          throw new Error('Erro ao fazer upload do logo.');
+        if (logoFile) {
+          const fileExt = logoFile.name.split('.').pop();
+          const fileName = `store_logo_${store.id}_${Date.now()}.${fileExt}`;
+
+          const { error: uploadError } = await supabase.storage
+            .from('stores')
+            .upload(fileName, logoFile, { cacheControl: '3600', upsert: true });
+
+          if (uploadError) {
+            console.error("Upload error:", uploadError);
+            throw new Error('Erro ao fazer upload do logo.');
+          }
+
+          const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
+          updatedLogoUrl = publicUrlData.publicUrl;
         }
 
-        const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
-        updatedLogoUrl = publicUrlData.publicUrl;
-      }
+        if (bannerFile) {
+          const fileExt = bannerFile.name.split('.').pop();
+          const fileName = `store_banner_${store.id}_${Date.now()}.${fileExt}`;
 
-      if (bannerFile) { 
-        const fileExt = bannerFile.name.split('.').pop();
-        const fileName = `store_banner_${store.id}_${Date.now()}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from('stores')
-          .upload(fileName, bannerFile, { cacheControl: '3600', upsert: true });
+          const { error: uploadError } = await supabase.storage
+            .from('stores')
+            .upload(fileName, bannerFile, { cacheControl: '3600', upsert: true });
 
-        if (uploadError) {
-          console.error("Upload banner error:", uploadError);
-          throw new Error('Erro ao fazer upload do banner.');
+          if (uploadError) {
+            console.error("Upload banner error:", uploadError);
+            throw new Error('Erro ao fazer upload do banner.');
+          }
+
+          const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
+          updatedBannerUrl = publicUrlData.publicUrl;
         }
 
-        const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
-        updatedBannerUrl = publicUrlData.publicUrl;
+        storeUpdateData.name = settingsForm.name;
+        storeUpdateData.phone = settingsForm.phone;
+        storeUpdateData.logo_url = updatedLogoUrl;
+        storeUpdateData.banner_url = updatedBannerUrl;
       }
 
-      const storeUpdateData = {
-        name: settingsForm.name,
-        phone: settingsForm.phone,
-        logo_url: updatedLogoUrl,
-        banner_url: updatedBannerUrl, 
-        delivery_fee: parseFloat(settingsForm.delivery_fee),
-        min_order_value: parseFloat(settingsForm.min_order_value),
-        avg_prep_time_min: parseInt(settingsForm.avg_prep_time_min),
-        accepts_pix: settingsForm.accepts_pix,
-        accepts_card: settingsForm.accepts_card,
-        accepts_cash: settingsForm.accepts_cash,
-      };
+      if (section === 'delivery') {
+        storeUpdateData.delivery_fee = parseFloat(settingsForm.delivery_fee);
+        storeUpdateData.min_order_value = parseFloat(settingsForm.min_order_value);
+        storeUpdateData.avg_prep_time_min = parseInt(settingsForm.avg_prep_time_min, 10);
+      }
+
+      if (section === 'payment') {
+        storeUpdateData.accepts_pix = settingsForm.accepts_pix;
+        storeUpdateData.accepts_card = settingsForm.accepts_card;
+        storeUpdateData.accepts_cash = settingsForm.accepts_cash;
+      }
 
       const { error: storeError } = await supabase
         .from('stores')
@@ -1110,14 +1121,20 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
       if (storeError) throw storeError;
 
-      const { error: userPhoneError } = await supabase
-        .from('users')
-        .update({ phone: settingsForm.phone })
-        .eq('id', user.id);
-      
-      if (userPhoneError) console.warn("Could not update user's phone:", userPhoneError.message);
+      if (section === 'profile') {
+        const { error: userPhoneError } = await supabase
+          .from('users')
+          .update({ phone: settingsForm.phone })
+          .eq('id', user.id);
+
+        if (userPhoneError) console.warn("Could not update user's phone:", userPhoneError.message);
+      }
 
       setStore(prev => prev ? { ...prev, ...storeUpdateData } : null);
+      if (section === 'profile') {
+        setLogoFile(null);
+        setBannerFile(null);
+      }
       showToast('Configurações da loja atualizadas!', 'success');
     } catch (error: any) {
       showToast(error.message || 'Erro ao atualizar configurações da loja.', 'error');
@@ -2025,7 +2042,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
               {/* Store Profile Settings */}
               <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                 <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><StoreIcon size={20} className="mr-2 text-brand-primary"/> Perfil da Loja</h3>
-                <form onSubmit={handleUpdateStoreSettings} className="space-y-5">
+                <form onSubmit={(e) => handleUpdateStoreSettings(e, 'profile')} className="space-y-5">
                   <div className="flex flex-col items-center justify-center mb-4">
                     <label htmlFor="logo-upload" className="w-32 h-32 rounded-full bg-gray-100 border-4 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative shadow-inner cursor-pointer hover:bg-gray-200 transition-colors group">
                       {logoPreview ? (
@@ -2104,7 +2121,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
               {/* Delivery Settings */}
               <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                 <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><Bike size={20} className="mr-2 text-brand-primary"/> Configurações de Entrega</h3>
-                <form onSubmit={handleUpdateStoreSettings} className="space-y-5">
+                <form onSubmit={(e) => handleUpdateStoreSettings(e, 'delivery')} className="space-y-5">
                   <div>
                     <label htmlFor="delivery_fee" className="block text-sm font-bold text-gray-700 mb-1">Taxa de Entrega Padrão (R$)</label>
                     <input type="number" step="0.01" id="delivery_fee" name="delivery_fee" value={settingsForm.delivery_fee} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
@@ -2126,7 +2143,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
               {/* Payment Methods */}
               <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
                 <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><CreditCard size={20} className="mr-2 text-brand-primary"/> Formas de Pagamento</h3>
-                <form onSubmit={handleUpdateStoreSettings} className="space-y-4">
+                <form onSubmit={(e) => handleUpdateStoreSettings(e, 'payment')} className="space-y-4">
                   <label className="flex items-center text-gray-700 font-medium">
                     <input type="checkbox" name="accepts_pix" checked={settingsForm.accepts_pix} onChange={handleSettingsChange} className="mr-3 w-5 h-5 accent-brand-primary" />
                     Aceita PIX
