@@ -10,7 +10,7 @@ import { supabase } from './lib/supabase';
 import { Loader2, Clock, XCircle } from 'lucide-react';
 
 function App() {
-  const { user, profile, loading, signOut, isPasswordRecovery, clearRecovery } = useAuth();
+  const { user, profile, loading, signOut, isPasswordRecovery, clearRecovery, refreshProfile } = useAuth();
   const [partnerCheckLoading, setPartnerCheckLoading] = useState(false);
   const [forcePendingApproval, setForcePendingApproval] = useState(false);
 
@@ -265,9 +265,10 @@ function App() {
           // (evita desativar usuário aprovado com cache desatualizado)
           if (!cancelled) setForcePendingApproval(true);
         } else {
-          // Usuário aprovado — garantir que is_active está true
+          // Usuário aprovado — garantir que is_active está true e atualizar profile
           if (!profile.is_active) {
             await supabase.from('users').update({ is_active: true }).eq('id', user.id);
+            await refreshProfile();
           }
           if (!cancelled) setForcePendingApproval(false);
         }
