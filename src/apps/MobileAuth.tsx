@@ -59,6 +59,50 @@ export default function MobileAuth() {
     fullName: '', rg: '', birthDate: '', vehicleType: 'motorcycle', vehicleBrand: '', vehicleModel: '', vehicleYear: '', licensePlate: '', operationCity: ''
   });
 
+  const buildRegistrationDraft = (data: any, role: 'store' | 'courier') => {
+    const baseDraft: any = {
+      phone: data.phone,
+      cep: data.cep,
+      street: data.street,
+      number: data.number,
+      complement: data.complement,
+      neighborhood: data.neighborhood,
+      city: data.city,
+      state: data.state,
+      pixKey: data.pixKey,
+      birthDate: data.birthDate,
+    };
+
+    if (role === 'store') {
+      return {
+        ...baseDraft,
+        storeName: data.storeName,
+        ownerName: data.ownerName,
+        cnpj: data.cnpj,
+        description: data.description,
+        category: data.category,
+        prepTime: data.prepTime,
+        minOrder: data.minOrder,
+        deliveryFee: data.deliveryFee,
+        acceptsPix: data.acceptsPix,
+        acceptsCard: data.acceptsCard,
+        acceptsCash: data.acceptsCash,
+      };
+    }
+
+    return {
+      ...baseDraft,
+      cpf: data.cpf,
+      fullName: data.fullName,
+      vehicleType: data.vehicleType,
+      vehicleBrand: data.vehicleBrand,
+      vehicleModel: data.vehicleModel,
+      vehicleYear: data.vehicleYear,
+      licensePlate: data.licensePlate,
+      operationCity: data.operationCity,
+    };
+  };
+
   const resendConfirmationLink = async (email: string) => {
     const cleanEmail = email.trim();
     if (!cleanEmail) return false;
@@ -196,6 +240,19 @@ export default function MobileAuth() {
           if (pending) {
             try {
               const parsed = JSON.parse(pending);
+              if ((parsed.role === 'store' || parsed.role === 'courier') && session.user?.id) {
+                const partnerRole = parsed.role === 'store' ? 'store_owner' : 'courier';
+                const draftPayload = buildRegistrationDraft(parsed.formData || {}, parsed.role);
+                const { error: persistDraftError } = await supabase.from('registration_drafts').upsert({
+                  user_id: session.user.id,
+                  draft: draftPayload,
+                  role: partnerRole,
+                  created_at: new Date().toISOString()
+                }, { onConflict: 'user_id' });
+                if (persistDraftError) {
+                  console.error('Erro ao persistir registration_drafts após confirmação:', persistDraftError);
+                }
+              }
               setRegisterRole(parsed.role);
               setFormData(parsed.formData);
               setAuthMode('register');
@@ -636,37 +693,9 @@ export default function MobileAuth() {
     let userId = session?.user?.id;
 
     if (!userId) {
-      const registrationDraft = {
-        phone: formData.phone,
-        cep: formData.cep,
-        street: formData.street,
-        number: formData.number,
-        complement: formData.complement,
-        neighborhood: formData.neighborhood,
-        city: formData.city,
-        state: formData.state,
-        storeName: formData.storeName,
-        ownerName: formData.ownerName,
-        cnpj: formData.cnpj,
-        description: formData.description,
-        category: formData.category,
-        prepTime: formData.prepTime,
-        minOrder: formData.minOrder,
-        deliveryFee: formData.deliveryFee,
-        acceptsPix: formData.acceptsPix,
-        acceptsCard: formData.acceptsCard,
-        acceptsCash: formData.acceptsCash,
-        pixKey: formData.pixKey,
-        cpf: formData.cpf,
-        fullName: formData.fullName,
-        vehicleType: formData.vehicleType,
-        vehicleBrand: formData.vehicleBrand,
-        vehicleModel: formData.vehicleModel,
-        vehicleYear: formData.vehicleYear,
-        licensePlate: formData.licensePlate,
-        operationCity: formData.operationCity,
-        birthDate: formData.birthDate,
-      };
+      const registrationDraft = (registerRole === 'store' || registerRole === 'courier')
+        ? buildRegistrationDraft(formData, registerRole)
+        : null;
 
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: emailClean,
@@ -701,7 +730,7 @@ export default function MobileAuth() {
           throw signUpError;
         }
       } else {
-        if (signUpData.user?.id && (registerRole === 'store' || registerRole === 'courier')) {
+        if (signUpData.user?.id && signUpData.session && registrationDraft && (registerRole === 'store' || registerRole === 'courier')) {
           const { error: draftError } = await supabase.from('registration_drafts').upsert({
             user_id: signUpData.user.id,
             draft: registrationDraft,
