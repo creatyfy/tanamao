@@ -326,7 +326,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           .order('created_at', { ascending: false });
 
         if (reviewsError) {
-          throw new Error(`reviews(target_id=${storeData.id}): ${reviewsError.message}`);
+          console.warn(`Aviso reviews(target_id=${storeData.id}):`, reviewsError.message);
         }
           
         let trueAvg = 0;
@@ -344,7 +344,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             .update({ avg_rating: trueAvg })
             .eq('id', storeData.id);
           if (updateRatingError) {
-            throw new Error(`stores.update(avg_rating) id=${storeData.id}: ${updateRatingError.message}`);
+            console.warn(`Aviso ao atualizar avg_rating id=${storeData.id}:`, updateRatingError.message);
           }
           storeData.avg_rating = trueAvg;
         }
