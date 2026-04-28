@@ -23,3 +23,4 @@ O **Tá Na Mão** é um sistema completo de marketplace para delivery, contando 
 - Supabase (PostgreSQL, Auth, Storage, Realtime)
 - PWA & Web Push Notifications
 ...
+///
