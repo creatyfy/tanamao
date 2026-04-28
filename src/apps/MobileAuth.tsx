@@ -233,7 +233,7 @@ export default function MobileAuth() {
       if (session) {
         checkPendingApproval(session.user.id).then((isPending) => {
           if (isPending) return;
-          restorePendingRegistrationFromMetadata(session.user).then((restoredByMetadata) => {
+          restorePendingRegistrationFromMetadata(session.user).then(async (restoredByMetadata) => {
           if (restoredByMetadata) return;
 
           const pending = localStorage.getItem('pendingRegistration');
