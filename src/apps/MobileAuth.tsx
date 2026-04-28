@@ -668,9 +668,10 @@ export default function MobileAuth() {
           }, { onConflict: 'user_id' });
           if (draftError) {
             console.error('Erro ao salvar draft:', draftError);
-            throw new Error('Erro ao salvar dados do cadastro. Tente novamente.');
+            showToast('Não foi possível salvar o rascunho no servidor agora. Você ainda pode confirmar o e-mail e concluir o cadastro.', 'error');
+          } else {
+            console.log('Draft salvo com sucesso para user:', signUpData.user.id);
           }
-          console.log('Draft salvo com sucesso para user:', signUpData.user.id);
         } else if (!signUpData.user?.id) {
           throw new Error('Erro ao criar usuário. Tente novamente.');
         }
