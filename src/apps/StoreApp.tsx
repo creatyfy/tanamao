@@ -437,7 +437,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       .eq('store_id', storeId)
       .in('status', ['pending', 'preparing', 'ready', 'delivering'])
       .order('created_at', { ascending: false });
-    if (error) throw new Error(`orders(store_id=${storeId}): ${error.message}`);
+    if (error) { console.warn(`orders(store_id=${storeId}):`, error.message); return; }
     if (data) setOrders(data);
   };
 
@@ -503,7 +503,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       .select('*, product_categories(name)')
       .eq('store_id', storeId)
       .order('name');
-    if (error) throw new Error(`products(store_id=${storeId}): ${error.message}`);
+    if (error) { console.warn(`products(store_id=${storeId}):`, error.message); return; }
     if (data) setProducts(data);
   };
 
@@ -512,7 +512,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       .select('*')
       .eq('store_id', storeId)
       .order('sort_order', { ascending: true });
-    if (error) throw new Error(`product_categories(store_id=${storeId}): ${error.message}`);
+    if (error) { console.warn(`product_categories(store_id=${storeId}):`, error.message); return; }
     if (data) setProductCategories(data);
   };
 
@@ -522,7 +522,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       .select('*')
       .eq('store_id', storeId)
       .order('created_at', { ascending: false });
-    if (error) throw new Error(`coupons(store_id=${storeId}): ${error.message}`);
+    if (error) { console.warn(`coupons(store_id=${storeId}):`, error.message); return; }
     if (data) setCoupons(data);
   };
 
