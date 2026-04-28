@@ -240,19 +240,6 @@ export default function MobileAuth() {
           if (pending) {
             try {
               const parsed = JSON.parse(pending);
-              if ((parsed.role === 'store' || parsed.role === 'courier') && session.user?.id) {
-                const partnerRole = parsed.role === 'store' ? 'store_owner' : 'courier';
-                const draftPayload = buildRegistrationDraft(parsed.formData || {}, parsed.role);
-                const { error: persistDraftError } = await supabase.from('registration_drafts').upsert({
-                  user_id: session.user.id,
-                  draft: draftPayload,
-                  role: partnerRole,
-                  created_at: new Date().toISOString()
-                }, { onConflict: 'user_id' });
-                if (persistDraftError) {
-                  console.error('Erro ao persistir registration_drafts após confirmação:', persistDraftError);
-                }
-              }
               setRegisterRole(parsed.role);
               setFormData(parsed.formData);
               setAuthMode('register');
@@ -730,18 +717,17 @@ export default function MobileAuth() {
           throw signUpError;
         }
       } else {
-        if (signUpData.user?.id && signUpData.session && registrationDraft && (registerRole === 'store' || registerRole === 'courier')) {
-          const { error: draftError } = await supabase.from('registration_drafts').upsert({
-            user_id: signUpData.user.id,
-            draft: registrationDraft,
-            role: roleMap[registerRole],
-            created_at: new Date().toISOString()
-          }, { onConflict: 'user_id' });
-          if (draftError) {
-            console.error('Erro ao salvar draft:', draftError);
-            showToast('Não foi possível salvar o rascunho no servidor agora. Você ainda pode confirmar o e-mail e concluir o cadastro.', 'error');
-          } else {
-            console.log('Draft salvo com sucesso para user:', signUpData.user.id);
+        if (signUpData.user?.id && registrationDraft && (registerRole === 'store' || registerRole === 'courier')) {
+          const { data: draftResult } = await supabase.functions.invoke('save-registration-draft', {
+            body: {
+              user_id: signUpData.user.id,
+              draft: registrationDraft,
+              role: roleMap[registerRole]
+            }
+          });
+
+          if (!draftResult?.success) {
+            throw new Error('Erro ao salvar dados do cadastro. Tente novamente.');
           }
         } else if (!signUpData.user?.id) {
           throw new Error('Erro ao criar usuário. Tente novamente.');
