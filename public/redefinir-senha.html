@@ -94,8 +94,8 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script>
+    <script type="module">
+    import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
     console.log('URL completa:', window.location.href)
     console.log('Hash:', window.location.hash)
     console.log('Search:', window.location.search)
@@ -113,7 +113,7 @@
 
     const SUPABASE_URL = 'https://fgjlyvkdkhxvzsgxuuad.supabase.co'
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnamx5dmtka2h4dnpzZ3h1dWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2MDIzNjEsImV4cCI6MjA1OTE3ODM2MX0.hfFbkO3TgkHFQRQOsVn-RHoNIYaLXoDEa0s5FgTsFKo'
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         autoRefreshToken: false,
         persistSession: false
