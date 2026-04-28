@@ -717,7 +717,14 @@ export default function MobileAuth() {
           throw signUpError;
         }
       } else {
-        if (signUpData.user?.id && registrationDraft && (registerRole === 'store' || registerRole === 'courier')) {
+        if (!signUpData.user?.id) {
+          throw new Error('Erro ao criar usuário. Tente novamente.');
+        }
+
+        userId = signUpData.user.id;
+
+        // Salvar draft imediatamente via Edge Function (service role, sem precisar de sessão)
+        if (registrationDraft && (registerRole === 'store' || registerRole === 'courier')) {
           const { data: draftResult } = await supabase.functions.invoke('save-registration-draft', {
             body: {
               user_id: signUpData.user.id,
@@ -725,24 +732,18 @@ export default function MobileAuth() {
               role: roleMap[registerRole]
             }
           });
-
           if (!draftResult?.success) {
-            throw new Error('Erro ao salvar dados do cadastro. Tente novamente.');
+            console.error('Erro ao salvar draft — continuando mesmo assim');
           }
-        } else if (!signUpData.user?.id) {
-          throw new Error('Erro ao criar usuário. Tente novamente.');
         }
 
-        // Se a confirmação de e-mail estiver ativada, a sessão será nula
+        // Se confirmação de email está ativa, avisar o usuário mas os dados já estão salvos
         if (!signUpData.session) {
-          const safeFormData = { ...formData, password: 'dummy_password_not_used' };
-          localStorage.setItem('pendingRegistration', JSON.stringify({ role: registerRole, formData: safeFormData }));
-          showToast('Verifique seu e-mail para confirmar a conta. Depois, retorne ao app.', 'success');
+          showToast('Cadastro recebido! Confirme seu e-mail para ativar o acesso.', 'success');
           setAuthMode('login');
           setFormData(prev => ({ ...prev, password: '' }));
-          return; // Para a execução aqui até o e-mail ser confirmado
+          return;
         }
-        userId = signUpData.user?.id;
       }
     }
 
