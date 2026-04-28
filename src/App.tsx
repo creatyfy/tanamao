@@ -35,13 +35,27 @@ function App() {
       setPartnerCheckLoading(true);
 
       try {
-        const { data: draftRow, error: draftError } = await supabase
-          .from('registration_drafts')
-          .select('draft')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        if (draftError) {
-          throw new Error(`Falha ao carregar registration_drafts: ${draftError.message}`);
+        // Buscar draft com retry (corrige race condition entre signUp e save-registration-draft)
+        let draftRow: { draft?: any } | null = null;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const { data, error: draftError } = await supabase
+            .from('registration_drafts')
+            .select('draft')
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          if (draftError) {
+            throw new Error(`Falha ao carregar registration_drafts: ${draftError.message}`);
+          }
+
+          if (data?.draft && (data.draft.cnpj || data.draft.cpf)) {
+            draftRow = data;
+            break;
+          }
+
+          if (attempt < 2) {
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
         }
         const draft = draftRow?.draft;
         const cleanPhone = typeof draft?.phone === 'string' ? draft.phone.replace(/\D/g, '') : profile.phone;
