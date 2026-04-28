@@ -304,15 +304,30 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const fetchStoreData = async () => {
     setLoading(true);
     try {
-      const { data: storeData } = await supabase.from('stores').select('*, addresses(*)').eq('owner_id', user!.id).maybeSingle();
-      if (storeData) {
+      const { data: storeData, error: storeError } = await supabase
+        .from('stores')
+        .select('*, addresses(*)')
+        .eq('owner_id', user!.id)
+        .maybeSingle();
+
+      if (storeError) {
+        throw new Error(`stores(owner_id=${user!.id}): ${storeError.message}`);
+      }
+
+      if (!storeData) {
+        throw new Error(`Nenhuma loja encontrada para owner_id=${user!.id}`);
+      }
         
-        const { data: storeReviews } = await supabase
+        const { data: storeReviews, error: reviewsError } = await supabase
           .from('reviews')
           .select('*, users:reviewer_id(name)')
           .eq('target_type', 'store')
           .eq('target_id', storeData.id)
           .order('created_at', { ascending: false });
+
+        if (reviewsError) {
+          throw new Error(`reviews(target_id=${storeData.id}): ${reviewsError.message}`);
+        }
           
         let trueAvg = 0;
         if (storeReviews && storeReviews.length > 0) {
@@ -324,14 +339,22 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         }
         
         if (storeData.avg_rating !== trueAvg) {
-          await supabase.from('stores').update({ avg_rating: trueAvg }).eq('id', storeData.id);
+          const { error: updateRatingError } = await supabase
+            .from('stores')
+            .update({ avg_rating: trueAvg })
+            .eq('id', storeData.id);
+          if (updateRatingError) {
+            throw new Error(`stores.update(avg_rating) id=${storeData.id}: ${updateRatingError.message}`);
+          }
           storeData.avg_rating = trueAvg;
         }
 
         setStore(storeData);
-        fetchOrders(storeData.id);
-        fetchProducts(storeData.id);
-        fetchProductCategories(storeData.id);
+        await Promise.all([
+          fetchOrders(storeData.id),
+          fetchProducts(storeData.id),
+          fetchProductCategories(storeData.id),
+        ]);
         
         if (storeChatsChannelRef.current) {
           supabase.removeChannel(storeChatsChannelRef.current);
@@ -355,9 +378,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           }).subscribe();
 
         storeChatsChannelRef.current = channelChats;
-      }
     } catch (error) {
-      console.error('Erro ao carregar loja:', error);
       console.error('Erro completo ao carregar dados da loja:', error);
       showToast('Erro ao carregar dados da loja', 'error');
     } finally {
@@ -411,11 +432,12 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   };
 
   const fetchOrders = async (storeId: number) => {
-    const { data } = await supabase.from('orders')
+    const { data, error } = await supabase.from('orders')
       .select(`*, users:client_id(name, phone), order_items(*), addresses:delivery_address_id(*), order_chats(*), couriers(users(name, phone), vehicle_type, license_plate), deliveries(id, status, created_at)`)
       .eq('store_id', storeId)
       .in('status', ['pending', 'preparing', 'ready', 'delivering'])
       .order('created_at', { ascending: false });
+    if (error) throw new Error(`orders(store_id=${storeId}): ${error.message}`);
     if (data) setOrders(data);
   };
 
@@ -477,23 +499,30 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   }, []);
 
   const fetchProducts = async (storeId: number) => {
-    const { data } = await supabase.from('products')
+    const { data, error } = await supabase.from('products')
       .select('*, product_categories(name)')
       .eq('store_id', storeId)
       .order('name');
+    if (error) throw new Error(`products(store_id=${storeId}): ${error.message}`);
     if (data) setProducts(data);
   };
 
   const fetchProductCategories = async (storeId: number) => {
-    const { data } = await supabase.from('product_categories')
+    const { data, error } = await supabase.from('product_categories')
       .select('*')
       .eq('store_id', storeId)
       .order('sort_order', { ascending: true });
+    if (error) throw new Error(`product_categories(store_id=${storeId}): ${error.message}`);
     if (data) setProductCategories(data);
   };
 
   const fetchCoupons = async (storeId: number) => {
-    const { data } = await supabase.from('coupons').select('*').eq('store_id', storeId).order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('coupons')
+      .select('*')
+      .eq('store_id', storeId)
+      .order('created_at', { ascending: false });
+    if (error) throw new Error(`coupons(store_id=${storeId}): ${error.message}`);
     if (data) setCoupons(data);
   };
 
