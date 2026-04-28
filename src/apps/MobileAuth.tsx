@@ -620,12 +620,19 @@ export default function MobileAuth() {
         }
       } else {
         if (signUpData.user?.id && (registerRole === 'store' || registerRole === 'courier')) {
-          await supabase.from('registration_drafts').upsert({
+          const { error: draftError } = await supabase.from('registration_drafts').upsert({
             user_id: signUpData.user.id,
             draft: registrationDraft,
             role: roleMap[registerRole],
             created_at: new Date().toISOString()
           }, { onConflict: 'user_id' });
+          if (draftError) {
+            console.error('Erro ao salvar draft:', draftError);
+            throw new Error('Erro ao salvar dados do cadastro. Tente novamente.');
+          }
+          console.log('Draft salvo com sucesso para user:', signUpData.user.id);
+        } else if (!signUpData.user?.id) {
+          throw new Error('Erro ao criar usuário. Tente novamente.');
         }
 
         // Se a confirmação de e-mail estiver ativada, a sessão será nula
