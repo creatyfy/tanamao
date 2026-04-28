@@ -16,6 +16,17 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const parseDraftInt = (value: any) => {
+      if (value === null || value === undefined || value === '') return null;
+      const parsed = Number.parseInt(String(value).trim(), 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+    const parseDraftDecimal = (value: any) => {
+      if (value === null || value === undefined || value === '') return null;
+      const normalized = String(value).trim().replace(',', '.');
+      const parsed = Number.parseFloat(normalized);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
 
     const ensurePartnerRecord = async () => {
       if (!user || !profile) return;
@@ -54,6 +65,9 @@ function App() {
             if (!safeDraft.city || safeDraft.city === 'Não informado') missingFields.push('Cidade');
             if (!safeDraft.cep || safeDraft.cep.replace(/\D/g, '').length < 8) missingFields.push('CEP');
             if (cleanCnpj?.length === 11 && !safeDraft.birthDate) missingFields.push('Data de nascimento');
+            if (parseDraftInt(safeDraft.prepTime) === null) missingFields.push('Tempo de preparo');
+            if (parseDraftDecimal(safeDraft.deliveryFee) === null) missingFields.push('Taxa de entrega');
+            if (!safeDraft.pixKey) missingFields.push('Chave PIX');
 
             if (missingFields.length > 0) {
               console.error('Cadastro de loja incompleto, campos faltando:', missingFields);
@@ -96,9 +110,9 @@ function App() {
                 phone: cleanPhone,
                 description: safeDraft.description || null,
                 global_category_id: safeDraft.category ? parseInt(safeDraft.category) : null,
-                avg_prep_time_min: safeDraft.prepTime ? parseInt(safeDraft.prepTime) : 30,
-                min_order_value: safeDraft.minOrder ? parseFloat(safeDraft.minOrder) : 0,
-                delivery_fee: safeDraft.deliveryFee ? parseFloat(safeDraft.deliveryFee) : 0,
+                avg_prep_time_min: parseDraftInt(safeDraft.prepTime),
+                min_order_value: parseDraftDecimal(safeDraft.minOrder) ?? 0,
+                delivery_fee: parseDraftDecimal(safeDraft.deliveryFee),
                 accepts_pix: safeDraft.acceptsPix ?? true,
                 accepts_card: safeDraft.acceptsCard ?? true,
                 accepts_cash: safeDraft.acceptsCash ?? false,
