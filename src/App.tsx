@@ -35,7 +35,7 @@ function App() {
       setPartnerCheckLoading(true);
 
       try {
-        // Buscar draft com retry (corrige race condition entre signUp e save-registration-draft)
+        // Buscar draft com retry
         let draftRow: { draft?: any } | null = null;
         for (let attempt = 0; attempt < 3; attempt++) {
           const { data, error: draftError } = await supabase
@@ -43,40 +43,32 @@ function App() {
             .select('draft')
             .eq('user_id', user.id)
             .maybeSingle();
-
-          if (draftError) {
-            throw new Error(`Falha ao carregar registration_drafts: ${draftError.message}`);
-          }
-
-          if (data?.draft && (data.draft.cnpj || data.draft.cpf)) {
-            draftRow = data;
-            break;
-          }
-
-          if (attempt < 2) {
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-          }
+          if (draftError) throw new Error(`Falha ao carregar registration_drafts: ${draftError.message}`);
+          if (data?.draft && (data.draft.cnpj || data.draft.cpf)) { draftRow = data; break; }
+          if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 2000));
         }
         const draft = draftRow?.draft;
         const cleanPhone = typeof draft?.phone === 'string' ? draft.phone.replace(/\D/g, '') : profile.phone;
         const cleanCep = typeof draft?.cep === 'string' ? draft.cep.replace(/\D/g, '') : '00000000';
-        let needsPendingScreen = !profile.is_active;
 
         if (profile.role === 'store_owner') {
           const { data: store } = await supabase
             .from('stores')
-            .select('id, is_approved, status')
+            .select('id, is_approved, status, cnpj')
             .eq('owner_id', user.id)
             .maybeSingle();
 
-          let storeData = store;
-          // Se loja existe mas está incompleta (sem CNPJ), tenta atualizar com o draft
-          const storeNeedsUpdate = store && !store.cnpj;
-          if (!storeData || storeNeedsUpdate) {
+          // Loja aprovada — libera acesso
+          if (store?.is_approved === true || store?.status === 'active') {
+            if (!cancelled) setForcePendingApproval(false);
+            return;
+          }
+
+          // Loja não existe ou está incompleta — criar/atualizar com draft
+          if (!store || !store.cnpj) {
             const safeDraft = draft && typeof draft === 'object' ? draft : {};
             const cleanCnpj = typeof safeDraft.cnpj === 'string' ? safeDraft.cnpj.replace(/\D/g, '') : null;
 
-            // Validação: bloqueia criação se dados obrigatórios estiverem faltando
             const missingFields: string[] = [];
             if (!cleanCnpj || (cleanCnpj.length !== 11 && cleanCnpj.length !== 14)) missingFields.push('CPF/CNPJ');
             if (!safeDraft.street || safeDraft.street === 'Não informado') missingFields.push('Endereço');
@@ -89,104 +81,52 @@ function App() {
             if (!safeDraft.pixKey) missingFields.push('Chave PIX');
 
             if (missingFields.length > 0) {
-              console.error('Cadastro de loja incompleto, campos faltando:', missingFields);
+              console.error('Cadastro de loja incompleto:', missingFields);
               if (!cancelled) setForcePendingApproval(true);
-              if (!cancelled) setPartnerCheckLoading(false);
               return;
             }
-            const { data: existingAddress } = await supabase
-              .from('addresses')
-              .select('id')
-              .eq('user_id', user.id)
-              .maybeSingle();
 
+            const { data: existingAddress } = await supabase.from('addresses').select('id').eq('user_id', user.id).maybeSingle();
             let addressId = existingAddress?.id || null;
             const addressPayload = {
-              user_id: user.id,
-              street: safeDraft.street || 'Não informado',
-              number: safeDraft.number || 'S/N',
-              complement: safeDraft.complement || null,
-              neighborhood: safeDraft.neighborhood || 'Não informado',
-              city: safeDraft.city || 'Não informado',
-              state: safeDraft.state || 'SP',
-              zip_code: cleanCep
+              user_id: user.id, street: safeDraft.street, number: safeDraft.number || 'S/N',
+              complement: safeDraft.complement || null, neighborhood: safeDraft.neighborhood,
+              city: safeDraft.city, state: safeDraft.state || 'SP', zip_code: cleanCep
             };
-
             if (addressId) {
-              const { error: addressUpdateError } = await supabase
-                .from('addresses')
-                .update(addressPayload)
-                .eq('id', addressId);
-              if (addressUpdateError) throw addressUpdateError;
+              await supabase.from('addresses').update(addressPayload).eq('id', addressId);
             } else {
-              const { data: newAddress, error: addressInsertError } = await supabase
-                .from('addresses')
-                .insert(addressPayload)
-                .select('id')
-                .single();
-              if (addressInsertError) throw addressInsertError;
-              addressId = newAddress?.id || null;
+              const { data: newAddr } = await supabase.from('addresses').insert(addressPayload).select('id').single();
+              addressId = newAddr?.id || null;
             }
 
             const storePayload = {
-                owner_id: user.id,
-                name: safeDraft.storeName || user.user_metadata?.name || profile.name || 'Nova Loja',
-                slug: `store-${user.id.substring(0, 8)}`,
-                cnpj: cleanCnpj,
-                phone: cleanPhone,
-                description: safeDraft.description || null,
-                global_category_id: safeDraft.category ? parseInt(safeDraft.category) : null,
-                avg_prep_time_min: parseDraftInt(safeDraft.prepTime),
-                min_order_value: parseDraftDecimal(safeDraft.minOrder) ?? 0,
-                delivery_fee: parseDraftDecimal(safeDraft.deliveryFee),
-                accepts_pix: safeDraft.acceptsPix ?? true,
-                accepts_card: safeDraft.acceptsCard ?? true,
-                accepts_cash: safeDraft.acceptsCash ?? false,
-                address_id: addressId,
-                status: 'pending',
-                is_approved: false,
-                commission_rate: 4,
-                pix_key: safeDraft.pixKey || null,
-                birth_date: safeDraft.birthDate || null
-              };
+              owner_id: user.id,
+              name: safeDraft.storeName || profile.name || 'Nova Loja',
+              slug: `store-${user.id.substring(0, 8)}`,
+              cnpj: cleanCnpj, phone: cleanPhone,
+              description: safeDraft.description || null,
+              global_category_id: safeDraft.category ? parseInt(safeDraft.category) : null,
+              avg_prep_time_min: parseDraftInt(safeDraft.prepTime),
+              min_order_value: parseDraftDecimal(safeDraft.minOrder) ?? 0,
+              delivery_fee: parseDraftDecimal(safeDraft.deliveryFee),
+              accepts_pix: safeDraft.acceptsPix ?? true, accepts_card: safeDraft.acceptsCard ?? true,
+              accepts_cash: safeDraft.acceptsCash ?? false,
+              address_id: addressId, status: 'pending', is_approved: false,
+              commission_rate: 4, pix_key: safeDraft.pixKey || null,
+              birth_date: safeDraft.birthDate || null
+            };
 
-            let insertedStore = null;
-            let storeInsertError = null;
-
-            if (storeNeedsUpdate && store?.id) {
-              const { data, error } = await supabase
-                .from('stores')
-                .update(storePayload)
-                .eq('id', store.id)
-                .select('id, is_approved, status')
-                .maybeSingle();
-              insertedStore = data;
-              storeInsertError = error;
+            if (store?.id) {
+              await supabase.from('stores').update(storePayload).eq('id', store.id);
             } else {
-              const { data, error } = await supabase
-                .from('stores')
-                .insert(storePayload)
-                .select('id, is_approved, status')
-                .maybeSingle();
-              insertedStore = data;
-              storeInsertError = error;
+              await supabase.from('stores').insert(storePayload);
             }
-            if (storeInsertError) throw storeInsertError;
-
-            storeData = insertedStore || null;
-            if (storeData?.id) {
-              const { error: deleteDraftError } = await supabase
-                .from('registration_drafts')
-                .delete()
-                .eq('user_id', user.id);
-              if (deleteDraftError) console.warn('Falha ao limpar registration_drafts da loja:', deleteDraftError);
-            }
+            await supabase.from('registration_drafts').delete().eq('user_id', user.id);
           }
 
-          const isStoreApproved = storeData?.is_approved === true || storeData?.status === 'active';
-          if (!storeData || !isStoreApproved) {
-            needsPendingScreen = true;
-          }
+          // Loja existe mas não aprovada — aguarda aprovação
+          if (!cancelled) setForcePendingApproval(true);
         }
 
         if (profile.role === 'courier') {
@@ -196,81 +136,41 @@ function App() {
             .eq('user_id', user.id)
             .maybeSingle();
 
-          let courierData = courier;
-          if (!courierData) {
+          // Motoboy aprovado — libera acesso
+          if (courier?.is_approved === true || courier?.status === 'active') {
+            if (!cancelled) setForcePendingApproval(false);
+            return;
+          }
+
+          // Motoboy não existe — criar com draft
+          if (!courier) {
             const safeDraft = draft && typeof draft === 'object' ? draft : {};
             const cpfFromMeta = typeof user.user_metadata?.cpf === 'string' ? user.user_metadata.cpf : null;
-            const cleanCpf = (cpfFromMeta || safeDraft.cpf || profile.cpf || '').toString().replace(/\D/g, '');
-            if (!cleanCpf || cleanCpf.length !== 11) {
-              console.error('CPF inválido para criação de courier');
+            const cleanCpf = (cpfFromMeta || safeDraft.cpf || '').toString().replace(/\D/g, '');
+
+            if (!cleanCpf || cleanCpf.length !== 11 || !safeDraft.pixKey || !safeDraft.street) {
+              console.error('Cadastro de motoboy incompleto');
               if (!cancelled) setForcePendingApproval(true);
-              if (!cancelled) setPartnerCheckLoading(false);
               return;
             }
 
-            // Validação: bloqueia criação se dados obrigatórios estiverem faltando
-            const missingCourierFields: string[] = [];
-            if (!safeDraft.street || safeDraft.street === 'Não informado') missingCourierFields.push('Endereço');
-            if (!safeDraft.neighborhood || safeDraft.neighborhood === 'Não informado') missingCourierFields.push('Bairro');
-            if (!safeDraft.city || safeDraft.city === 'Não informado') missingCourierFields.push('Cidade');
-            if (!safeDraft.cep || safeDraft.cep.replace(/\D/g, '').length < 8) missingCourierFields.push('CEP');
-            if (!safeDraft.birthDate) missingCourierFields.push('Data de nascimento');
-            if (!safeDraft.pixKey) missingCourierFields.push('Chave PIX');
-
-            if (missingCourierFields.length > 0) {
-              console.error('Cadastro de motoboy incompleto, campos faltando:', missingCourierFields);
-              if (!cancelled) setForcePendingApproval(true);
-              if (!cancelled) setPartnerCheckLoading(false);
-              return;
-            }
-
-            const { data: insertedCourier, error: courierInsertError } = await supabase
-              .from('couriers')
-              .insert({
-                user_id: user.id,
-                cpf: cleanCpf,
-                vehicle_type: safeDraft.vehicleType || 'motorcycle',
-                vehicle_brand: safeDraft.vehicleBrand || null,
-                vehicle_model: safeDraft.vehicleModel || null,
-                vehicle_year: safeDraft.vehicleYear ? parseInt(safeDraft.vehicleYear) : new Date().getFullYear(),
-                license_plate: safeDraft.licensePlate || null,
-                pix_key: safeDraft.pixKey || null,
-                operation_city: safeDraft.operationCity || safeDraft.city || 'Não informado',
-                status: 'pending',
-                is_approved: false,
-                birth_date: safeDraft.birthDate || null
-              })
-              .select('id, is_approved, status')
-              .maybeSingle();
-            if (courierInsertError) throw courierInsertError;
-
-            courierData = insertedCourier || null;
-            if (courierData?.id) {
-              const { error: deleteDraftError } = await supabase
-                .from('registration_drafts')
-                .delete()
-                .eq('user_id', user.id);
-              if (deleteDraftError) console.warn('Falha ao limpar registration_drafts do motoboy:', deleteDraftError);
-            }
+            await supabase.from('couriers').insert({
+              user_id: user.id, cpf: cleanCpf,
+              vehicle_type: safeDraft.vehicleType || 'motorcycle',
+              vehicle_brand: safeDraft.vehicleBrand || null,
+              vehicle_model: safeDraft.vehicleModel || null,
+              vehicle_year: safeDraft.vehicleYear ? parseInt(safeDraft.vehicleYear) : new Date().getFullYear(),
+              license_plate: safeDraft.licensePlate || null,
+              pix_key: safeDraft.pixKey || null,
+              operation_city: safeDraft.operationCity || safeDraft.city || 'Não informado',
+              status: 'pending', is_approved: false,
+              birth_date: safeDraft.birthDate || null
+            });
+            await supabase.from('registration_drafts').delete().eq('user_id', user.id);
           }
 
-          const isCourierApproved = courierData?.is_approved === true || courierData?.status === 'active';
-          if (!courierData || !isCourierApproved) {
-            needsPendingScreen = true;
-          }
-        }
-
-        if (needsPendingScreen) {
-          // Só desativa se não estiver aprovado no banco
-          // (evita desativar usuário aprovado com cache desatualizado)
+          // Motoboy existe mas não aprovado — aguarda aprovação
           if (!cancelled) setForcePendingApproval(true);
-        } else {
-          // Usuário aprovado — garantir que is_active está true e atualizar profile
-          if (!profile.is_active) {
-            await supabase.from('users').update({ is_active: true }).eq('id', user.id);
-            await refreshProfile();
-          }
-          if (!cancelled) setForcePendingApproval(false);
         }
       } catch (error) {
         console.error('Erro ao validar cadastro de parceiro:', error);
@@ -282,43 +182,6 @@ function App() {
     ensurePartnerRecord();
     return () => { cancelled = true; };
   }, [user, profile]);
-
-  // Polling: verifica aprovação a cada 15 segundos quando está na tela de análise
-  useEffect(() => {
-    if (!forcePendingApproval && profile?.is_active) return;
-    if (!user || !profile) return;
-    if (profile.role !== 'store_owner' && profile.role !== 'courier') return;
-
-    const checkApproval = async () => {
-      if (profile.role === 'store_owner') {
-        const { data } = await supabase
-          .from('stores')
-          .select('is_approved, status')
-          .eq('owner_id', user.id)
-          .maybeSingle();
-        if (data?.is_approved === true || data?.status === 'active') {
-          await supabase.from('users').update({ is_active: true }).eq('id', user.id);
-          await refreshProfile();
-          setForcePendingApproval(false);
-        }
-      } else if (profile.role === 'courier') {
-        const { data } = await supabase
-          .from('couriers')
-          .select('is_approved, status')
-          .eq('user_id', user.id)
-          .maybeSingle();
-        if (data?.is_approved === true || data?.status === 'active') {
-          await supabase.from('users').update({ is_active: true }).eq('id', user.id);
-          await refreshProfile();
-          setForcePendingApproval(false);
-        }
-      }
-    };
-
-    const interval = setInterval(checkApproval, 15000);
-    checkApproval(); // verifica imediatamente
-    return () => clearInterval(interval);
-  }, [forcePendingApproval, profile?.is_active, user?.id, profile?.role]);
 
   if (loading || partnerCheckLoading) {
     return (
@@ -354,7 +217,7 @@ function App() {
   }
 
   // Bloqueia o acesso para usuários não aprovados (Lojas e Motoboys pendentes)
-  if ((forcePendingApproval || !profile.is_active) && profile.role !== 'admin') {
+  if (forcePendingApproval && profile.role !== 'admin') {
     return (
       <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50 p-6 text-center" style={{paddingTop: 'max(1.5rem, env(safe-area-inset-top, 0px))', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))'}}>
         <div className="w-24 h-24 bg-yellow-100 text-yellow-600 rounded-full flex items-center justify-center mb-6 shadow-inner">
