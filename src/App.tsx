@@ -70,7 +70,9 @@ function App() {
             .maybeSingle();
 
           let storeData = store;
-          if (!storeData) {
+          // Se loja existe mas está incompleta (sem CNPJ), tenta atualizar com o draft
+          const storeNeedsUpdate = store && !store.cnpj;
+          if (!storeData || storeNeedsUpdate) {
             const safeDraft = draft && typeof draft === 'object' ? draft : {};
             const cleanCnpj = typeof safeDraft.cnpj === 'string' ? safeDraft.cnpj.replace(/\D/g, '') : null;
 
@@ -126,9 +128,7 @@ function App() {
               addressId = newAddress?.id || null;
             }
 
-            const { data: insertedStore, error: storeInsertError } = await supabase
-              .from('stores')
-              .insert({
+            const storePayload = {
                 owner_id: user.id,
                 name: safeDraft.storeName || user.user_metadata?.name || profile.name || 'Nova Loja',
                 slug: `store-${user.id.substring(0, 8)}`,
@@ -148,9 +148,29 @@ function App() {
                 commission_rate: 4,
                 pix_key: safeDraft.pixKey || null,
                 birth_date: safeDraft.birthDate || null
-              })
-              .select('id, is_approved, status')
-              .maybeSingle();
+              };
+
+            let insertedStore = null;
+            let storeInsertError = null;
+
+            if (storeNeedsUpdate && store?.id) {
+              const { data, error } = await supabase
+                .from('stores')
+                .update(storePayload)
+                .eq('id', store.id)
+                .select('id, is_approved, status')
+                .maybeSingle();
+              insertedStore = data;
+              storeInsertError = error;
+            } else {
+              const { data, error } = await supabase
+                .from('stores')
+                .insert(storePayload)
+                .select('id, is_approved, status')
+                .maybeSingle();
+              insertedStore = data;
+              storeInsertError = error;
+            }
             if (storeInsertError) throw storeInsertError;
 
             storeData = insertedStore || null;
