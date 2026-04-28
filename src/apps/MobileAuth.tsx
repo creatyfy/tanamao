@@ -373,10 +373,44 @@ export default function MobileAuth() {
           .maybeSingle();
         const draft = draftRow?.draft;
         if (draft && typeof draft === 'object') {
+          const parseDraftInt = (value: any) => {
+            if (value === null || value === undefined || value === '') return null;
+            const parsed = Number.parseInt(String(value).trim(), 10);
+            return Number.isFinite(parsed) ? parsed : null;
+          };
+          const parseDraftDecimal = (value: any) => {
+            if (value === null || value === undefined || value === '') return null;
+            const normalized = String(value).trim().replace(',', '.');
+            const parsed = Number.parseFloat(normalized);
+            return Number.isFinite(parsed) ? parsed : null;
+          };
           const cleanCep = typeof draft.cep === 'string' ? draft.cep.replace(/\D/g, '') : '00000000';
           const cleanPhone = typeof draft.phone === 'string' ? draft.phone.replace(/\D/g, '') : null;
           const cleanCnpj = typeof draft.cnpj === 'string' ? draft.cnpj.replace(/\D/g, '') : null;
+          const prepTime = parseDraftInt(draft.prepTime);
+          const minOrder = parseDraftDecimal(draft.minOrder);
+          const deliveryFee = parseDraftDecimal(draft.deliveryFee);
           const ownerName = data.user.user_metadata?.name || 'Nova Loja';
+
+          const requiredDraftMissing =
+            !cleanCnpj || (cleanCnpj.length !== 11 && cleanCnpj.length !== 14)
+            || !draft.street || !draft.neighborhood || !draft.city
+            || cleanCep.length < 8
+            || prepTime === null
+            || deliveryFee === null
+            || !draft.pixKey;
+
+          if (requiredDraftMissing) {
+            setRegisterRole('store');
+            setFormData(prev => ({
+              ...prev,
+              email: data.user.email || emailClean,
+              ownerName: data.user.user_metadata?.name || prev.ownerName,
+            }));
+            setAuthMode('register');
+            setErrorMsg('Falta concluir o cadastro da loja. Preencha os dados abaixo e clique em Cadastrar.');
+            return;
+          }
 
           const { data: existingAddress } = await supabase
             .from('addresses')
@@ -415,9 +449,9 @@ export default function MobileAuth() {
             phone: cleanPhone,
             description: draft.description || null,
             global_category_id: draft.category ? parseInt(draft.category) : null,
-            avg_prep_time_min: draft.prepTime ? parseInt(draft.prepTime) : 30,
-            min_order_value: draft.minOrder ? parseFloat(draft.minOrder) : 0,
-            delivery_fee: draft.deliveryFee ? parseFloat(draft.deliveryFee) : 0,
+            avg_prep_time_min: prepTime,
+            min_order_value: minOrder ?? 0,
+            delivery_fee: deliveryFee,
             accepts_pix: draft.acceptsPix ?? true,
             accepts_card: draft.acceptsCard ?? true,
             accepts_cash: draft.acceptsCash ?? false,
@@ -534,6 +568,12 @@ export default function MobileAuth() {
       }
       if (cleanCnpj.length === 11 && !formData.birthDate) {
         throw new Error('Data de nascimento é obrigatória para cadastro com CPF.');
+      }
+      if (!formData.prepTime.toString().trim()) {
+        throw new Error('Tempo médio de preparo é obrigatório.');
+      }
+      if (!formData.deliveryFee.toString().trim()) {
+        throw new Error('Taxa base de entrega é obrigatória.');
       }
       if (!formData.pixKey.trim()) {
         throw new Error('Chave PIX é obrigatória.');
@@ -681,10 +721,26 @@ export default function MobileAuth() {
       return (digits || '0').padEnd(11, '0').slice(0, 11);
     };
 
+    const parseDecimalInput = (value: string) => {
+      if (!value?.toString().trim()) return null;
+      const normalized = value.toString().trim().replace(',', '.');
+      const parsed = Number.parseFloat(normalized);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
+    const parseIntegerInput = (value: string) => {
+      if (!value?.toString().trim()) return null;
+      const parsed = Number.parseInt(value.toString().trim(), 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    };
+
     const cleanPhone = formData.phone ? formData.phone.replace(/\D/g, '') : null;
     const cleanCep = formData.cep ? formData.cep.replace(/\D/g, '') : '00000000';
     const cleanCnpj = formData.cnpj ? formData.cnpj.replace(/\D/g, '') : null;
     const cleanCpf = formData.cpf ? formData.cpf.replace(/\D/g, '') : generateFallbackCpf(userId);
+    const prepTimeValue = parseIntegerInput(formData.prepTime);
+    const minOrderValue = parseDecimalInput(formData.minOrder);
+    const deliveryFeeValue = parseDecimalInput(formData.deliveryFee);
     const isActive = registerRole === 'client';
 
     const userData: any = {
@@ -728,6 +784,8 @@ export default function MobileAuth() {
     }
 
     if (registerRole === 'store') {
+      if (prepTimeValue === null) throw new Error('Tempo médio de preparo inválido.');
+      if (deliveryFeeValue === null) throw new Error('Taxa base de entrega inválida.');
       const storeData: any = {
         owner_id: userId,
         name: formData.storeName || 'Nova Loja',
@@ -736,9 +794,9 @@ export default function MobileAuth() {
         phone: cleanPhone,
         description: formData.description || null,
         global_category_id: formData.category ? parseInt(formData.category) : null,
-        avg_prep_time_min: formData.prepTime ? parseInt(formData.prepTime) : 30,
-        min_order_value: formData.minOrder ? parseFloat(formData.minOrder) : 0,
-        delivery_fee: formData.deliveryFee ? parseFloat(formData.deliveryFee) : 0,
+        avg_prep_time_min: prepTimeValue,
+        min_order_value: minOrderValue ?? 0,
+        delivery_fee: deliveryFeeValue,
         accepts_pix: formData.acceptsPix,
         accepts_card: formData.acceptsCard,
         accepts_cash: formData.acceptsCash,
@@ -971,9 +1029,9 @@ export default function MobileAuth() {
                       </div>
                     </FormSection>
                     <FormSection title="Operação e Taxas">
-                      <InputField icon={Clock} name="prepTime" placeholder="Tempo médio de preparo (min)" type="number" value={formData.prepTime} onChange={handleChange} />
+                      <InputField icon={Clock} name="prepTime" placeholder="Tempo médio de preparo (min)" type="number" required value={formData.prepTime} onChange={handleChange} />
                       <InputField icon={DollarSign} name="minOrder" placeholder="Valor mínimo do pedido (R$)" type="number" value={formData.minOrder} onChange={handleChange} />
-                      <InputField icon={Bike} name="deliveryFee" placeholder="Taxa base de entrega (R$)" type="number" value={formData.deliveryFee} onChange={handleChange} />
+                      <InputField icon={Bike} name="deliveryFee" placeholder="Taxa base de entrega (R$)" type="number" required value={formData.deliveryFee} onChange={handleChange} />
                     </FormSection>
                     <FormSection title="Dados Financeiros">
                       <InputField
