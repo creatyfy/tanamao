@@ -1212,6 +1212,14 @@ export default function MobileAuth() {
               </div>
             )}
 
+            {authMode === 'register' && (registerRole === 'store' || registerRole === 'courier') && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-4">
+                <p className="text-xs text-amber-800 text-center font-medium">
+                  Os serviços financeiros desta plataforma são fornecidos pelo Asaas, instituição de pagamento autorizada pelo Banco Central do Brasil.
+                </p>
+              </div>
+            )}
+
             <button type="submit" disabled={loading} className={`w-full bg-brand-primary text-white rounded-2xl py-4 font-bold text-lg shadow-lg shadow-brand-primary/30 hover:bg-green-600 transition-colors flex justify-center items-center mt-6 mb-4 shrink-0 ${loading ? 'opacity-70' : ''}`}>
               {loading ? <Loader2 className="animate-spin" size={20} /> : (
                 <>
