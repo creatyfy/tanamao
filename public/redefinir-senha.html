@@ -125,7 +125,7 @@
       auth: {
         autoRefreshToken: false,
         persistSession: false,
-        flowType: 'implicit'
+        flowType: 'pkce'
       }
     })
 
@@ -140,6 +140,7 @@
         // Formato PKCE - code na query string
         if (code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+          if (error) console.error('exchangeCodeForSession error:', error)
           if (!error && data?.session) {
             show('formCard')
             return
@@ -152,6 +153,7 @@
             token_hash: tokenHash, 
             type: type 
           })
+          if (error) console.error('verifyOtp error:', error)
           if (!error && data?.session) {
             show('formCard')
             return
@@ -164,6 +166,7 @@
             access_token: accessToken, 
             refresh_token: refreshToken 
           })
+          if (error) console.error('setSession error:', error)
           if (!error) {
             show('formCard')
             return
