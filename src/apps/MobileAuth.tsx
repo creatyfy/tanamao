@@ -1213,10 +1213,9 @@ export default function MobileAuth() {
             )}
 
             {authMode === 'register' && (registerRole === 'store' || registerRole === 'courier') && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-4">
-                <p className="text-xs text-amber-800 text-center font-medium">
-                  Os serviços financeiros desta plataforma são fornecidos pelo Asaas, instituição de pagamento autorizada pelo Banco Central do Brasil.
-                </p>
+              <div className="flex flex-col items-center mt-2 mb-2">
+                <img src="/logoasaas.png" alt="Asaas" className="h-4 opacity-50 mb-1" />
+                <p className="text-center text-xs text-gray-400">Serviços financeiros fornecidos pelo Asaas, instituição autorizada pelo Banco Central do Brasil.</p>
               </div>
             )}
 

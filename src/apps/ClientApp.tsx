@@ -1727,7 +1727,10 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                 )}
 
                 <p className="text-center text-xs text-gray-400 mb-2">⏱ Expira em 30 minutos</p>
-                <p className="text-center text-xs font-semibold text-brand-dark mb-4">🔒 Pagamento seguro processado pelo Asaas</p>
+                <div className="flex flex-col items-center mt-2 mb-4">
+                  <img src="/logoasaas.png" alt="Asaas" className="h-4 opacity-50 mb-1" />
+                  <p className="text-center text-xs text-gray-400">🔒 Pagamento seguro processado pelo Asaas</p>
+                </div>
 
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
                   <p className="text-blue-700 text-xs font-medium text-center">
@@ -1789,7 +1792,10 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                 + Usar outro cartão
               </button>
 
-              <p className="text-center text-xs text-gray-400">🔒 Pagamento seguro processado pelo Asaas</p>
+              <div className="flex flex-col items-center mt-2">
+                <img src="/logoasaas.png" alt="Asaas" className="h-4 opacity-50 mb-1" />
+                <p className="text-center text-xs text-gray-400">🔒 Pagamento seguro processado pelo Asaas</p>
+              </div>
             </div>
           )}
 
@@ -1867,9 +1873,10 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                   {paymentLoading ? <Loader2 className="animate-spin" size={24} /> : `Pagar R$ ${activeOrder?.total.toFixed(2)}`}
                 </button>
 
-                <p className="text-center text-xs text-gray-400">
-                  🔒 Pagamento seguro processado pelo Asaas
-                </p>
+                <div className="flex flex-col items-center mt-2">
+                  <img src="/logoasaas.png" alt="Asaas" className="h-4 opacity-50 mb-1" />
+                  <p className="text-center text-xs text-gray-400">🔒 Pagamento seguro processado pelo Asaas</p>
+                </div>
               </div>
             </div>
           )}
