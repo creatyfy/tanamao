@@ -92,6 +92,14 @@
       <h1>Verificando...</h1>
       <p class="subtitle">Aguarde um momento.</p>
     </div>
+
+    <div id="prepareCard" style="display:none">
+      <div class="icon">🔐</div>
+      <h1>Quase lá</h1>
+      <p class="subtitle">Para sua segurança, toque no botão abaixo para validar o link e continuar a redefinição da senha.</p>
+      <button class="btn" id="continueBtn" onclick="startResetFlow()">Continuar redefinição</button>
+      <p class="brand">Tá Na Mão — Delivery</p>
+    </div>
   </div>
 
     <script type="module">
@@ -122,12 +130,12 @@
     })
 
     function show(id) {
-      ['loadingCard','formCard','successCard','errorCard'].forEach(i => {
+      ['loadingCard','prepareCard','formCard','successCard','errorCard'].forEach(i => {
         document.getElementById(i).style.display = i === id ? 'block' : 'none'
       })
     }
 
-    async function initSession() {
+    async function startResetFlow() {
       try {
         // Formato PKCE - code na query string
         if (code) {
@@ -165,7 +173,7 @@
         // Nenhum formato reconhecido
         show('errorCard')
       } catch (e) {
-        console.error('initSession error:', e)
+        console.error('startResetFlow error:', e)
         show('errorCard')
       }
     }
@@ -205,10 +213,16 @@
       show('successCard')
     }
 
+
+    window.startResetFlow = startResetFlow
+    window.handleReset = handleReset
+
     if (errorParam) {
       show('errorCard')
+    } else if (code || tokenHash || accessToken) {
+      show('prepareCard')
     } else {
-      initSession()
+      show('errorCard')
     }
   </script>
 </body>
