@@ -115,7 +115,8 @@
     const code = queryParams.get('code')
     const accessToken = hashParams.get('access_token') || queryParams.get('access_token')
     const refreshToken = hashParams.get('refresh_token') || queryParams.get('refresh_token') || ''
-    const tokenHash = hashParams.get('token_hash') || queryParams.get('token_hash') || queryParams.get('token')
+    const tokenHash = hashParams.get('token_hash') || queryParams.get('token_hash')
+    const otpToken = hashParams.get('token') || queryParams.get('token')
     const type = hashParams.get('type') || queryParams.get('type') || 'recovery'
     const errorParam = hashParams.get('error') || queryParams.get('error')
 
@@ -147,7 +148,21 @@
             token_hash: tokenHash, 
             type: type 
           })
-          if (error) console.error('verifyOtp error:', error)
+          if (error) console.error('verifyOtp(token_hash) error:', error)
+          if (!error && data?.session) {
+            show('formCard')
+            return
+          }
+        }
+
+        // Formato OTP com token direto (alguns templates/clientes de e-mail)
+        if (otpToken && type) {
+          const { data, error } = await supabase.auth.verifyOtp({ 
+            token: otpToken,
+            type: type,
+            email: queryParams.get('email') || undefined
+          })
+          if (error) console.error('verifyOtp(token) error:', error)
           if (!error && data?.session) {
             show('formCard')
             return
@@ -229,8 +244,9 @@
 
     if (errorParam) {
       show('errorCard')
-    } else if (code || tokenHash || accessToken) {
+    } else if (code || tokenHash || otpToken || accessToken) {
       show('prepareCard')
+      setTimeout(() => { startResetFlow(); }, 50)
     } else {
       show('errorCard')
     }
