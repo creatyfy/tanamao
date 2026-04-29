@@ -1726,7 +1726,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                   </button>
                 )}
 
-                <p className="text-center text-xs text-gray-400 mb-4">⏱ Expira em 30 minutos</p>
+                <p className="text-center text-xs text-gray-400 mb-2">⏱ Expira em 30 minutos</p>
+                <p className="text-center text-xs font-semibold text-brand-dark mb-4">🔒 Pagamento seguro processado pelo Asaas</p>
 
                 <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
                   <p className="text-blue-700 text-xs font-medium text-center">
