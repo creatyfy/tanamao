@@ -109,16 +109,35 @@
     console.log('Search:', window.location.search)
 
     // Pega parâmetros tanto da hash quanto da query string
-    const hashParams = new URLSearchParams(window.location.hash.replace('#', ''))
-    const queryParams = new URLSearchParams(window.location.search)
+    function normalizeParams(raw) {
+      const params = new URLSearchParams((raw || '').replace(/^#/, ''))
+      const normalized = new URLSearchParams()
 
-    const code = queryParams.get('code')
-    const accessToken = hashParams.get('access_token') || queryParams.get('access_token')
-    const refreshToken = hashParams.get('refresh_token') || queryParams.get('refresh_token') || ''
-    const tokenHash = hashParams.get('token_hash') || queryParams.get('token_hash')
-    const otpToken = hashParams.get('token') || queryParams.get('token')
-    const type = hashParams.get('type') || queryParams.get('type') || 'recovery'
-    const errorParam = hashParams.get('error') || queryParams.get('error')
+      for (const [key, value] of params.entries()) {
+        const cleanKey = key.replace(/^amp;/, '')
+        normalized.append(cleanKey, value)
+      }
+
+      return normalized
+    }
+
+    const hashParams = normalizeParams(window.location.hash)
+    const queryParams = normalizeParams(window.location.search)
+
+    const getParam = (name) => (
+      hashParams.get(name)
+      || queryParams.get(name)
+      || queryParams.get(`amp;${name}`)
+      || null
+    )
+
+    const code = getParam('code')
+    const accessToken = getParam('access_token')
+    const refreshToken = getParam('refresh_token') || ''
+    const tokenHash = getParam('token_hash')
+    const otpToken = getParam('token')
+    const type = getParam('type') || 'recovery'
+    const errorParam = getParam('error')
 
     const SUPABASE_URL = 'https://fgjlyvkdkhxvzsgxuuad.supabase.co'
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnamx5dmtka2h4dnpzZ3h1dWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2MDIzNjEsImV4cCI6MjA1OTE3ODM2MX0.hfFbkO3TgkHFQRQOsVn-RHoNIYaLXoDEa0s5FgTsFKo'
@@ -160,7 +179,7 @@
           const { data, error } = await supabase.auth.verifyOtp({ 
             token: otpToken,
             type: type,
-            email: queryParams.get('email') || undefined
+            email: getParam('email') || undefined
           })
           if (error) console.error('verifyOtp(token) error:', error)
           if (!error && data?.session) {
