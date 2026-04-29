@@ -93,133 +93,91 @@
       <p class="subtitle">Aguarde um momento.</p>
     </div>
 
-    <div id="prepareCard" style="display:none">
-      <div class="icon">🔐</div>
-      <h1>Quase lá</h1>
-      <p class="subtitle">Para sua segurança, toque no botão abaixo para validar o link e continuar a redefinição da senha.</p>
-      <button class="btn" id="continueBtn" onclick="startResetFlow()">Continuar redefinição</button>
-      <p class="brand">Tá Na Mão — Delivery</p>
-    </div>
+
   </div>
 
     <script type="module">
     import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-    console.log('URL completa:', window.location.href)
-    console.log('Hash:', window.location.hash)
-    console.log('Search:', window.location.search)
-
-    // Pega parâmetros tanto da hash quanto da query string
-    function normalizeParams(raw) {
-      const params = new URLSearchParams((raw || '').replace(/^#/, ''))
-      const normalized = new URLSearchParams()
-
-      for (const [key, value] of params.entries()) {
-        const cleanKey = key.replace(/^amp;/, '')
-        normalized.append(cleanKey, value)
-      }
-
-      return normalized
-    }
-
-    const hashParams = normalizeParams(window.location.hash)
-    const queryParams = normalizeParams(window.location.search)
-
-    const getParam = (name) => (
-      hashParams.get(name)
-      || queryParams.get(name)
-      || queryParams.get(`amp;${name}`)
-      || null
-    )
-
-    const code = getParam('code')
-    const accessToken = getParam('access_token')
-    const refreshToken = getParam('refresh_token') || ''
-    const tokenHash = getParam('token_hash')
-    const otpToken = getParam('token')
-    const type = getParam('type') || 'recovery'
-    const errorParam = getParam('error')
 
     const SUPABASE_URL = 'https://fgjlyvkdkhxvzsgxuuad.supabase.co'
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnamx5dmtka2h4dnpzZ3h1dWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2MDIzNjEsImV4cCI6MjA1OTE3ODM2MX0.hfFbkO3TgkHFQRQOsVn-RHoNIYaLXoDEa0s5FgTsFKo'
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: {
         autoRefreshToken: false,
-        persistSession: false,
-        flowType: 'pkce'
+        persistSession: true,
+        flowType: 'pkce',
+        storage: localStorage
       }
     })
 
     function show(id) {
-      ['loadingCard','prepareCard','formCard','successCard','errorCard'].forEach(i => {
+      ['loadingCard','formCard','successCard','errorCard'].forEach(i => {
         document.getElementById(i).style.display = i === id ? 'block' : 'none'
       })
     }
 
-    async function startResetFlow() {
-      const continueBtn = document.getElementById('continueBtn')
-      continueBtn.disabled = true
-      continueBtn.textContent = 'Validando...'
+    function getParam(name) {
+      const query = new URLSearchParams(window.location.search)
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+      return query.get(name) || hash.get(name) || null
+    }
 
-      try {
-        // Formato token_hash (mais confiável quando o link é aberto em outro navegador/dispositivo)
-        if (tokenHash && type) {
-          const { data, error } = await supabase.auth.verifyOtp({ 
-            token_hash: tokenHash, 
-            type: type 
-          })
-          if (error) console.error('verifyOtp(token_hash) error:', error)
-          if (!error && data?.session) {
-            show('formCard')
-            return
-          }
-        }
+    async function init() {
+      const code = getParam('code')
+      const tokenHash = getParam('token_hash')
+      const type = getParam('type') || 'recovery'
+      const errorParam = getParam('error')
 
-        // Formato OTP com token direto (alguns templates/clientes de e-mail)
-        if (otpToken && type) {
-          const { data, error } = await supabase.auth.verifyOtp({ 
-            token: otpToken,
-            type: type,
-            email: getParam('email') || undefined
-          })
-          if (error) console.error('verifyOtp(token) error:', error)
-          if (!error && data?.session) {
-            show('formCard')
-            return
-          }
-        }
+      if (errorParam) {
+        show('errorCard')
+        return
+      }
 
-        // Formato PKCE - code na query string (depende de code_verifier no mesmo navegador)
-        if (code) {
+      // Formato PKCE - code na query string
+      if (code) {
+        try {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-          if (error) console.error('exchangeCodeForSession error:', error)
           if (!error && data?.session) {
             show('formCard')
             return
           }
+          console.error('exchangeCodeForSession error:', error)
+        } catch(e) {
+          console.error('exchangeCodeForSession exception:', e)
         }
+      }
 
-        // Formato access_token direto na hash
-        if (accessToken) {
-          const { error } = await supabase.auth.setSession({ 
-            access_token: accessToken, 
-            refresh_token: refreshToken 
-          })
-          if (error) console.error('setSession error:', error)
+      // Formato token_hash
+      if (tokenHash) {
+        try {
+          const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
+          if (!error && data?.session) {
+            show('formCard')
+            return
+          }
+          console.error('verifyOtp error:', error)
+        } catch(e) {
+          console.error('verifyOtp exception:', e)
+        }
+      }
+
+      // Formato access_token na hash (fallback)
+      const accessToken = getParam('access_token')
+      const refreshToken = getParam('refresh_token') || ''
+      if (accessToken) {
+        try {
+          const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
           if (!error) {
             show('formCard')
             return
           }
+          console.error('setSession error:', error)
+        } catch(e) {
+          console.error('setSession exception:', e)
         }
-
-        // Nenhum formato reconhecido
-        show('errorCard')
-      } catch (e) {
-        console.error('startResetFlow error:', e)
-        show('errorCard')
-      } finally {
-        continueBtn.disabled = false
-        continueBtn.textContent = 'Continuar redefinição'
       }
+
+      show('errorCard')
     }
 
     async function handleReset() {
@@ -257,18 +215,8 @@
       show('successCard')
     }
 
-
-    window.startResetFlow = startResetFlow
     window.handleReset = handleReset
-
-    if (errorParam) {
-      show('errorCard')
-    } else if (code || tokenHash || otpToken || accessToken) {
-      show('prepareCard')
-      setTimeout(() => { startResetFlow(); }, 50)
-    } else {
-      show('errorCard')
-    }
+    init()
   </script>
 </body>
 </html>
