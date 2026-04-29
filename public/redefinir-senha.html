@@ -115,8 +115,8 @@
     const code = queryParams.get('code')
     const accessToken = hashParams.get('access_token') || queryParams.get('access_token')
     const refreshToken = hashParams.get('refresh_token') || queryParams.get('refresh_token') || ''
-    const tokenHash = hashParams.get('token_hash') || queryParams.get('token_hash')
-    const type = hashParams.get('type') || queryParams.get('type')
+    const tokenHash = hashParams.get('token_hash') || queryParams.get('token_hash') || queryParams.get('token')
+    const type = hashParams.get('type') || queryParams.get('type') || 'recovery'
     const errorParam = hashParams.get('error') || queryParams.get('error')
 
     const SUPABASE_URL = 'https://fgjlyvkdkhxvzsgxuuad.supabase.co'
@@ -136,24 +136,28 @@
     }
 
     async function startResetFlow() {
-      try {
-        // Formato PKCE - code na query string
-        if (code) {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-          if (error) console.error('exchangeCodeForSession error:', error)
-          if (!error && data?.session) {
-            show('formCard')
-            return
-          }
-        }
+      const continueBtn = document.getElementById('continueBtn')
+      continueBtn.disabled = true
+      continueBtn.textContent = 'Validando...'
 
-        // Formato token_hash (OTP)
+      try {
+        // Formato token_hash (mais confiável quando o link é aberto em outro navegador/dispositivo)
         if (tokenHash && type) {
           const { data, error } = await supabase.auth.verifyOtp({ 
             token_hash: tokenHash, 
             type: type 
           })
           if (error) console.error('verifyOtp error:', error)
+          if (!error && data?.session) {
+            show('formCard')
+            return
+          }
+        }
+
+        // Formato PKCE - code na query string (depende de code_verifier no mesmo navegador)
+        if (code) {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+          if (error) console.error('exchangeCodeForSession error:', error)
           if (!error && data?.session) {
             show('formCard')
             return
@@ -178,6 +182,9 @@
       } catch (e) {
         console.error('startResetFlow error:', e)
         show('errorCard')
+      } finally {
+        continueBtn.disabled = false
+        continueBtn.textContent = 'Continuar redefinição'
       }
     }
 
