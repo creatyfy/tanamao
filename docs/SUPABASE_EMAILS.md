@@ -44,6 +44,8 @@ Copie os códigos abaixo e cole no painel do Supabase em **Authentication > Emai
 
 **Subject (Assunto):** `Recuperação de Senha - Tá Na Mão`
 
+
+> ⚠️ Para recuperação de senha, prefira `token_hash` (como no link acima) em vez de `{{ .ConfirmationURL }}` para evitar links com hash `#access_token=pkce_...` que podem abrir como inválidos em alguns navegadores/sessões.
 **Código HTML:**
 ```html
 <!DOCTYPE html>
@@ -64,7 +66,7 @@ Copie os códigos abaixo e cole no painel do Supabase em **Authentication > Emai
       <p style="color: #4b5563; line-height: 1.6; font-size: 15px;">Olá!</p>
       <p style="color: #4b5563; line-height: 1.6; font-size: 15px;">Recebemos um pedido para redefinir a senha da sua conta no <strong>Tá Na Mão</strong>. Clique no botão abaixo para criar uma nova senha:</p>
       <div style="text-align: center; margin: 35px 0;">
-        <a href="{{ .ConfirmationURL }}" style="background-color: #10b981; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">Redefinir Minha Senha</a>
+        <a href="https://www.tanamao.website/redefinir-senha?token_hash={{ .TokenHash }}&type=recovery" style="background-color: #10b981; color: #ffffff; padding: 14px 28px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">Redefinir Minha Senha</a>
       </div>
       <p style="color: #6b7280; font-size: 13px; line-height: 1.5; margin-bottom: 0; border-top: 1px solid #e5e7eb; padding-top: 20px;">
         Se você não solicitou essa alteração ou lembrou da sua senha, pode ignorar este e-mail com segurança. Sua senha atual continuará funcionando.
