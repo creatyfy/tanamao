@@ -116,20 +116,41 @@
       })
     }
 
-    function getParam(name) {
-      const query = new URLSearchParams(window.location.search)
-      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ''))
-      return query.get(name) || hash.get(name) || null
+    function collectParams() {
+      const candidates = [{ search: window.location.search, hash: window.location.hash }]
+      const topQuery = new URLSearchParams(window.location.search)
+      const nestedUrl = topQuery.get('redirect_to') || topQuery.get('confirmation_url') || topQuery.get('redirectTo')
+
+      if (nestedUrl) {
+        try {
+          const nested = new URL(decodeURIComponent(nestedUrl))
+          candidates.push({ search: nested.search, hash: nested.hash })
+        } catch (e) {
+          console.warn('Não foi possível ler URL aninhada:', e)
+        }
+      }
+
+      const merged = new URLSearchParams()
+      candidates.forEach(({ search, hash }) => {
+        ;[new URLSearchParams(search), new URLSearchParams(hash.replace(/^#/, ''))].forEach(params => {
+          params.forEach((value, key) => {
+            if (!merged.has(key) && value) merged.set(key, value)
+          })
+        })
+      })
+
+      return merged
     }
 
     async function init() {
-      const code = getParam('code')
-      const tokenHash = getParam('token_hash')
-      const token = getParam('token')
-      const type = getParam('type') || 'recovery'
-      const errorParam = getParam('error')
-      const accessToken = getParam('access_token')
-      const refreshToken = getParam('refresh_token') || ''
+      const params = collectParams()
+      const code = params.get('code')
+      const tokenHash = params.get('token_hash')
+      const token = params.get('token')
+      const type = params.get('type') || 'recovery'
+      const errorParam = params.get('error')
+      const accessToken = params.get('access_token')
+      const refreshToken = params.get('refresh_token') || ''
 
       if (errorParam) { show('errorCard'); return }
 
@@ -179,7 +200,7 @@
       // --- Estratégia 5: token OTP legado ---
       if (token) {
         try {
-          const { data, error } = await supabase.auth.verifyOtp({ token, type, email: getParam('email') || undefined })
+          const { data, error } = await supabase.auth.verifyOtp({ token, type, email: params.get('email') || undefined })
           if (!error && data?.session) { show('formCard'); return }
           console.error('verifyOtp(token) error:', error)
         } catch(e) { console.error('verifyOtp(token) exception:', e) }
