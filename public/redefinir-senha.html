@@ -125,6 +125,7 @@
     async function init() {
       const code = getParam('code')
       const tokenHash = getParam('token_hash')
+      const token = getParam('token')
       const type = getParam('type') || 'recovery'
       const errorParam = getParam('error')
 
@@ -147,7 +148,7 @@
         }
       }
 
-      // Formato token_hash
+      // Formato token_hash (novo formato)
       if (tokenHash) {
         try {
           const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
@@ -155,15 +156,45 @@
             show('formCard')
             return
           }
-          console.error('verifyOtp error:', error)
+          console.error('verifyOtp(token_hash) error:', error)
         } catch(e) {
-          console.error('verifyOtp exception:', e)
+          console.error('verifyOtp(token_hash) exception:', e)
+        }
+      }
+
+      // Formato token (alguns templates/custom links)
+      if (token) {
+        try {
+          const { data, error } = await supabase.auth.verifyOtp({ token, type, email: getParam('email') || undefined })
+          if (!error && data?.session) {
+            show('formCard')
+            return
+          }
+          console.error('verifyOtp(token) error:', error)
+        } catch(e) {
+          console.error('verifyOtp(token) exception:', e)
         }
       }
 
       // Formato access_token na hash (fallback)
       const accessToken = getParam('access_token')
       const refreshToken = getParam('refresh_token') || ''
+
+      // Alguns links PKCE chegam com access_token=pkce_* (não é JWT de sessão).
+      // Nesses casos, tratar como token OTP de recovery antes do setSession.
+      if (accessToken && accessToken.startsWith('pkce_')) {
+        try {
+          const { data, error } = await supabase.auth.verifyOtp({ token: accessToken, type, email: getParam('email') || undefined })
+          if (!error && data?.session) {
+            show('formCard')
+            return
+          }
+          console.error('verifyOtp(pkce access_token) error:', error)
+        } catch(e) {
+          console.error('verifyOtp(pkce access_token) exception:', e)
+        }
+      }
+
       if (accessToken) {
         try {
           const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
