@@ -133,13 +133,19 @@
 
       if (errorParam) { show('errorCard'); return }
 
-      // --- Estratégia 1: access_token=pkce_* na hash — é o code PKCE disfarçado ---
-      // O Supabase às vezes coloca o code PKCE no campo access_token da hash com prefixo pkce_
+      // --- Estratégia 1: access_token=pkce_* na hash (variação comum em links de recovery) ---
+      // Alguns links chegam como access_token=pkce_<code>. Tentamos com e sem o prefixo.
       if (accessToken && accessToken.startsWith('pkce_')) {
         try {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(accessToken)
-          if (!error && data?.session) { show('formCard'); return }
-          console.error('exchangeCodeForSession(pkce_) error:', error)
+          const pkceCode = accessToken.replace(/^pkce_/, '')
+
+          let result = await supabase.auth.exchangeCodeForSession(accessToken)
+          if (!result.error && result.data?.session) { show('formCard'); return }
+
+          result = await supabase.auth.exchangeCodeForSession(pkceCode)
+          if (!result.error && result.data?.session) { show('formCard'); return }
+
+          console.error('exchangeCodeForSession(pkce_) error:', result.error)
         } catch(e) { console.error('exchangeCodeForSession(pkce_) exception:', e) }
       }
 
