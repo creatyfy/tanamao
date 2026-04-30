@@ -180,18 +180,18 @@
       const accessToken = getParam('access_token')
       const refreshToken = getParam('refresh_token') || ''
 
-      // Alguns links PKCE chegam com access_token=pkce_* (não é JWT de sessão).
-      // Nesses casos, tratar como token OTP de recovery antes do setSession.
+      // Alguns links PKCE chegam com access_token=pkce_* na hash.
+      // Nesses casos, usar exchangeCodeForSession com o valor pkce_.
       if (accessToken && accessToken.startsWith('pkce_')) {
         try {
-          const { data, error } = await supabase.auth.verifyOtp({ token: accessToken, type, email: getParam('email') || undefined })
+          const { data, error } = await supabase.auth.exchangeCodeForSession(accessToken)
           if (!error && data?.session) {
             show('formCard')
             return
           }
-          console.error('verifyOtp(pkce access_token) error:', error)
+          console.error('exchangeCodeForSession(pkce_) error:', error)
         } catch(e) {
-          console.error('verifyOtp(pkce access_token) exception:', e)
+          console.error('exchangeCodeForSession(pkce_) exception:', e)
         }
       }
 
