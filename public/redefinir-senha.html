@@ -128,84 +128,55 @@
       const token = getParam('token')
       const type = getParam('type') || 'recovery'
       const errorParam = getParam('error')
-
-      if (errorParam) {
-        show('errorCard')
-        return
-      }
-
-      // Formato PKCE - code na query string
-      if (code) {
-        try {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-          if (!error && data?.session) {
-            show('formCard')
-            return
-          }
-          console.error('exchangeCodeForSession error:', error)
-        } catch(e) {
-          console.error('exchangeCodeForSession exception:', e)
-        }
-      }
-
-      // Formato token_hash (novo formato)
-      if (tokenHash) {
-        try {
-          const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
-          if (!error && data?.session) {
-            show('formCard')
-            return
-          }
-          console.error('verifyOtp(token_hash) error:', error)
-        } catch(e) {
-          console.error('verifyOtp(token_hash) exception:', e)
-        }
-      }
-
-      // Formato token (alguns templates/custom links)
-      if (token) {
-        try {
-          const { data, error } = await supabase.auth.verifyOtp({ token, type, email: getParam('email') || undefined })
-          if (!error && data?.session) {
-            show('formCard')
-            return
-          }
-          console.error('verifyOtp(token) error:', error)
-        } catch(e) {
-          console.error('verifyOtp(token) exception:', e)
-        }
-      }
-
-      // Formato access_token na hash (fallback)
       const accessToken = getParam('access_token')
       const refreshToken = getParam('refresh_token') || ''
 
-      // Alguns links PKCE chegam com access_token=pkce_* na hash.
-      // Nesses casos, usar exchangeCodeForSession com o valor pkce_.
+      if (errorParam) { show('errorCard'); return }
+
+      // --- Estratégia 1: access_token=pkce_* na hash — é o code PKCE disfarçado ---
+      // O Supabase às vezes coloca o code PKCE no campo access_token da hash com prefixo pkce_
       if (accessToken && accessToken.startsWith('pkce_')) {
         try {
           const { data, error } = await supabase.auth.exchangeCodeForSession(accessToken)
-          if (!error && data?.session) {
-            show('formCard')
-            return
-          }
+          if (!error && data?.session) { show('formCard'); return }
           console.error('exchangeCodeForSession(pkce_) error:', error)
-        } catch(e) {
-          console.error('exchangeCodeForSession(pkce_) exception:', e)
-        }
+        } catch(e) { console.error('exchangeCodeForSession(pkce_) exception:', e) }
       }
 
-      if (accessToken) {
+      // --- Estratégia 2: access_token normal na hash (fluxo implicit real) ---
+      if (accessToken && !accessToken.startsWith('pkce_')) {
         try {
           const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
-          if (!error) {
-            show('formCard')
-            return
-          }
+          if (!error) { show('formCard'); return }
           console.error('setSession error:', error)
-        } catch(e) {
-          console.error('setSession exception:', e)
-        }
+        } catch(e) { console.error('setSession exception:', e) }
+      }
+
+      // --- Estratégia 3: token_hash na query string (formato moderno) ---
+      if (tokenHash) {
+        try {
+          const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
+          if (!error && data?.session) { show('formCard'); return }
+          console.error('verifyOtp(token_hash) error:', error)
+        } catch(e) { console.error('verifyOtp(token_hash) exception:', e) }
+      }
+
+      // --- Estratégia 4: code na query string (PKCE via query) ---
+      if (code) {
+        try {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+          if (!error && data?.session) { show('formCard'); return }
+          console.error('exchangeCodeForSession(code) error:', error)
+        } catch(e) { console.error('exchangeCodeForSession(code) exception:', e) }
+      }
+
+      // --- Estratégia 5: token OTP legado ---
+      if (token) {
+        try {
+          const { data, error } = await supabase.auth.verifyOtp({ token, type, email: getParam('email') || undefined })
+          if (!error && data?.session) { show('formCard'); return }
+          console.error('verifyOtp(token) error:', error)
+        } catch(e) { console.error('verifyOtp(token) exception:', e) }
       }
 
       show('errorCard')
