@@ -2182,70 +2182,199 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           )}
 
           {/* PRODUTOS */}
-          {activeTab === 'products' && (
-            <div className="max-w-6xl mx-auto">
-              <div className="flex justify-between items-center mb-6">
+          {activeTab === 'products' && !showSubcategoryPanel && (
+            <div className="max-w-6xl mx-auto space-y-6">
+              <div className="flex justify-between items-center">
                 <h2 className="text-2xl font-bold text-brand-dark">Gestão de Cardápio</h2>
                 <button onClick={openNewProductModal} className="bg-brand-primary text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm md:text-base">
                   <Plus size={20} className="mr-1 md:mr-2" /> <span className="hidden sm:inline">Novo Produto</span><span className="sm:hidden">Novo</span>
                 </button>
               </div>
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[800px]">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
-                      <th className="p-4 font-medium w-20">Foto</th>
-                      <th className="p-4 font-medium">Nome</th>
-                      <th className="p-4 font-medium">Categoria</th>
-                      <th className="p-4 font-medium">Preço</th>
-                      <th className="p-4 font-medium">Status</th>
-                      <th className="p-4 font-medium text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {products.map(p => (
-                      <tr key={p.id} className="hover:bg-gray-50">
-                        <td className="p-4">
-                          {p.image_url ? (
-                            <img src={p.image_url} alt={p.name} className="w-12 h-12 rounded-lg object-cover border border-gray-200" />
-                          ) : (
-                            <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 border border-gray-200">
-                              <ImageIcon size={20} />
-                            </div>
-                          )}
-                        </td>
-                        <td className="p-4">
-                          <p className="font-bold text-brand-dark">{p.name}</p>
-                          <p className="text-xs text-gray-500 truncate max-w-xs">{p.description}</p>
-                        </td>
-                        <td className="p-4 text-sm text-gray-600">
-                          {p.product_categories?.name || <span className="text-gray-400 italic">Sem categoria</span>}
-                        </td>
-                        <td className="p-4 font-bold text-brand-dark">R$ {p.price.toFixed(2)}</td>
-                        <td className="p-4">
-                          <button onClick={() => toggleProductAvailability(p)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${p.is_available ? 'bg-brand-light text-brand-primary hover:bg-green-100' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>
+
+              {/* Produtos sem categoria */}
+              {products.filter(p => !p.category_id).length > 0 && (
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                  <div className="px-5 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                    <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                      <FolderTree size={18} className="text-gray-400" /> Sem categoria
+                    </h3>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {products.filter(p => !p.category_id).map(p => (
+                      <div key={p.id} className="flex items-center gap-3 p-4 hover:bg-gray-50">
+                        {p.image_url ? (
+                          <img src={p.image_url} alt={p.name} className="w-12 h-12 rounded-xl object-cover border border-gray-200 shrink-0" />
+                        ) : (
+                          <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-gray-400 border border-gray-200 shrink-0"><ImageIcon size={20}/></div>
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-brand-dark truncate">{p.name}</p>
+                          <p className="text-xs text-gray-500 truncate">{p.description}</p>
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="font-bold text-brand-dark">R$ {p.price.toFixed(2)}</span>
+                          <button onClick={() => toggleProductAvailability(p)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${p.is_available ? 'bg-brand-light text-brand-primary' : 'bg-gray-200 text-gray-600'}`}>
                             {p.is_available ? 'Ativo' : 'Pausado'}
                           </button>
-                        </td>
-                        <td className="p-4 text-right">
-                          <button onClick={() => openEditProductModal(p)} className="p-2 text-gray-400 hover:text-blue-500 transition-colors"><Edit2 size={18}/></button>
-                          <button onClick={() => handleDeleteProduct(p.id)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
-                        </td>
-                      </tr>
+                          <button onClick={() => openEditProductModal(p)} className="p-2 text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button>
+                          <button onClick={() => handleDeleteProduct(p.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
+                        </div>
+                      </div>
                     ))}
-                    {products.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="p-12 text-center text-gray-500">
-                          <div className="flex flex-col items-center justify-center">
-                            <Package size={48} className="text-gray-300 mb-4" />
-                            <p className="font-medium">Nenhum produto cadastrado ainda.</p>
-                            <p className="text-sm mt-1">Clique em "Novo Produto" para começar a vender.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Produtos agrupados por categoria */}
+              {productCategories.map(cat => {
+                const catProducts = products.filter(p => p.category_id === cat.id);
+                return (
+                  <div key={cat.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
+                    {/* Cabeçalho da categoria */}
+                    <div className="px-5 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+                      <h3 className="font-bold text-gray-700 flex items-center gap-2">
+                        <FolderTree size={18} className="text-brand-primary" />
+                        {cat.name}
+                        <span className="text-xs font-normal text-gray-400">({catProducts.length} produto{catProducts.length !== 1 ? 's' : ''})</span>
+                      </h3>
+                      <button
+                        onClick={async () => {
+                          setSelectedCategoryForSub(cat);
+                          setShowSubcategoryPanel(true);
+                          await fetchSubcategories(cat.id);
+                        }}
+                        className="flex items-center gap-1.5 text-xs font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors border border-purple-200"
+                      >
+                        <Plus size={14} /> Gerenciar adicionais
+                      </button>
+                    </div>
+
+                    {/* Produtos da categoria */}
+                    {catProducts.length === 0 ? (
+                      <div className="p-6 text-center text-gray-400 text-sm">
+                        Nenhum produto nesta categoria ainda.
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-gray-100">
+                        {catProducts.map(p => (
+                          <div key={p.id} className="flex items-center gap-3 p-4 hover:bg-gray-50">
+                            {p.image_url ? (
+                              <img src={p.image_url} alt={p.name} className="w-12 h-12 rounded-xl object-cover border border-gray-200 shrink-0" />
+                            ) : (
+                              <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-gray-400 border border-gray-200 shrink-0"><ImageIcon size={20}/></div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-bold text-brand-dark truncate">{p.name}</p>
+                              <p className="text-xs text-gray-500 truncate">{p.description}</p>
+                            </div>
+                            <div className="flex items-center gap-3 shrink-0">
+                              <span className="font-bold text-brand-dark">R$ {p.price.toFixed(2)}</span>
+                              <button onClick={() => toggleProductAvailability(p)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${p.is_available ? 'bg-brand-light text-brand-primary' : 'bg-gray-200 text-gray-600'}`}>
+                                {p.is_available ? 'Ativo' : 'Pausado'}
+                              </button>
+                              <button onClick={() => openEditProductModal(p)} className="p-2 text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button>
+                              <button onClick={() => handleDeleteProduct(p.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
+                            </div>
                           </div>
-                        </td>
-                      </tr>
+                        ))}
+                      </div>
                     )}
-                  </tbody>
-                </table>
+                  </div>
+                );
+              })}
+
+              {products.length === 0 && productCategories.length === 0 && (
+                <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-500">
+                  <Package size={48} className="text-gray-300 mx-auto mb-4" />
+                  <p className="font-medium">Nenhum produto cadastrado ainda.</p>
+                  <p className="text-sm mt-1">Clique em "Novo Produto" para começar a vender.</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* SUBCATEGORIAS PANEL — acessível também pela aba de produtos */}
+          {activeTab === 'products' && showSubcategoryPanel && selectedCategoryForSub && (
+            <div className="max-w-6xl mx-auto">
+              <div className="flex items-center gap-3 mb-6">
+                <button onClick={() => { setShowSubcategoryPanel(false); setSubcategories([]); setSubItems([]); setSelectedSubcategoryForItem(null); }} className="p-2 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors">
+                  <ChevronLeft size={24} />
+                </button>
+                <div>
+                  <h2 className="text-2xl font-bold text-brand-dark">Adicionais do Cardápio</h2>
+                  <p className="text-sm text-gray-500">Categoria: <span className="font-bold text-brand-primary">{selectedCategoryForSub.name}</span> — aparecem em todos os produtos desta categoria</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditingSubcategory(null);
+                    setSubcategoryForm({ name: '', description: '', min_selections: '0', max_selections: '5', is_required: false });
+                    setShowSubcategoryModal(true);
+                  }}
+                  className="ml-auto bg-brand-primary text-white px-4 py-2.5 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm"
+                >
+                  <Plus size={18} className="mr-1" /> Novo Grupo
+                </button>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 text-sm text-blue-700">
+                💡 Os grupos de adicionais criados aqui aparecem automaticamente quando o cliente abre qualquer produto da categoria <strong>{selectedCategoryForSub.name}</strong>.
+              </div>
+
+              {subcategories.length === 0 && (
+                <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-500">
+                  <Plus size={48} className="text-gray-300 mx-auto mb-4" />
+                  <p className="font-medium">Nenhum grupo de adicionais criado.</p>
+                  <p className="text-sm mt-1">Clique em "Novo Grupo" para criar grupos como "Molhos", "Extras", "Tamanho".</p>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {subcategories.map(sub => (
+                  <div key={sub.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm">
+                    <div className="p-4 flex items-center justify-between border-b border-gray-100">
+                      <div>
+                        <h3 className="font-bold text-brand-dark">{sub.name}</h3>
+                        {sub.description && <p className="text-xs text-gray-500 mt-0.5">{sub.description}</p>}
+                        <div className="flex gap-2 mt-1">
+                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Mín: {sub.min_selections}</span>
+                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Máx: {sub.max_selections}</span>
+                          {sub.is_required && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Obrigatório</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedSubcategoryForItem(sub);
+                            setEditingSubItem(null);
+                            setSubItemForm({ name: '', description: '', price: '0', image_url: '' });
+                            setSubItemImageFile(null);
+                            setSubItemImagePreview(null);
+                            setShowSubItemModal(true);
+                            fetchSubItems(sub.id);
+                          }}
+                          className="text-xs bg-brand-light text-brand-primary px-3 py-1.5 rounded-lg font-bold hover:bg-green-100 transition-colors flex items-center gap-1"
+                        >
+                          <Plus size={14} /> Novo Item
+                        </button>
+                        <button onClick={() => {
+                          setEditingSubcategory(sub);
+                          setSubcategoryForm({ name: sub.name, description: sub.description || '', min_selections: sub.min_selections.toString(), max_selections: sub.max_selections.toString(), is_required: sub.is_required });
+                          setShowSubcategoryModal(true);
+                        }} className="p-2 text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button>
+                        <button onClick={() => handleDeleteSubcategory(sub.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
+                      </div>
+                    </div>
+                    <SubItemsList subcategoryId={sub.id} storeId={store!.id} onEdit={(item) => {
+                      setSelectedSubcategoryForItem(sub);
+                      setEditingSubItem(item);
+                      setSubItemForm({ name: item.name, description: item.description || '', price: item.price.toString(), image_url: item.image_url || '' });
+                      setSubItemImageFile(null);
+                      setSubItemImagePreview(item.image_url || null);
+                      fetchSubItems(sub.id);
+                      setShowSubItemModal(true);
+                    }} onDelete={(id) => handleDeleteSubItem(id)} />
+                  </div>
+                ))}
               </div>
             </div>
           )}
