@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Store, StoreCategory, Product, Order, Coupon, OrderChat } from '../types';
@@ -1240,7 +1241,6 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   );
 
   return (
-    <>
     <div className="w-full max-w-lg mx-auto h-screen bg-gray-50 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[900px] sm:my-8 md:max-w-2xl md:h-[95vh] border-4 border-gray-900" style={{paddingTop: 'env(safe-area-inset-top, 0px)'}}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       {loading && <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-brand-primary" size={40}/></div>}
@@ -2523,9 +2523,9 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       )}
     </div>
 
-    {/* PRODUCT MODAL — fora do container overflow-hidden */}
-    {showProductModal && selectedProduct && (
-      <div className="fixed inset-0 bg-black/60 z-[200] flex items-end justify-center" onClick={() => setShowProductModal(false)}>
+    {/* PRODUCT MODAL — via portal para garantir renderização acima de tudo no mobile */}
+    {showProductModal && selectedProduct && ReactDOM.createPortal(
+      <div className="fixed inset-0 bg-black/60 z-[9999] flex items-end justify-center" style={{position:'fixed',top:0,left:0,right:0,bottom:0}} onClick={() => setShowProductModal(false)}>
         <div className="bg-white w-full max-w-lg rounded-t-3xl max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-300" onClick={e => e.stopPropagation()}>
           {/* Header com foto */}
           <div className="relative shrink-0">
@@ -2604,7 +2604,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           </div>
         </div>
       </div>
-    )}
+    , document.body)}
     </>
   );
 }
