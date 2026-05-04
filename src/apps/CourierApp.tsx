@@ -60,7 +60,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   const deliveryStateRef = React.useRef('none');
   useEffect(() => { deliveryStateRef.current = deliveryState; }, [deliveryState]);
 
-  const [acceptTimer, setAcceptTimer] = useState(15);
+  const [acceptTimer, setAcceptTimer] = useState(60);
   const [activeDelivery, setActiveDelivery] = useState<any>(null);
   const activeDeliveryRef = React.useRef<any>(null);
   useEffect(() => { activeDeliveryRef.current = activeDelivery; }, [activeDelivery]);
