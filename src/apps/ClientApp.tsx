@@ -1240,6 +1240,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   );
 
   return (
+    <>
     <div className="w-full max-w-lg mx-auto h-screen bg-gray-50 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[900px] sm:my-8 md:max-w-2xl md:h-[95vh] border-4 border-gray-900" style={{paddingTop: 'env(safe-area-inset-top, 0px)'}}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       {loading && <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-brand-primary" size={40}/></div>}
@@ -2604,5 +2605,6 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         </div>
       </div>
     )}
+    </>
   );
-}z
+}
