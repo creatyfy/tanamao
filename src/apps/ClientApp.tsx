@@ -1245,86 +1245,6 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       {loading && <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-brand-primary" size={40}/></div>}
       
       {/* PRODUCT MODAL WITH SUBCATEGORIES */}
-      {showProductModal && selectedProduct && (
-        <div className="fixed inset-0 bg-black/60 z-[100] flex items-end justify-center">
-          <div className="bg-white w-full max-w-lg rounded-t-3xl max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-300">
-            {/* Header */}
-            <div className="relative shrink-0">
-              {selectedProduct.image_url ? (
-                <img src={selectedProduct.image_url} alt={selectedProduct.name} className="w-full h-48 object-cover rounded-t-3xl" />
-              ) : (
-                <div className="w-full h-32 bg-gray-100 rounded-t-3xl flex items-center justify-center text-gray-300"><StoreIcon size={48}/></div>
-              )}
-              <button onClick={() => setShowProductModal(false)} className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm p-2 rounded-full shadow-md"><X size={20}/></button>
-            </div>
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-5">
-              <div>
-                <h2 className="text-xl font-black text-brand-dark">{selectedProduct.name}</h2>
-                {selectedProduct.description && <p className="text-sm text-gray-500 mt-1">{selectedProduct.description}</p>}
-                <p className="text-lg font-bold text-brand-primary mt-2">R$ {Number(selectedProduct.price).toFixed(2)}</p>
-              </div>
-
-              {loadingSubcategories && (
-                <div className="flex justify-center py-4"><Loader2 className="animate-spin text-brand-primary" size={24}/></div>
-              )}
-
-              {productSubcategories.map(sub => (
-                <div key={sub.id} className="border border-gray-200 rounded-2xl overflow-hidden">
-                  <div className="bg-gray-50 px-4 py-3 flex justify-between items-center">
-                    <div>
-                      <h3 className="font-bold text-brand-dark text-sm">{sub.name}</h3>
-                      {sub.description && <p className="text-xs text-gray-500">{sub.description}</p>}
-                    </div>
-                    <div className="flex gap-1">
-                      {sub.is_required && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">Obrigatório</span>}
-                      <span className="text-[10px] bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
-                        {sub.max_selections === 1 ? 'Escolha 1' : `Até ${sub.max_selections}`}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="divide-y divide-gray-100">
-                    {(sub.subcategory_items || []).filter((i: any) => i.is_available).map((item: any) => {
-                      const selected = (subcategorySelections[sub.id] || []).find((s: any) => s.id === item.id);
-                      return (
-                        <button key={item.id} onClick={() => toggleSubcategoryItem(sub, item)}
-                          className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${selected ? 'bg-brand-light' : 'hover:bg-gray-50'}`}>
-                          {item.image_url && <img src={item.image_url} alt={item.name} className="w-10 h-10 rounded-lg object-cover shrink-0"/>}
-                          <div className="flex-1 text-left">
-                            <p className="font-medium text-sm text-brand-dark">{item.name}</p>
-                            {item.description && <p className="text-xs text-gray-500">{item.description}</p>}
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {Number(item.price) > 0 && <span className="text-sm font-bold text-brand-primary">+R$ {Number(item.price).toFixed(2)}</span>}
-                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${selected ? 'bg-brand-primary border-brand-primary' : 'border-gray-300'}`}>
-                              {selected && <Check size={12} className="text-white"/>}
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-            {/* Footer */}
-            <div className="p-4 border-t border-gray-100 shrink-0">
-              <button
-                onClick={addToCartWithSelections}
-                disabled={!canAddToCart()}
-                className="w-full bg-brand-primary text-white py-4 rounded-2xl font-black text-base flex items-center justify-between px-5 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-600 transition-colors"
-              >
-                <span>Adicionar ao carrinho</span>
-                <span>R$ {(Number(selectedProduct.price) + getSelectionsTotal()).toFixed(2)}</span>
-              </button>
-              {!canAddToCart() && (
-                <p className="text-center text-xs text-red-500 mt-2">Selecione os itens obrigatórios para continuar</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* CART CONFLICT MODAL */}
       {pendingProduct && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
@@ -2601,5 +2521,88 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         </div>
       )}
     </div>
+
+    {/* PRODUCT MODAL — fora do container overflow-hidden */}
+    {showProductModal && selectedProduct && (
+      <div className="fixed inset-0 bg-black/60 z-[200] flex items-end justify-center" onClick={() => setShowProductModal(false)}>
+        <div className="bg-white w-full max-w-lg rounded-t-3xl max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-300" onClick={e => e.stopPropagation()}>
+          {/* Header com foto */}
+          <div className="relative shrink-0">
+            {selectedProduct.image_url ? (
+              <img src={selectedProduct.image_url} alt={selectedProduct.name} className="w-full h-48 object-cover rounded-t-3xl" />
+            ) : (
+              <div className="w-full h-24 bg-gray-100 rounded-t-3xl flex items-center justify-center text-gray-300"><StoreIcon size={48}/></div>
+            )}
+            <button onClick={() => setShowProductModal(false)} className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm p-2 rounded-full shadow-md"><X size={20}/></button>
+          </div>
+
+          {/* Conteúdo scrollável */}
+          <div className="flex-1 overflow-y-auto p-5 space-y-5">
+            <div>
+              <h2 className="text-xl font-black text-brand-dark">{selectedProduct.name}</h2>
+              {selectedProduct.description && <p className="text-sm text-gray-500 mt-1">{selectedProduct.description}</p>}
+              <p className="text-lg font-bold text-brand-primary mt-2">R$ {Number(selectedProduct.price).toFixed(2)}</p>
+            </div>
+
+            {loadingSubcategories && (
+              <div className="flex justify-center py-4"><Loader2 className="animate-spin text-brand-primary" size={24}/></div>
+            )}
+
+            {productSubcategories.map(sub => (
+              <div key={sub.id} className="border border-gray-200 rounded-2xl overflow-hidden">
+                <div className="bg-gray-50 px-4 py-3 flex justify-between items-center">
+                  <div>
+                    <h3 className="font-bold text-brand-dark text-sm">{sub.name}</h3>
+                    {sub.description && <p className="text-xs text-gray-500">{sub.description}</p>}
+                  </div>
+                  <div className="flex gap-1 flex-wrap justify-end">
+                    {sub.is_required && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">Obrigatório</span>}
+                    <span className="text-[10px] bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                      {sub.max_selections === 1 ? 'Escolha 1' : `Até ${sub.max_selections}`}
+                    </span>
+                  </div>
+                </div>
+                <div className="divide-y divide-gray-100">
+                  {(sub.subcategory_items || []).filter((i: any) => i.is_available).map((item: any) => {
+                    const selected = (subcategorySelections[sub.id] || []).find((s: any) => s.id === item.id);
+                    return (
+                      <button key={item.id} onClick={() => toggleSubcategoryItem(sub, item)}
+                        className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${selected ? 'bg-brand-light' : 'hover:bg-gray-50'}`}>
+                        {item.image_url && <img src={item.image_url} alt={item.name} className="w-10 h-10 rounded-lg object-cover shrink-0"/>}
+                        <div className="flex-1 text-left">
+                          <p className="font-medium text-sm text-brand-dark">{item.name}</p>
+                          {item.description && <p className="text-xs text-gray-500">{item.description}</p>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {Number(item.price) > 0 && <span className="text-sm font-bold text-brand-primary">+R$ {Number(item.price).toFixed(2)}</span>}
+                          <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${selected ? 'bg-brand-primary border-brand-primary' : 'border-gray-300'}`}>
+                            {selected && <Check size={12} className="text-white"/>}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Footer com botão */}
+          <div className="p-4 border-t border-gray-100 shrink-0">
+            <button
+              onClick={addToCartWithSelections}
+              disabled={!canAddToCart()}
+              className="w-full bg-brand-primary text-white py-4 rounded-2xl font-black text-base flex items-center justify-between px-5 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-600 transition-colors"
+            >
+              <span>Adicionar ao carrinho</span>
+              <span>R$ {(Number(selectedProduct.price) + getSelectionsTotal()).toFixed(2)}</span>
+            </button>
+            {!canAddToCart() && (
+              <p className="text-center text-xs text-red-500 mt-2">Selecione os itens obrigatórios para continuar</p>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
   );
-}
+}z
