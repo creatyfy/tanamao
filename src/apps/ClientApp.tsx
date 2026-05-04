@@ -2605,7 +2605,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           </div>
         </div>
       </div>
-    , document.body)}
+    , document.documentElement)}
     </>
   );
 }
