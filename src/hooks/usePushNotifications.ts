@@ -122,55 +122,37 @@ export function usePushNotifications() {
   };
 
   const sendNotification = async (title: string, options?: NotificationOptions) => {
-    // Toca som de alerta
+    // Som de alerta via AudioContext (funciona no app aberto, nativo e web)
     try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const playBeep = (freq: number, start: number, duration: number) => {
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.frequency.value = freq;
-        osc.type = 'sine';
-        gain.gain.setValueAtTime(0.8, audioCtx.currentTime + start);
-        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + start + duration);
-        osc.start(audioCtx.currentTime + start);
-        osc.stop(audioCtx.currentTime + start + duration);
-      };
-      playBeep(880, 0, 0.3);
-      playBeep(1100, 0.35, 0.3);
-      playBeep(880, 0.7, 0.3);
-      playBeep(1100, 1.05, 0.5);
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const audioCtx = new AudioCtx();
+        const playBeep = (freq: number, start: number, dur: number) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.frequency.value = freq;
+          osc.type = 'sine';
+          gain.gain.setValueAtTime(0.7, audioCtx.currentTime + start);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + start + dur);
+          osc.start(audioCtx.currentTime + start);
+          osc.stop(audioCtx.currentTime + start + dur + 0.05);
+        };
+        playBeep(880, 0, 0.25);
+        playBeep(1100, 0.3, 0.25);
+        playBeep(880, 0.6, 0.25);
+        playBeep(1320, 0.9, 0.4);
+      }
     } catch (err) {
       console.warn('Audio error:', err);
     }
 
-    // Vibração
+    // Vibração forte
     if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 600]);
 
-    // Notificação local nativa (Capacitor) — mostra banner mesmo com app aberto
-    if (isNative()) {
-      try {
-        const { LocalNotifications } = await import('@capacitor/local-notifications');
-        const perm = await LocalNotifications.requestPermissions();
-        if (perm.display === 'granted') {
-          await LocalNotifications.schedule({
-            notifications: [{
-              title,
-              body: (options as any)?.body || '',
-              id: Math.floor(Math.random() * 100000),
-              iconColor: '#10b981',
-            }]
-          });
-        }
-      } catch (err) {
-        console.warn('Local notification native error:', err);
-      }
-      return;
-    }
-
-    // Notificação local web
-    if ('Notification' in window && Notification.permission === 'granted') {
+    // Notificação visual — apenas web (no nativo o som+vibração já avisam)
+    if (!isNative() && 'Notification' in window && Notification.permission === 'granted') {
       try {
         new Notification(title, {
           icon: '/icon-192.png',
