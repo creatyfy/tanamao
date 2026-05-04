@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Store, StoreCategory, Product, Order, Coupon, OrderChat } from '../types';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { Search, MapPin, Star, Clock, Bike, ChevronLeft, Plus, Minus, ShoppingBag, CheckCircle, History, Home, User, CreditCard, Loader2, X, Store as StoreIcon, LogOut, MessageSquare, Trash2, Ticket, BellRing, Send, Heart, AlertTriangle } from 'lucide-react';
+import { Search, MapPin, Star, Clock, Bike, ChevronLeft, Plus, Minus, ShoppingBag, CheckCircle, History, Home, User, CreditCard, Loader2, X, Store as StoreIcon, LogOut, MessageSquare, Trash2, Ticket, BellRing, Send, Heart, AlertTriangle, Check } from 'lucide-react';
 
 // Função auxiliar para normalizar strings (remove acentos, espaços e deixa minúsculo)
 const normalizeString = (str?: string) => {
@@ -100,7 +100,25 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const [selectedStore, setSelectedStore] = useState<Store | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [storeCategories, setStoreCategories] = useState<any[]>([]); // Categorias internas da loja
-  const [cart, setCart] = useState<any[]>([]);
+  const [cart, setCart] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('tanamao_cart');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+  const [cartStoreId, setCartStoreId] = useState<number | null>(() => {
+    try {
+      const saved = localStorage.getItem('tanamao_cart_store_id');
+      return saved ? parseInt(saved) : null;
+    } catch { return null; }
+  });
+
+  // Product modal with subcategories
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [productSubcategories, setProductSubcategories] = useState<any[]>([]);
+  const [subcategorySelections, setSubcategorySelections] = useState<Record<number, any[]>>({});
+  const [loadingSubcategories, setLoadingSubcategories] = useState(false);
   const [favoriteStoreIds, setFavoriteStoreIds] = useState<number[]>([]); // Lojas Favoritas
   
   // Filters
@@ -546,6 +564,90 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     }
   };
 
+  // Persist cart to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('tanamao_cart', JSON.stringify(cart));
+      if (cart.length > 0) {
+        localStorage.setItem('tanamao_cart_store_id', cart[0].store_id.toString());
+      } else {
+        localStorage.removeItem('tanamao_cart_store_id');
+      }
+    } catch {}
+  }, [cart]);
+
+  const openProductModal = async (product: any) => {
+    setSelectedProduct(product);
+    setSubcategorySelections({});
+    setShowProductModal(true);
+    setLoadingSubcategories(true);
+    try {
+      const { data } = await supabase
+        .from('product_subcategories')
+        .select('*, subcategory_items(*)')
+        .eq('category_id', product.category_id)
+        .eq('is_active', true)
+        .order('sort_order');
+      setProductSubcategories(data || []);
+    } catch {}
+    setLoadingSubcategories(false);
+  };
+
+  const toggleSubcategoryItem = (subcategory: any, item: any) => {
+    setSubcategorySelections(prev => {
+      const current = prev[subcategory.id] || [];
+      const exists = current.find((s: any) => s.id === item.id);
+      if (exists) {
+        return { ...prev, [subcategory.id]: current.filter((s: any) => s.id !== item.id) };
+      }
+      if (current.length >= subcategory.max_selections) {
+        if (subcategory.max_selections === 1) {
+          return { ...prev, [subcategory.id]: [item] };
+        }
+        showToast(`Máximo de ${subcategory.max_selections} itens para "${subcategory.name}"`, 'warning');
+        return prev;
+      }
+      return { ...prev, [subcategory.id]: [...current, item] };
+    });
+  };
+
+  const getSelectionsTotal = () => {
+    return Object.values(subcategorySelections).flat().reduce((acc: number, item: any) => acc + Number(item.price || 0), 0);
+  };
+
+  const canAddToCart = () => {
+    if (!selectedProduct) return false;
+    return productSubcategories.every(sub => {
+      if (!sub.is_required) return true;
+      const selected = subcategorySelections[sub.id] || [];
+      return selected.length >= sub.min_selections;
+    });
+  };
+
+  const addToCartWithSelections = () => {
+    if (!selectedProduct) return;
+    const selections = Object.values(subcategorySelections).flat() as any[];
+    const itemTotal = Number(selectedProduct.price) + getSelectionsTotal();
+    const cartItem = {
+      ...selectedProduct,
+      quantity: 1,
+      price: itemTotal,
+      base_price: Number(selectedProduct.price),
+      selections,
+      cart_key: `${selectedProduct.id}_${Date.now()}`,
+    };
+
+    if (cart.length > 0 && cart[0].store_id !== selectedProduct.store_id) {
+      setPendingProduct(cartItem);
+      setShowProductModal(false);
+      return;
+    }
+
+    setCart(prev => [...prev, cartItem]);
+    setShowProductModal(false);
+    showToast('Adicionado ao carrinho! 🛒');
+  };
+
   const addToCart = (product: Product) => {
     if (cart.length > 0 && cart[0].store_id !== product.store_id) {
       setPendingProduct(product);
@@ -553,9 +655,9 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     }
 
     setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
-      return [...prev, { ...product, quantity: 1 }];
+      const existing = prev.find(item => item.id === product.id && !item.selections?.length);
+      if (existing) return prev.map(item => item.id === product.id && !item.selections?.length ? { ...item, quantity: item.quantity + 1 } : item);
+      return [...prev, { ...product, quantity: 1, cart_key: `${product.id}_${Date.now()}` }];
     });
     showToast('Adicionado ao carrinho');
   };
@@ -675,6 +777,13 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     }
     
     // Bloqueia se a loja fechou depois que o cliente abriu o cardápio
+    // Verify store is still open before placing order
+    const { data: freshStore } = await supabase.from('stores').select('is_open').eq('id', selectedStore.id).single();
+    if (!freshStore?.is_open) {
+      showToast('A loja está fechada no momento. Aguarde ela reabrir.', 'error');
+      return;
+    }
+
     if (!selectedStore.is_open) {
       showToast('Esta loja fechou. Não é possível finalizar o pedido.', 'error');
       return;
@@ -720,8 +829,30 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         total_price: Number(item.price) * item.quantity
       }));
       
-      const { error: itemsErr } = await supabase.from('order_items').insert(orderItems);
+      const { error: itemsErr, data: insertedItems } = await supabase.from('order_items').insert(orderItems).select();
       if (itemsErr) throw itemsErr;
+
+      // Save subcategory selections
+      if (insertedItems) {
+        const allSelections: any[] = [];
+        cart.forEach((item, idx) => {
+          if (item.selections?.length && insertedItems[idx]) {
+            item.selections.forEach((sel: any) => {
+              allSelections.push({
+                order_item_id: insertedItems[idx].id,
+                subcategory_item_id: sel.id,
+                subcategory_id: sel.subcategory_id || 0,
+                item_name: sel.name,
+                item_price: Number(sel.price || 0),
+                quantity: 1,
+              });
+            });
+          }
+        });
+        if (allSelections.length > 0) {
+          await supabase.from('order_item_selections').insert(allSelections);
+        }
+      }
 
       // Register coupon usage
       if (appliedCoupon) {
@@ -1089,8 +1220,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
   const showBottomBar = ['home', 'history', 'profile'].includes(currentScreen);
 
   // Renderizador de Produtos
-  const renderProduct = (product: Product) => (
-    <div key={product.id} className="flex border-b border-gray-100 pb-4 mb-4 last:border-0 last:pb-0 last:mb-0">
+  const renderProduct = (product: any) => (
+    <div key={product.id} onClick={() => openProductModal(product)} className="flex border-b border-gray-100 pb-4 mb-4 last:border-0 last:pb-0 last:mb-0 cursor-pointer hover:bg-gray-50 rounded-xl p-2 -mx-2 transition-colors">
       <div className="flex-1 pr-4">
         <h3 className="font-semibold text-brand-dark">{product.name}</h3>
         <p className="text-xs text-gray-500 mt-1 line-clamp-2">{product.description}</p>
@@ -1104,7 +1235,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             <StoreIcon size={32} />
           </div>
         )}
-        <button onClick={() => addToCart(product)} className="absolute -bottom-2 -right-2 bg-brand-primary text-white p-2 rounded-full shadow-md hover:bg-green-600 transition-transform active:scale-90"><Plus size={16} /></button>
+        <button onClick={e => { e.stopPropagation(); openProductModal(product); }} className="absolute -bottom-2 -right-2 bg-brand-primary text-white p-2 rounded-full shadow-md hover:bg-green-600 transition-transform active:scale-90"><Plus size={16} /></button>
       </div>
     </div>
   );
@@ -1114,6 +1245,87 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       {loading && <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center"><Loader2 className="animate-spin text-brand-primary" size={40}/></div>}
       
+      {/* PRODUCT MODAL WITH SUBCATEGORIES */}
+      {showProductModal && selectedProduct && (
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-end justify-center">
+          <div className="bg-white w-full max-w-lg rounded-t-3xl max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-300">
+            {/* Header */}
+            <div className="relative shrink-0">
+              {selectedProduct.image_url ? (
+                <img src={selectedProduct.image_url} alt={selectedProduct.name} className="w-full h-48 object-cover rounded-t-3xl" />
+              ) : (
+                <div className="w-full h-32 bg-gray-100 rounded-t-3xl flex items-center justify-center text-gray-300"><StoreIcon size={48}/></div>
+              )}
+              <button onClick={() => setShowProductModal(false)} className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm p-2 rounded-full shadow-md"><X size={20}/></button>
+            </div>
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              <div>
+                <h2 className="text-xl font-black text-brand-dark">{selectedProduct.name}</h2>
+                {selectedProduct.description && <p className="text-sm text-gray-500 mt-1">{selectedProduct.description}</p>}
+                <p className="text-lg font-bold text-brand-primary mt-2">R$ {Number(selectedProduct.price).toFixed(2)}</p>
+              </div>
+
+              {loadingSubcategories && (
+                <div className="flex justify-center py-4"><Loader2 className="animate-spin text-brand-primary" size={24}/></div>
+              )}
+
+              {productSubcategories.map(sub => (
+                <div key={sub.id} className="border border-gray-200 rounded-2xl overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 flex justify-between items-center">
+                    <div>
+                      <h3 className="font-bold text-brand-dark text-sm">{sub.name}</h3>
+                      {sub.description && <p className="text-xs text-gray-500">{sub.description}</p>}
+                    </div>
+                    <div className="flex gap-1">
+                      {sub.is_required && <span className="text-[10px] bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">Obrigatório</span>}
+                      <span className="text-[10px] bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full">
+                        {sub.max_selections === 1 ? 'Escolha 1' : `Até ${sub.max_selections}`}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="divide-y divide-gray-100">
+                    {(sub.subcategory_items || []).filter((i: any) => i.is_available).map((item: any) => {
+                      const selected = (subcategorySelections[sub.id] || []).find((s: any) => s.id === item.id);
+                      return (
+                        <button key={item.id} onClick={() => toggleSubcategoryItem(sub, item)}
+                          className={`w-full flex items-center gap-3 px-4 py-3 transition-colors ${selected ? 'bg-brand-light' : 'hover:bg-gray-50'}`}>
+                          {item.image_url && <img src={item.image_url} alt={item.name} className="w-10 h-10 rounded-lg object-cover shrink-0"/>}
+                          <div className="flex-1 text-left">
+                            <p className="font-medium text-sm text-brand-dark">{item.name}</p>
+                            {item.description && <p className="text-xs text-gray-500">{item.description}</p>}
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {Number(item.price) > 0 && <span className="text-sm font-bold text-brand-primary">+R$ {Number(item.price).toFixed(2)}</span>}
+                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${selected ? 'bg-brand-primary border-brand-primary' : 'border-gray-300'}`}>
+                              {selected && <Check size={12} className="text-white"/>}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {/* Footer */}
+            <div className="p-4 border-t border-gray-100 shrink-0">
+              <button
+                onClick={addToCartWithSelections}
+                disabled={!canAddToCart()}
+                className="w-full bg-brand-primary text-white py-4 rounded-2xl font-black text-base flex items-center justify-between px-5 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-green-600 transition-colors"
+              >
+                <span>Adicionar ao carrinho</span>
+                <span>R$ {(Number(selectedProduct.price) + getSelectionsTotal()).toFixed(2)}</span>
+              </button>
+              {!canAddToCart() && (
+                <p className="text-center text-xs text-red-500 mt-2">Selecione os itens obrigatórios para continuar</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CART CONFLICT MODAL */}
       {pendingProduct && (
         <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
