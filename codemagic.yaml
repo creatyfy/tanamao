@@ -6,7 +6,7 @@ workflows:
     integrations:
       app_store_connect: Apple Codemagic
     environment:
-      xcode: 16.3
+      xcode: latest
       groups:
         - tanamao
       ios_signing:
@@ -73,7 +73,7 @@ workflows:
         script: |
           PLIST="ios/App/App/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.6" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.5" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Tá Na Mão" "$PLIST" 2>/dev/null || \
@@ -189,8 +189,8 @@ workflows:
           npx @capacitor/assets generate --android
       - name: Increment Android build number
         script: |
-          sed -i '' 's/versionCode [0-9]*/versionCode 10/' android/app/build.gradle
-          sed -i '' 's/versionName "[0-9]*\.[0-9]*"/versionName "2.5"/' android/app/build.gradle
+          sed -i '' 's/versionCode [0-9]*/versionCode 9/' android/app/build.gradle
+          sed -i '' 's/versionName "[0-9]*\.[0-9]*"/versionName "2.4"/' android/app/build.gradle
       - name: Build Android AAB
         script: |
           set -euo pipefail
