@@ -2526,7 +2526,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
 
     {/* PRODUCT MODAL — fora do container overflow-hidden */}
     {showProductModal && selectedProduct && ReactDOM.createPortal(
-      <div className="fixed inset-0 bg-black/60 z-[9999] flex items-end justify-center" style={{position:'fixed',top:0,left:0,right:0,bottom:0}} onClick={() => setShowProductModal(false)}>
+      <div className="fixed inset-0 bg-black/60 flex items-end justify-center" style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:9999,pointerEvents:'all'}} onClick={() => setShowProductModal(false)}>
         <div className="bg-white w-full max-w-lg rounded-t-3xl max-h-[90vh] flex flex-col animate-in slide-in-from-bottom duration-300" onClick={e => e.stopPropagation()}>
           {/* Header com foto */}
           <div className="relative shrink-0">
@@ -2605,7 +2605,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           </div>
         </div>
       </div>
-    , document.documentElement)}
+    , document.getElementById('portal-root') || document.body)}
     </>
   );
 }
