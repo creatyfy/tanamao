@@ -263,7 +263,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           showToast('Ative o GPS do celular e dê permissão para ficar online.', 'error');
           setLoading(false);
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
       );
     } else {
       setLoading(true);
@@ -383,7 +383,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           console.warn("Sinal de GPS perdido:", err);
           setGpsError(true);
         },
-        { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 }
       );
     }
 
