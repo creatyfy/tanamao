@@ -13,6 +13,41 @@ import {
   Menu, ChevronLeft
 } from 'lucide-react';
 
+// Sub-component to list items of a subcategory
+function SubItemsList({ subcategoryId, storeId, onEdit, onDelete }: { subcategoryId: number, storeId: number, onEdit: (item: any) => void, onDelete: (id: number) => void }) {
+  const [items, setItems] = React.useState<any[]>([]);
+  React.useEffect(() => {
+    supabase.from('subcategory_items').select('*').eq('subcategory_id', subcategoryId).order('sort_order').then(({ data }) => setItems(data || []));
+  }, [subcategoryId]);
+
+  if (items.length === 0) return (
+    <div className="p-4 text-center text-sm text-gray-400">Nenhum item cadastrado. Clique em "Novo Item" para adicionar.</div>
+  );
+
+  return (
+    <div className="divide-y divide-gray-50">
+      {items.map(item => (
+        <div key={item.id} className="p-3 flex items-center gap-3">
+          {item.image_url ? (
+            <img src={item.image_url} alt={item.name} className="w-10 h-10 rounded-lg object-cover border border-gray-200 shrink-0" />
+          ) : (
+            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 text-gray-400 text-xs">Sem foto</div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-sm text-brand-dark truncate">{item.name}</p>
+            {item.description && <p className="text-xs text-gray-500 truncate">{item.description}</p>}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="font-bold text-brand-primary text-sm">{item.price > 0 ? `+R$ ${Number(item.price).toFixed(2)}` : 'Grátis'}</span>
+            <button onClick={() => onEdit(item)} className="p-1.5 text-gray-400 hover:text-blue-500"><Edit2 size={14}/></button>
+            <button onClick={() => onDelete(item.id)} className="p-1.5 text-gray-400 hover:text-red-500"><Trash2 size={14}/></button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function StoreApp({ onExit }: { onExit: () => void }) {
   const { user } = useAuth();
   const { permission: notifPermission, requestPermission, sendNotification } = usePushNotifications();
@@ -106,6 +141,21 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [categoryForm, setCategoryForm] = useState({ name: '', sort_order: '0', is_active: true });
+
+  // Subcategory state
+  const [showSubcategoryPanel, setShowSubcategoryPanel] = useState(false);
+  const [selectedCategoryForSub, setSelectedCategoryForSub] = useState<any>(null);
+  const [subcategories, setSubcategories] = useState<any[]>([]);
+  const [showSubcategoryModal, setShowSubcategoryModal] = useState(false);
+  const [editingSubcategory, setEditingSubcategory] = useState<any>(null);
+  const [subcategoryForm, setSubcategoryForm] = useState({ name: '', description: '', min_selections: '0', max_selections: '5', is_required: false });
+  const [showSubItemModal, setShowSubItemModal] = useState(false);
+  const [editingSubItem, setEditingSubItem] = useState<any>(null);
+  const [selectedSubcategoryForItem, setSelectedSubcategoryForItem] = useState<any>(null);
+  const [subItems, setSubItems] = useState<any[]>([]);
+  const [subItemForm, setSubItemForm] = useState({ name: '', description: '', price: '0', image_url: '' });
+  const [subItemImageFile, setSubItemImageFile] = useState<File | null>(null);
+  const [subItemImagePreview, setSubItemImagePreview] = useState<string | null>(null);
 
   // Coupon Modal State
   const [showCouponModal, setShowCouponModal] = useState(false);
@@ -525,6 +575,122 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       .order('sort_order', { ascending: true });
     if (error) { console.warn(`product_categories(store_id=${storeId}):`, error.message); return; }
     if (data) setProductCategories(data);
+  };
+
+  const fetchSubcategories = async (categoryId: number) => {
+    const { data, error } = await supabase
+      .from('product_subcategories')
+      .select('*')
+      .eq('category_id', categoryId)
+      .order('sort_order');
+    if (error) { console.warn('fetchSubcategories:', error.message); return; }
+    setSubcategories(data || []);
+  };
+
+  const fetchSubItems = async (subcategoryId: number) => {
+    const { data, error } = await supabase
+      .from('subcategory_items')
+      .select('*')
+      .eq('subcategory_id', subcategoryId)
+      .order('sort_order');
+    if (error) { console.warn('fetchSubItems:', error.message); return; }
+    setSubItems(data || []);
+  };
+
+  const handleSaveSubcategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!store || !selectedCategoryForSub) return;
+    setActionLoading(-10);
+    try {
+      const data = {
+        store_id: store.id,
+        category_id: selectedCategoryForSub.id,
+        name: subcategoryForm.name,
+        description: subcategoryForm.description,
+        min_selections: parseInt(subcategoryForm.min_selections) || 0,
+        max_selections: parseInt(subcategoryForm.max_selections) || 1,
+        is_required: subcategoryForm.is_required,
+      };
+      if (editingSubcategory) {
+        await supabase.from('product_subcategories').update(data).eq('id', editingSubcategory.id);
+        showToast('Subcategoria atualizada!');
+      } else {
+        await supabase.from('product_subcategories').insert(data);
+        showToast('Subcategoria criada!');
+      }
+      setShowSubcategoryModal(false);
+      fetchSubcategories(selectedCategoryForSub.id);
+    } catch (err) {
+      showToast('Erro ao salvar subcategoria', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteSubcategory = (id: number) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Subcategoria',
+      message: 'Isso vai excluir a subcategoria e todos os seus itens. Confirmar?',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        await supabase.from('product_subcategories').delete().eq('id', id);
+        showToast('Subcategoria excluída');
+        if (selectedCategoryForSub) fetchSubcategories(selectedCategoryForSub.id);
+      }
+    });
+  };
+
+  const handleSaveSubItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!store || !selectedSubcategoryForItem) return;
+    setActionLoading(-11);
+    try {
+      let imageUrl = subItemForm.image_url;
+      if (subItemImageFile) {
+        const ext = subItemImageFile.name.split('.').pop();
+        const fileName = `subitem_${store.id}_${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage.from('products').upload(fileName, subItemImageFile, { upsert: false });
+        if (uploadErr) throw new Error('Erro ao fazer upload da imagem.');
+        const { data: urlData } = supabase.storage.from('products').getPublicUrl(fileName);
+        imageUrl = urlData.publicUrl;
+      }
+      const data = {
+        subcategory_id: selectedSubcategoryForItem.id,
+        store_id: store.id,
+        name: subItemForm.name,
+        description: subItemForm.description,
+        price: parseFloat(subItemForm.price) || 0,
+        image_url: imageUrl || null,
+      };
+      if (editingSubItem) {
+        await supabase.from('subcategory_items').update(data).eq('id', editingSubItem.id);
+        showToast('Item atualizado!');
+      } else {
+        await supabase.from('subcategory_items').insert(data);
+        showToast('Item criado!');
+      }
+      setShowSubItemModal(false);
+      fetchSubItems(selectedSubcategoryForItem.id);
+    } catch (err: any) {
+      showToast(err.message || 'Erro ao salvar item', 'error');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteSubItem = (id: number) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Item',
+      message: 'Confirma a exclusão deste item?',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        await supabase.from('subcategory_items').delete().eq('id', id);
+        showToast('Item excluído');
+        if (selectedSubcategoryForItem) fetchSubItems(selectedSubcategoryForItem.id);
+      }
+    });
   };
 
   const fetchCoupons = async (storeId: number) => {
@@ -1843,7 +2009,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           )}
 
           {/* CATEGORIAS DO CARDÁPIO */}
-          {activeTab === 'categories' && (
+          {activeTab === 'categories' && !showSubcategoryPanel && (
             <div className="max-w-6xl mx-auto">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold text-brand-dark">Categorias do Cardápio</h2>
@@ -1872,6 +2038,15 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                           </button>
                         </td>
                         <td className="p-4 text-right">
+                          <button
+                            onClick={() => {
+                              setSelectedCategoryForSub(c);
+                              setShowSubcategoryPanel(true);
+                              fetchSubcategories(c.id);
+                            }}
+                            className="p-2 text-gray-400 hover:text-purple-500 transition-colors"
+                            title="Gerenciar Subcategorias/Adicionais"
+                          ><Plus size={18}/></button>
                           <button onClick={() => openEditCategoryModal(c)} className="p-2 text-gray-400 hover:text-blue-500 transition-colors"><Edit2 size={18}/></button>
                           <button onClick={() => handleDeleteCategory(c.id)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
                         </td>
@@ -1890,6 +2065,92 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* SUBCATEGORIAS PANEL */}
+          {activeTab === 'categories' && showSubcategoryPanel && selectedCategoryForSub && (
+            <div className="max-w-6xl mx-auto">
+              <div className="flex items-center gap-3 mb-6">
+                <button onClick={() => { setShowSubcategoryPanel(false); setSubcategories([]); setSubItems([]); setSelectedSubcategoryForItem(null); }} className="p-2 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors">
+                  <ChevronLeft size={24} />
+                </button>
+                <div>
+                  <h2 className="text-2xl font-bold text-brand-dark">Subcategorias / Adicionais</h2>
+                  <p className="text-sm text-gray-500">Categoria: <span className="font-bold text-brand-primary">{selectedCategoryForSub.name}</span></p>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditingSubcategory(null);
+                    setSubcategoryForm({ name: '', description: '', min_selections: '0', max_selections: '5', is_required: false });
+                    setShowSubcategoryModal(true);
+                  }}
+                  className="ml-auto bg-brand-primary text-white px-4 py-2.5 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm"
+                >
+                  <Plus size={18} className="mr-1" /> Nova Subcategoria
+                </button>
+              </div>
+
+              <p className="text-sm text-gray-500 mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                💡 Subcategorias aparecem como grupos de opções quando o cliente escolhe um produto desta categoria. Ex: "Adicionais", "Tamanho", "Complementos".
+              </p>
+
+              {subcategories.length === 0 && (
+                <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-500">
+                  <Plus size={48} className="text-gray-300 mx-auto mb-4" />
+                  <p className="font-medium">Nenhuma subcategoria criada.</p>
+                  <p className="text-sm mt-1">Crie grupos de opções extras para os produtos desta categoria.</p>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {subcategories.map(sub => (
+                  <div key={sub.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm">
+                    <div className="p-4 flex items-center justify-between border-b border-gray-100">
+                      <div>
+                        <h3 className="font-bold text-brand-dark">{sub.name}</h3>
+                        {sub.description && <p className="text-xs text-gray-500 mt-0.5">{sub.description}</p>}
+                        <div className="flex gap-2 mt-1">
+                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Mín: {sub.min_selections}</span>
+                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Máx: {sub.max_selections}</span>
+                          {sub.is_required && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Obrigatório</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedSubcategoryForItem(sub);
+                            setEditingSubItem(null);
+                            setSubItemForm({ name: '', description: '', price: '0', image_url: '' });
+                            setSubItemImageFile(null);
+                            setSubItemImagePreview(null);
+                            setShowSubItemModal(true);
+                            fetchSubItems(sub.id);
+                          }}
+                          className="text-xs bg-brand-light text-brand-primary px-3 py-1.5 rounded-lg font-bold hover:bg-green-100 transition-colors flex items-center gap-1"
+                        >
+                          <Plus size={14} /> Novo Item
+                        </button>
+                        <button onClick={() => {
+                          setEditingSubcategory(sub);
+                          setSubcategoryForm({ name: sub.name, description: sub.description || '', min_selections: sub.min_selections.toString(), max_selections: sub.max_selections.toString(), is_required: sub.is_required });
+                          setShowSubcategoryModal(true);
+                        }} className="p-2 text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button>
+                        <button onClick={() => handleDeleteSubcategory(sub.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
+                      </div>
+                    </div>
+                    <SubItemsList subcategoryId={sub.id} storeId={store!.id} onEdit={(item) => {
+                      setSelectedSubcategoryForItem(sub);
+                      setEditingSubItem(item);
+                      setSubItemForm({ name: item.name, description: item.description || '', price: item.price.toString(), image_url: item.image_url || '' });
+                      setSubItemImageFile(null);
+                      setSubItemImagePreview(item.image_url || null);
+                      fetchSubItems(sub.id);
+                      setShowSubItemModal(true);
+                    }} onDelete={(id) => handleDeleteSubItem(id)} />
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -2385,6 +2646,111 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                 <button type="button" onClick={() => setShowCouponModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold">Cancelar</button>
                 <button type="submit" disabled={actionLoading === -2} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center">
                   {actionLoading === -2 ? <Loader2 size={20} className="animate-spin"/> : 'Criar Cupom'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SUBCATEGORY MODAL */}
+      {showSubcategoryModal && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-brand-dark">{editingSubcategory ? 'Editar Subcategoria' : 'Nova Subcategoria'}</h2>
+              <button onClick={() => setShowSubcategoryModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
+            </div>
+            <form onSubmit={handleSaveSubcategory} className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Nome do grupo *</label>
+                <input type="text" required placeholder="Ex: Adicionais, Tamanho, Complementos" value={subcategoryForm.name} onChange={e => setSubcategoryForm({...subcategoryForm, name: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Descrição (opcional)</label>
+                <input type="text" placeholder="Ex: Escolha até 3 complementos" value={subcategoryForm.description} onChange={e => setSubcategoryForm({...subcategoryForm, description: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Mínimo</label>
+                  <input type="number" min="0" value={subcategoryForm.min_selections} onChange={e => setSubcategoryForm({...subcategoryForm, min_selections: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-bold text-gray-700 mb-1">Máximo</label>
+                  <input type="number" min="1" value={subcategoryForm.max_selections} onChange={e => setSubcategoryForm({...subcategoryForm, max_selections: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+                </div>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" checked={subcategoryForm.is_required} onChange={e => setSubcategoryForm({...subcategoryForm, is_required: e.target.checked})} className="w-5 h-5 accent-brand-primary" />
+                <span className="font-bold text-gray-700">Obrigatório</span>
+                <span className="text-xs text-gray-500">(cliente precisa escolher antes de adicionar ao carrinho)</span>
+              </label>
+              <div className="pt-2 flex gap-3">
+                <button type="button" onClick={() => setShowSubcategoryModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold">Cancelar</button>
+                <button type="submit" disabled={actionLoading === -10} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center">
+                  {actionLoading === -10 ? <Loader2 size={20} className="animate-spin"/> : 'Salvar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* SUB ITEM MODAL */}
+      {showSubItemModal && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto scrollbar-hide">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-brand-dark">{editingSubItem ? 'Editar Item' : 'Novo Item'}</h2>
+                {selectedSubcategoryForItem && <p className="text-xs text-gray-500">Em: {selectedSubcategoryForItem.name}</p>}
+              </div>
+              <button onClick={() => setShowSubItemModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
+            </div>
+            <form onSubmit={handleSaveSubItem} className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Foto do item</label>
+                <label htmlFor="subitem-image-upload" className="w-full h-32 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative cursor-pointer hover:bg-gray-100 transition-colors group">
+                  {subItemImagePreview ? (
+                    <>
+                      <img src={subItemImagePreview} alt="Preview" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className="text-white font-bold text-sm">Trocar</span>
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center text-gray-400">
+                      <ImageIcon size={28} className="mb-1" />
+                      <span className="text-sm font-bold">Clique para enviar foto</span>
+                    </div>
+                  )}
+                </label>
+                <input id="subitem-image-upload" type="file" accept="image/*" onChange={e => {
+                  if (e.target.files?.[0]) {
+                    setSubItemImageFile(e.target.files[0]);
+                    const r = new FileReader();
+                    r.onload = ev => setSubItemImagePreview(ev.target?.result as string);
+                    r.readAsDataURL(e.target.files[0]);
+                  }
+                }} className="hidden" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Nome do item *</label>
+                <input type="text" required placeholder="Ex: Bacon, Queijo extra, 300ml" value={subItemForm.name} onChange={e => setSubItemForm({...subItemForm, name: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Descrição (opcional)</label>
+                <input type="text" placeholder="Ex: Fatia grossa de bacon crocante" value={subItemForm.description} onChange={e => setSubItemForm({...subItemForm, description: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-1">Preço adicional (R$)</label>
+                <input type="number" step="0.01" min="0" value={subItemForm.price} onChange={e => setSubItemForm({...subItemForm, price: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+                <p className="text-xs text-gray-500 mt-1">Use 0 para itens sem custo adicional</p>
+              </div>
+              <div className="pt-2 flex gap-3">
+                <button type="button" onClick={() => setShowSubItemModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold">Cancelar</button>
+                <button type="submit" disabled={actionLoading === -11} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center">
+                  {actionLoading === -11 ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Item'}
                 </button>
               </div>
             </form>
