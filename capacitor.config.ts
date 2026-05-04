@@ -3,6 +3,10 @@ const config: CapacitorConfig = {
   appId: 'com.tanamao.delivery',
   appName: 'Tá Na Mão',
   webDir: 'dist',
+  server: {
+    url: 'https://www.tanamao.website',
+    cleartext: false,
+  },
   android: {
     backgroundColor: '#10b981',
   },
