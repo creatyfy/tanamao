@@ -303,7 +303,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
 
       let query = supabase
         .from('orders')
-        .select('*, users:client_id(name), stores(name), couriers(users:user_id(name)), addresses(*), order_items(*)')
+        .select('*, users:client_id(name), stores(name), couriers(users:user_id(name)), addresses(*), order_items(*, order_item_selections(*))')
         .order('created_at', { ascending: false })
         .gte('created_at', startDate.toISOString())
         .lte('created_at', endDate.toISOString());
@@ -1735,9 +1735,14 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                 <h3 className="font-bold text-gray-800 border-b pb-2 mb-3 flex items-center"><Package size={18} className="mr-2 text-gray-400"/> Itens do Pedido</h3>
                 <div className="space-y-2">
                   {viewOrder.order_items?.map((item: any) => (
-                    <div key={item.id} className="flex justify-between text-sm text-gray-700">
-                      <span>{item.quantity}x {item.product_name}</span>
-                      <span className="font-medium">R$ {item.total_price.toFixed(2)}</span>
+                    <div key={item.id} className="text-sm text-gray-700">
+                      <div className="flex justify-between">
+                        <span className="font-medium">{item.quantity}x {item.product_name}</span>
+                        <span className="font-medium">R$ {item.total_price.toFixed(2)}</span>
+                      </div>
+                      {item.order_item_selections?.map((sel:any) => (
+                        <p key={sel.id} className="text-xs text-gray-400 pl-3">↳ {sel.item_name}{sel.item_price > 0 ? ` +R$ ${Number(sel.item_price).toFixed(2)}` : ''}</p>
+                      ))}
                     </div>
                   ))}
                   <div className="flex justify-between text-sm text-gray-500 pt-2 border-t border-gray-100">
