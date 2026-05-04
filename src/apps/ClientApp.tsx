@@ -672,12 +672,11 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
     }
   };
 
-  const updateQuantity = (productId: number, delta: number) => {
+  const updateQuantity = (cartKeyOrId: any, delta: number) => {
     setCart(prev => {
       const newCart = prev.map(item => {
-        if (item.id === productId) {
-          return { ...item, quantity: item.quantity + delta };
-        }
+        const match = item.cart_key ? item.cart_key === cartKeyOrId : item.id === cartKeyOrId;
+        if (match) return { ...item, quantity: item.quantity + delta };
         return item;
       }).filter(item => item.quantity > 0);
       return newCart;
@@ -1840,23 +1839,32 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           <div className="flex-1 overflow-y-auto p-6">
             <div className="space-y-6">
               {cart.map((item, idx) => (
-                <div key={item.id || idx} className="flex items-center justify-between">
-                  <div className="flex items-center flex-1">
-                    <div className="flex items-center border border-gray-200 rounded-full px-2 py-1 mr-3 bg-white shrink-0">
-                      <button onClick={() => updateQuantity(item.id, -1)} className="p-1 text-gray-400"><Minus size={14} strokeWidth={3} /></button>
+                <div key={item.cart_key || item.id || idx} className="flex items-start justify-between">
+                  <div className="flex items-start flex-1">
+                    <div className="flex items-center border border-gray-200 rounded-full px-2 py-1 mr-3 bg-white shrink-0 mt-0.5">
+                      <button onClick={() => updateQuantity(item.cart_key || item.id, -1)} className="p-1 text-gray-400"><Minus size={14} strokeWidth={3} /></button>
                       <span className="w-6 text-center text-sm font-bold text-brand-dark">{item.quantity}</span>
-                      <button onClick={() => updateQuantity(item.id, 1)} className="p-1 text-brand-primary"><Plus size={14} strokeWidth={3} /></button>
+                      <button onClick={() => updateQuantity(item.cart_key || item.id, 1)} className="p-1 text-brand-primary"><Plus size={14} strokeWidth={3} /></button>
                     </div>
                     {item.image_url ? (
-                      <img src={item.image_url} alt={item.name} className="w-10 h-10 rounded-lg object-cover mr-3 shrink-0 border border-gray-100" />
+                      <img src={item.image_url} alt={item.name} className="w-10 h-10 rounded-lg object-cover mr-3 shrink-0 border border-gray-100 mt-0.5" />
                     ) : (
-                      <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 mr-3 shrink-0 border border-gray-200">
+                      <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center text-gray-400 mr-3 shrink-0 border border-gray-200 mt-0.5">
                         <StoreIcon size={16} />
                       </div>
                     )}
-                    <span className="text-sm font-bold text-brand-dark line-clamp-2 pr-2">{item.name}</span>
+                    <div className="flex-1">
+                      <span className="text-sm font-bold text-brand-dark line-clamp-2 pr-2">{item.name}</span>
+                      {item.selections?.length > 0 && (
+                        <div className="mt-0.5">
+                          {item.selections.map((sel: any, sidx: number) => (
+                            <p key={sidx} className="text-xs text-gray-400">↳ {sel.name}{Number(sel.price) > 0 ? ` +R$ ${Number(sel.price).toFixed(2)}` : ''}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-sm font-bold text-brand-dark shrink-0">R$ {(Number(item.price) * item.quantity).toFixed(2)}</span>
+                  <span className="text-sm font-bold text-brand-dark shrink-0 mt-0.5">R$ {(Number(item.price) * item.quantity).toFixed(2)}</span>
                 </div>
               ))}
             </div>
@@ -2197,6 +2205,33 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                 {!selectedStore?.accepts_cash && !selectedStore?.accepts_pix && !selectedStore?.accepts_card && (
                   <p className="text-sm text-red-500 italic">Esta loja não configurou nenhuma forma de pagamento.</p>
                 )}
+              </div>
+            </div>
+
+            {/* RESUMO DOS ITENS */}
+            <div className="bg-white p-4 rounded-2xl shadow-sm">
+              <h2 className="font-bold text-brand-dark mb-3 flex items-center"><ShoppingBag size={18} className="mr-2 text-brand-primary"/> Resumo do Pedido</h2>
+              <div className="space-y-3">
+                {cart.map((item, idx) => (
+                  <div key={item.cart_key || idx} className="border-b border-gray-50 last:border-0 pb-3 last:pb-0">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <span className="text-sm font-bold text-brand-dark">{item.quantity}x {item.name}</span>
+                        {item.base_price !== undefined && item.price !== item.base_price && (
+                          <span className="text-xs text-gray-400 ml-1">(base: R$ {Number(item.base_price).toFixed(2)})</span>
+                        )}
+                      </div>
+                      <span className="text-sm font-bold text-brand-dark shrink-0 ml-2">R$ {(Number(item.price) * item.quantity).toFixed(2)}</span>
+                    </div>
+                    {item.selections?.length > 0 && (
+                      <div className="mt-1 space-y-0.5">
+                        {item.selections.map((sel: any, sidx: number) => (
+                          <p key={sidx} className="text-xs text-gray-500 pl-3">↳ {sel.name}{Number(sel.price) > 0 ? ` +R$ ${Number(sel.price).toFixed(2)}` : ''}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
 
