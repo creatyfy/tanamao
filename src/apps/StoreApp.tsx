@@ -494,7 +494,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
   const fetchOrders = async (storeId: number) => {
     const { data, error } = await supabase.from('orders')
-      .select(`*, users:client_id(name, phone), order_items(*), addresses:delivery_address_id(*), order_chats(*), couriers(users(name, phone), vehicle_type, license_plate), deliveries(id, status, created_at)`)
+      .select(`*, users:client_id(name, phone), order_items(*, order_item_selections(*)), addresses:delivery_address_id(*), order_chats(*), couriers(users(name, phone), vehicle_type, license_plate), deliveries(id, status, created_at)`)
       .eq('store_id', storeId)
       .in('status', ['pending', 'preparing', 'ready', 'delivering'])
       .order('created_at', { ascending: false });
@@ -732,12 +732,15 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     const printWindow = window.open('', '_blank', 'width=400,height=600');
     if (!printWindow) return;
 
-    const items = order.order_items?.map((item: any) =>
-      `<tr>
+    const items = order.order_items?.map((item: any) => {
+      const selections = item.order_item_selections?.map((sel: any) =>
+        `<tr><td style="padding:1px 0 1px 12px;font-size:11px;color:#666">↳ ${sel.item_name}${sel.item_price > 0 ? ` +R$ ${Number(sel.item_price).toFixed(2)}` : ''}</td><td></td></tr>`
+      ).join('') || '';
+      return `<tr>
         <td style="padding:2px 0">${item.quantity}x ${item.product_name}</td>
         <td style="text-align:right;padding:2px 0">R$ ${(item.unit_price * item.quantity).toFixed(2)}</td>
-      </tr>`
-    ).join('') || '';
+      </tr>${selections}`;
+    }).join('') || '';
 
     const now = new Date();
     const dateStr = now.toLocaleDateString('pt-BR');
@@ -1626,7 +1629,14 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                         )}
 
                         <div className="text-sm text-gray-600 mb-3 space-y-1">
-                          {order.order_items?.map((item:any) => <p key={item.id}>{item.quantity}x {item.product_name}</p>)}
+                          {order.order_items?.map((item:any) => (
+                            <div key={item.id}>
+                              <p className="font-medium">{item.quantity}x {item.product_name}</p>
+                              {item.order_item_selections?.map((sel:any) => (
+                                <p key={sel.id} className="text-xs text-gray-400 pl-3">↳ {sel.item_name}{sel.item_price > 0 ? ` +R$ ${Number(sel.item_price).toFixed(2)}` : ''}</p>
+                              ))}
+                            </div>
+                          ))}
                         </div>
                         <div className="flex justify-between items-center mb-4">
                           <div className="font-black text-brand-dark text-lg">R$ {order.total.toFixed(2)}</div>
@@ -1701,7 +1711,14 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                         )}
 
                         <div className="text-sm text-gray-600 mb-4 space-y-1 bg-gray-50 p-3 rounded-xl border border-gray-100">
-                          {order.order_items?.map((item:any) => <p key={item.id} className="font-medium">{item.quantity}x {item.product_name}</p>)}
+                          {order.order_items?.map((item:any) => (
+                            <div key={item.id}>
+                              <p className="font-medium">{item.quantity}x {item.product_name}</p>
+                              {item.order_item_selections?.map((sel:any) => (
+                                <p key={sel.id} className="text-xs text-gray-400 pl-3">↳ {sel.item_name}{sel.item_price > 0 ? ` +R$ ${Number(sel.item_price).toFixed(2)}` : ''}</p>
+                              ))}
+                            </div>
+                          ))}
                         </div>
 
                         <div className="flex flex-col sm:flex-row gap-2 mt-3">
@@ -1946,8 +1963,17 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                       <tr key={order.id} className="hover:bg-gray-50">
                         <td className="p-4 font-bold text-gray-400">#{order.id}</td>
                         <td className="p-4 font-bold text-brand-dark">{order.users?.name || 'Cliente'}</td>
-                        <td className="p-4 text-sm text-gray-600 max-w-[200px] truncate">
-                          {order.order_items?.map((item:any) => `${item.quantity}x ${item.product_name}`).join(', ')}
+                        <td className="p-4 text-sm text-gray-600 max-w-[200px]">
+                          <div className="space-y-0.5">
+                            {order.order_items?.map((item:any) => (
+                              <div key={item.id}>
+                                <span>{item.quantity}x {item.product_name}</span>
+                                {item.order_item_selections?.length > 0 && (
+                                  <span className="text-xs text-gray-400"> ({item.order_item_selections.map((s:any) => s.item_name).join(', ')})</span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         </td>
                         <td className="p-4 font-bold text-brand-dark">R$ {order.total.toFixed(2)}</td>
                         <td className="p-4">
