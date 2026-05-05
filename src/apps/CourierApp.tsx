@@ -52,6 +52,8 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const { permission: notifPermission, requestPermission, sendNotification } = usePushNotifications();
   const [courier, setCourier] = useState<any>(null);
+  const courierRef = React.useRef<any>(null);
+  useEffect(() => { courierRef.current = courier; }, [courier]);
   const [activeTab, setActiveTab] = useState('home');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -169,21 +171,25 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     }
   };
 
-  // Checa a cada 5 segundos se há corridas pendentes (Fallback robusto para o Realtime)
+  // Checa a cada 3 segundos se há corridas pendentes
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (courier?.is_online && deliveryState === 'none') {
+      // Checa imediatamente ao ficar online
+      checkPendingOffers();
       interval = setInterval(() => {
         checkPendingOffers();
-      }, 5000);
+      }, 3000);
     }
     return () => clearInterval(interval);
   }, [courier?.is_online, deliveryState]);
 
   const subscribeToDeliveries = (courierId: number) => {
-    const channel = supabase.channel(`broadcast_offers_${courierId}`)
+    const channel = supabase.channel(`courier_offers_${courierId}_${Date.now()}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'deliveries' }, () => {
-        setTimeout(checkPendingOffers, 500);
+        console.log('Nova entrega detectada via realtime!');
+        setTimeout(checkPendingOffers, 300);
+        setTimeout(checkPendingOffers, 1000);
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'deliveries' }, (payload) => {
         const updated = payload.new;
@@ -200,7 +206,9 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           setDeliveryCodeError(false);
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Realtime status:', status);
+      });
 
     return channel;
   };
