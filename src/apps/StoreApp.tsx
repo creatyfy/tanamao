@@ -1,3001 +1,1080 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { Store, Order, Product, Coupon } from '../types';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { 
-  LayoutDashboard, ShoppingBag, Package, DollarSign, LogOut, 
-  Check, X, Clock, Plus, Bell, Star, BarChart3, 
-  FolderTree, Bike, Settings, Edit2, Trash2, 
-  Image as ImageIcon, MapPin, MessageSquare, Loader2, History, Ticket, UploadCloud, BellRing,
-  User, CheckCircle, Printer, XCircle, Send, Lock, CreditCard, Store as StoreIcon,
-  Menu, ChevronLeft
-} from 'lucide-react';
+import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing, Map, Trash2 } from 'lucide-react';
 
-// Sub-component to list items of a subcategory
-function SubItemsList({ subcategoryId, storeId, onEdit, onDelete }: { subcategoryId: number, storeId: number, onEdit: (item: any) => void, onDelete: (id: number) => void }) {
-  const [items, setItems] = React.useState<any[]>([]);
-  React.useEffect(() => {
-    supabase.from('subcategory_items').select('*').eq('subcategory_id', subcategoryId).order('sort_order').then(({ data }) => setItems(data || []));
-  }, [subcategoryId]);
+// Helper — detecta se está rodando dentro do app Capacitor nativo
+const isNativeApp = () => !!(window as any).Capacitor?.isNativePlatform?.();
 
-  if (items.length === 0) return (
-    <div className="p-4 text-center text-sm text-gray-400">Nenhum item cadastrado. Clique em "Novo Item" para adicionar.</div>
-  );
-
+// Componente auxiliar para renderizar o mapa e os botões de navegação
+const AddressMap = ({ address }: { address: string }) => {
+  if (!address) return null;
+  const encodedAddress = encodeURIComponent(address);
+  
   return (
-    <div className="divide-y divide-gray-50">
-      {items.map(item => (
-        <div key={item.id} className="p-3 flex items-center gap-3">
-          {item.image_url ? (
-            <img src={item.image_url} alt={item.name} className="w-10 h-10 rounded-lg object-cover border border-gray-200 shrink-0" />
-          ) : (
-            <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center shrink-0 text-gray-400 text-xs">Sem foto</div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="font-bold text-sm text-brand-dark truncate">{item.name}</p>
-            {item.description && <p className="text-xs text-gray-500 truncate">{item.description}</p>}
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="font-bold text-brand-primary text-sm">{item.price > 0 ? `+R$ ${Number(item.price).toFixed(2)}` : 'Grátis'}</span>
-            <button onClick={() => onEdit(item)} className="p-1.5 text-gray-400 hover:text-blue-500"><Edit2 size={14}/></button>
-            <button onClick={() => onDelete(item.id)} className="p-1.5 text-gray-400 hover:text-red-500"><Trash2 size={14}/></button>
-          </div>
-        </div>
-      ))}
+    <div className="mt-4 mb-6 shrink-0">
+      {/* Mapa Embutido */}
+      <div className="w-full h-48 rounded-2xl overflow-hidden border-2 border-gray-700 mb-3 shadow-inner relative bg-gray-800">
+        <iframe
+          width="100%"
+          height="100%"
+          frameBorder="0"
+          style={{ border: 0, filter: 'contrast(0.9) opacity(0.9)' }}
+          src={`https://maps.google.com/maps?q=${encodedAddress}&t=&z=15&ie=UTF8&iwloc=&output=embed`}
+          allowFullScreen
+        ></iframe>
+      </div>
+      
+      {/* Botões de Navegação Externa */}
+      <div className="flex gap-3">
+        <button 
+          onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodedAddress}`, '_blank')}
+          className="flex-1 bg-gray-100 hover:bg-white text-gray-900 py-3 rounded-xl font-bold text-sm flex justify-center items-center transition-colors shadow-sm"
+        >
+          <Map size={16} className="mr-2" /> Google Maps
+        </button>
+        <button 
+          onClick={() => window.open(`https://waze.com/ul?q=${encodedAddress}`, '_blank')}
+          className="flex-1 bg-[#33ccff] hover:bg-[#2eb8e6] text-white py-3 rounded-xl font-bold text-sm flex justify-center items-center transition-colors shadow-sm"
+        >
+          <Navigation size={16} className="mr-2" /> Waze
+        </button>
+      </div>
     </div>
   );
-}
+};
 
-export default function StoreApp({ onExit }: { onExit: () => void }) {
-  const { user } = useAuth();
+export default function CourierApp({ onExit }: { onExit: () => void }) {
+  const { user, deleteAccount } = useAuth();
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const { permission: notifPermission, requestPermission, sendNotification } = usePushNotifications();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [courier, setCourier] = useState<any>(null);
+  const courierRef = React.useRef<any>(null);
+  useEffect(() => { courierRef.current = courier; }, [courier]);
+  const [activeTab, setActiveTab] = useState('home');
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState<number | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => setToast({ message, type });
-  const audioLoopRef = React.useRef<boolean>(false);
-  const audioLoopTimeoutRef = React.useRef<number | null>(null);
-
-  const stopNotificationSound = () => {
-    audioLoopRef.current = false;
-    if (audioLoopTimeoutRef.current) {
-      clearTimeout(audioLoopTimeoutRef.current);
-      audioLoopTimeoutRef.current = null;
-    }
-  };
-
-  const playNotificationSound = () => {
-    if (audioLoopRef.current) return;
-    audioLoopRef.current = true;
-    
-    const playLoop = () => {
-      if (!audioLoopRef.current) return;
-      try {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const playDing = (freq: number, startTime: number) => {
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(freq, startTime);
-          osc.frequency.exponentialRampToValueAtTime(freq * 0.95, startTime + 0.3);
-          gain.gain.setValueAtTime(0, startTime);
-          gain.gain.linearRampToValueAtTime(0.8, startTime + 0.01);
-          gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.8);
-          osc.start(startTime);
-          osc.stop(startTime + 0.8);
-        };
-        const t = audioCtx.currentTime;
-        playDing(1200, t);
-        playDing(900, t + 0.35);
-        playDing(1200, t + 0.7);
-        playDing(900, t + 1.05);
-        audioLoopTimeoutRef.current = window.setTimeout(() => {
-          audioCtx.close();
-          playLoop();
-        }, 3000);
-      } catch (e) {
-        console.warn('Audio não suportado:', e);
-      }
-    };
-    playLoop();
-  };
   
-  const [store, setStore] = useState<Store | null>(null);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [coupons, setCoupons] = useState<Coupon[]>([]);
-  const [productCategories, setProductCategories] = useState<any[]>([]);
-  const [reviews, setReviews] = useState<any[]>([]); 
+  const [deliveryState, setDeliveryState] = useState('none'); 
+  const deliveryStateRef = React.useRef('none');
+  useEffect(() => { deliveryStateRef.current = deliveryState; }, [deliveryState]);
+
+  const [acceptTimer, setAcceptTimer] = useState(60);
+  const [activeDelivery, setActiveDelivery] = useState<any>(null);
+  const activeDeliveryRef = React.useRef<any>(null);
+  useEffect(() => { activeDeliveryRef.current = activeDelivery; }, [activeDelivery]);
+
+  const [gpsError, setGpsError] = useState(false);
+  const watchIdRef = useRef<string | null>(null);
   
-  // Dashboard Metrics & Filters
-  const [dashboardMetrics, setDashboardMetrics] = useState({ totalOrders: 0, deliveredOrders: 0, cancelledOrders: 0, revenue: 0 });
-  const [dashboardFilter, setDashboardFilter] = useState<'today' | '7days' | '15days' | '30days' | 'custom'>('today');
-  const [customStartDate, setCustomStartDate] = useState('');
-  const [customEndDate, setCustomEndDate] = useState('');
-  const [storeBalance, setStoreBalance] = useState<number | null>(null);
-  const [nextPayoutDate, setNextPayoutDate] = useState<string>('');
+  // Delivery Code Validation
+  const [deliveryCodeInput, setDeliveryCodeInput] = useState('');
+  const [deliveryCodeError, setDeliveryCodeError] = useState(false);
 
-  // History Tab
-  const [historyFilter, setHistoryFilter] = useState<'today' | 'yesterday' | 'week'>('today');
-  const [historyOrders, setHistoryOrders] = useState<any[]>([]);
-  const [lastUpdate, setLastUpdate] = useState(Date.now());
-  const [historyPage, setHistoryPage] = useState(0);
-  const [historyHasMore, setHistoryHasMore] = useState(true);
-  const PAGE_SIZE = 20;
+  // Earnings History
+  const [deliveriesHistory, setDeliveriesHistory] = useState<any[]>([]);
+  const [earningsPage, setEarningsPage] = useState(0);
+  const [earningsHasMore, setEarningsHasMore] = useState(true);
+  const EARNINGS_PAGE_SIZE = 20;
 
-  // Product Modal State
-  const [showProductModal, setShowProductModal] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [productForm, setProductForm] = useState({ name: '', description: '', price: '', image_url: '', is_available: true, category_id: '' });
-  const [productImageFile, setProductImageFile] = useState<File | null>(null);
-  const [productImagePreview, setProductImagePreview] = useState<string | null>(null);
+  // Perfil
+  const [showProfileEdit, setShowProfileEdit] = useState(false);
+  const [profileForm, setProfileForm] = useState({ name: '', phone: '' });
+  const [profileLoading, setProfileLoading] = useState(false);
 
-  // Category Modal State
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
-  const [editingCategory, setEditingCategory] = useState<any>(null);
-  const [categoryForm, setCategoryForm] = useState({ name: '', sort_order: '0', is_active: true });
-
-  // Subcategory state
-  const [showSubcategoryPanel, setShowSubcategoryPanel] = useState(false);
-  const [selectedCategoryForSub, setSelectedCategoryForSub] = useState<any>(null);
-  const [subcategories, setSubcategories] = useState<any[]>([]);
-  const [showSubcategoryModal, setShowSubcategoryModal] = useState(false);
-  const [editingSubcategory, setEditingSubcategory] = useState<any>(null);
-  const [subcategoryForm, setSubcategoryForm] = useState({ name: '', description: '', min_selections: '0', max_selections: '5', is_required: false });
-  const [showSubItemModal, setShowSubItemModal] = useState(false);
-  const [editingSubItem, setEditingSubItem] = useState<any>(null);
-  const [selectedSubcategoryForItem, setSelectedSubcategoryForItem] = useState<any>(null);
-  const [subItems, setSubItems] = useState<any[]>([]);
-  const [subItemForm, setSubItemForm] = useState({ name: '', description: '', price: '0', image_url: '' });
-  const [subItemImageFile, setSubItemImageFile] = useState<File | null>(null);
-  const [subItemImagePreview, setSubItemImagePreview] = useState<string | null>(null);
-
-  // Coupon Modal State
-  const [showCouponModal, setShowCouponModal] = useState(false);
-  const [couponForm, setCouponForm] = useState({ code: '', type: 'percentage', value: '', min_order_value: '0', expires_at: '', is_active: true });
-  const [newCouponCode, setNewCouponCode] = useState<string>('');
-  const [showNotifyModal, setShowNotifyModal] = useState(false);
-  const [sendingCouponNotif, setSendingCouponNotif] = useState(false);
-
-  // Settings Form State
-  const [settingsForm, setSettingsForm] = useState({
-    name: '',
-    phone: '',
-    logo_url: '',
-    banner_url: '',
-    delivery_fee: '',
-    min_order_value: '',
-    avg_prep_time_min: '',
-    accepts_pix: false,
-    accepts_card: false,
-    accepts_cash: false,
-    newPassword: '',
-    confirmPassword: ''
-  });
-  const [logoFile, setLogoFile] = useState<File | null>(null);
-  const [logoPreview, setLogoPreview] = useState<string | null>(null);
-  const [bannerFile, setBannerFile] = useState<File | null>(null);
-  const [bannerPreview, setBannerPreview] = useState<string | null>(null);
-  const [settingsLoading, setSettingsLoading] = useState(false);
-
-  // Confirm Modal
-  const [confirmModal, setConfirmModal] = useState<{isOpen: boolean, title: string, message: string, onConfirm: () => void} | null>(null);
-
-  // Chat States
-  const [activeChatOrderId, setActiveChatOrderId] = useState<number | null>(null);
-  const [chatInput, setChatInput] = useState('');
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const storeOrdersChannelRef = React.useRef<any>(null);
-  const storeChatsChannelRef = React.useRef<any>(null);
-
-  // Timer para busca de motoboys
-  const [now, setNow] = useState(Date.now());
-  
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
+  // Ganhos por período
+  const [earningsPeriod, setEarningsPeriod] = useState<'today' | 'week' | 'month'>('today');
+  const [periodEarnings, setPeriodEarnings] = useState(0);
+  const [periodDeliveries, setPeriodDeliveries] = useState(0);
 
   useEffect(() => {
-    if (user) {
-      fetchStoreData();
-    }
+    if (user) fetchCourier();
   }, [user]);
 
   useEffect(() => {
-    const fetchDashboardMetrics = async () => {
-      if (!store) return;
-      
-      let startDate = new Date();
-      let endDate = new Date();
-      
-      if (dashboardFilter === 'today') {
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setHours(23, 59, 59, 999);
-      } else if (dashboardFilter === '7days') {
-        startDate.setDate(startDate.getDate() - 7);
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setHours(23, 59, 59, 999);
-      } else if (dashboardFilter === '15days') {
-        startDate.setDate(startDate.getDate() - 15);
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setHours(23, 59, 59, 999);
-      } else if (dashboardFilter === '30days') {
-        startDate.setDate(startDate.getDate() - 30);
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setHours(23, 59, 59, 999);
-      } else if (dashboardFilter === 'custom') {
-        if (!customStartDate || !customEndDate) return; 
-        
-        const startParts = customStartDate.split('-');
-        startDate = new Date(Number(startParts[0]), Number(startParts[1]) - 1, Number(startParts[2]));
-        startDate.setHours(0, 0, 0, 0);
-        
-        const endParts = customEndDate.split('-');
-        endDate = new Date(Number(endParts[0]), Number(endParts[1]) - 1, Number(endParts[2]));
-        endDate.setHours(23, 59, 59, 999);
-      }
-
-      const { data: periodOrders } = await supabase
-        .from('orders')
-        .select('total, status')
-        .eq('store_id', store.id)
-        .gte('created_at', startDate.toISOString())
-        .lte('created_at', endDate.toISOString());
-
-      if (periodOrders) {
-        const totalOrders = periodOrders.length;
-        const deliveredOrders = periodOrders.filter(o => o.status === 'delivered').length;
-        const cancelledOrders = periodOrders.filter(o => o.status === 'cancelled').length;
-        const revenue = periodOrders.filter(o => o.status === 'delivered').reduce((acc, o) => acc + o.total, 0);
-        setDashboardMetrics({ totalOrders, deliveredOrders, cancelledOrders, revenue });
-      }
-
-      // Saldo disponível
-      const { data: pendingPayments } = await supabase
-        .from('payments')
-        .select('split_store_amount, confirmed_at')
-        .eq('status', 'confirmed')
-        .in('order_id',
-          (await supabase
-            .from('orders')
-            .select('id')
-            .eq('store_id', store.id)
-          ).data?.map((o: any) => o.id) || []
-        );
-
-      const balance = (pendingPayments || []).reduce((acc: number, p: any) => acc + (p.split_store_amount || 0), 0);
-      setStoreBalance(balance);
-
-      // Próxima segunda-feira
-      const today = new Date();
-      const daysUntilMonday = (8 - today.getDay()) % 7 || 7;
-      const nextMonday = new Date(today);
-      nextMonday.setDate(today.getDate() + daysUntilMonday);
-      setNextPayoutDate(nextMonday.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }));
-    };
-
-    if (activeTab === 'dashboard' && store) {
-      fetchDashboardMetrics();
+    if (activeTab === 'earnings' && courier) {
+      setEarningsPage(0);
+      setDeliveriesHistory([]);
+      setEarningsHasMore(true);
+      fetchEarningsHistory(0, false);
     }
-  }, [activeTab, dashboardFilter, customStartDate, customEndDate, store, lastUpdate]);
+  }, [activeTab, courier]);
 
   useEffect(() => {
-    if (activeTab === 'history' && store) {
-      setHistoryPage(0);
-      setHistoryOrders([]);
-      setHistoryHasMore(true);
-      fetchHistoryOrders(0, false);
+    if (deliveriesHistory.length > 0) {
+      calcPeriodEarnings(earningsPeriod);
+    } else {
+      setPeriodDeliveries(0);
+      setPeriodEarnings(0);
     }
-    if (activeTab === 'coupons' && store) fetchCoupons(store.id);
-    if (activeTab === 'categories' && store) fetchProductCategories(store.id);
-    if (activeTab === 'settings' && store) {
-      setSettingsForm({
-        name: store.name,
-        phone: store.phone || '',
-        logo_url: store.logo_url || '',
-        banner_url: store.banner_url || '',
-        delivery_fee: store.delivery_fee?.toString() || '0',
-        min_order_value: store.min_order_value?.toString() || '0',
-        avg_prep_time_min: store.avg_prep_time_min?.toString() || '30',
-        accepts_pix: store.accepts_pix,
-        accepts_card: store.accepts_card,
-        accepts_cash: store.accepts_cash,
-        newPassword: '',
-        confirmPassword: ''
-      });
-      setLogoPreview(store.logo_url || null);
-      setBannerPreview(store.banner_url || null);
-    }
-  }, [activeTab, historyFilter, store, lastUpdate]);
+  }, [deliveriesHistory, earningsPeriod]);
 
-  useEffect(() => {
-    if (activeTab === 'chats' && activeChatOrderId)
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [orders, activeChatOrderId, activeTab]);
-
-  const handleCourierTimeout = async (orderId: number, deliveryId: number) => {
-    if (actionLoading === orderId) return;
-    setActionLoading(orderId);
+  const fetchCourier = async () => {
     try {
-      await supabase.from('deliveries').update({ status: 'cancelled' }).eq('id', deliveryId);
-      await supabase.from('orders').update({ status: 'preparing' }).eq('id', orderId);
-      showToast(`Pedido #${orderId}: Nenhum motoboy aceitou.`, 'warning');
-      fetchOrders(store!.id);
-      setLastUpdate(Date.now());
-    } catch (error) {
-      console.error('Erro no timeout do motoboy', error);
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  useEffect(() => {
-    orders.forEach(order => {
-      if (order.status === 'ready' && !order.courier_id && order.deliveries) {
-        const offer = order.deliveries.find((d: any) => d.status === 'offered');
-        if (offer) {
-          const elapsed = Date.now() - new Date(offer.created_at).getTime();
-          if (elapsed > 60000 && actionLoading !== order.id) {
-            handleCourierTimeout(order.id, offer.id);
-          }
-        }
-      }
-    });
-  }, [now, orders, actionLoading]);
-
-  const fetchStoreData = async () => {
-    setLoading(true);
-    try {
-      const { data: storeData, error: storeError } = await supabase
-        .from('stores')
-        .select('*')
-        .eq('owner_id', user!.id)
-        .maybeSingle();
-
-      if (storeError) {
-        console.warn('Erro ao buscar loja:', storeError.message);
-        setLoading(false);
-        return;
-      }
-
-      if (!storeData) {
-        console.warn('Nenhuma loja encontrada para owner_id=' + user!.id);
-        setLoading(false);
-        return;
-      }
-
-      // Busca endereço separado para evitar falha de FK
-      const { data: addressData } = await supabase
-        .from('addresses')
-        .select('*')
-        .eq('user_id', user!.id)
-        .maybeSingle();
-      if (addressData) storeData.addresses = addressData;
-        
-        const { data: storeReviews, error: reviewsError } = await supabase
-          .from('reviews')
-          .select('*, users:reviewer_id(name)')
-          .eq('target_type', 'store')
-          .eq('target_id', storeData.id)
-          .order('created_at', { ascending: false });
-
-        if (reviewsError) {
-          console.warn(`Aviso reviews(target_id=${storeData.id}):`, reviewsError.message);
-        }
-          
-        let trueAvg = 0;
-        if (storeReviews && storeReviews.length > 0) {
-          setReviews(storeReviews);
-          const sum = storeReviews.reduce((acc, r) => acc + r.rating, 0);
-          trueAvg = parseFloat((sum / storeReviews.length).toFixed(1));
-        } else {
-          setReviews([]);
-        }
-        
-        if (storeData.avg_rating !== trueAvg) {
-          const { error: updateRatingError } = await supabase
-            .from('stores')
-            .update({ avg_rating: trueAvg })
-            .eq('id', storeData.id);
-          if (updateRatingError) {
-            console.warn(`Aviso ao atualizar avg_rating id=${storeData.id}:`, updateRatingError.message);
-          }
-          storeData.avg_rating = trueAvg;
-        }
-
-        setStore(storeData);
-        await Promise.all([
-          fetchOrders(storeData.id),
-          fetchProducts(storeData.id),
-          fetchProductCategories(storeData.id),
-        ]);
-        
-        if (storeChatsChannelRef.current) {
-          supabase.removeChannel(storeChatsChannelRef.current);
-          storeChatsChannelRef.current = null;
-        }
-
-        const channelChats = supabase.channel(`store_chats_${storeData.id}`)
-          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'order_chats' }, (payload) => {
-            const newMsg = payload.new;
-            setOrders(prev => {
-              const idx = prev.findIndex(o => o.id === newMsg.order_id);
-              if (idx === -1) return prev;
-              if (newMsg.sender_id !== user!.id) showToast(`Nova mensagem no pedido #${newMsg.order_id}`, 'success');
-              const updated = [...prev];
-              const order = { ...updated[idx] };
-              if (!order.order_chats?.find((m: any) => m.id === newMsg.id))
-                order.order_chats = [...(order.order_chats || []), newMsg];
-              updated[idx] = order;
-              return updated;
-            });
-          }).subscribe();
-
-        storeChatsChannelRef.current = channelChats;
-    } catch (error) {
-      console.warn('Aviso ao carregar dados da loja:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchHistoryOrders = async (page = 0, append = false) => {
-    if (!store) return;
-    setLoading(true);
-    try {
-      let startDate = new Date();
-      let endDate = new Date();
-      
-      if (historyFilter === 'today') {
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setHours(23, 59, 59, 999);
-      } else if (historyFilter === 'yesterday') {
-        startDate.setDate(startDate.getDate() - 1);
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setDate(endDate.getDate() - 1);
-        endDate.setHours(23, 59, 59, 999);
-      } else if (historyFilter === 'week') {
-        startDate.setDate(startDate.getDate() - 7);
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setHours(23, 59, 59, 999);
-      }
-
-      const from = page * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-
-      const { data } = await supabase
-        .from('orders')
-        .select('*, users:client_id(name, phone), order_items(*)')
-        .eq('store_id', store.id)
-        .in('status', ['delivered', 'cancelled'])
-        .gte('created_at', startDate.toISOString())
-        .lte('created_at', endDate.toISOString())
-        .order('created_at', { ascending: false })
-        .range(from, to);
-        
+      const { data } = await supabase.from('couriers').select('*, users:user_id(*)').eq('user_id', user!.id).maybeSingle();
       if (data) {
-        setHistoryOrders(prev => append ? [...prev, ...data] : data);
-        setHistoryHasMore(data.length === PAGE_SIZE);
+        setCourier(data);
       }
     } catch (error) {
-      showToast('Erro ao carregar histórico', 'error');
+      console.error(error);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchOrders = async (storeId: number) => {
-    const { data, error } = await supabase.from('orders')
-      .select(`*, users:client_id(name, phone), order_items(*, order_item_selections(*)), addresses:delivery_address_id(*), order_chats(*), couriers(users(name, phone), vehicle_type, license_plate), deliveries(id, status, created_at)`)
-      .eq('store_id', storeId)
-      .in('status', ['pending', 'preparing', 'ready', 'delivering'])
-      .order('created_at', { ascending: false });
-    if (error) { console.warn(`orders(store_id=${storeId}):`, error.message); return; }
-    if (data) setOrders(data);
-  };
-
-  useEffect(() => {
-    if (!store?.id) return;
-
-    if (storeOrdersChannelRef.current) {
-      supabase.removeChannel(storeOrdersChannelRef.current);
-      storeOrdersChannelRef.current = null;
-    }
-
-    const channelOrders = supabase.channel(`store_orders_${store.id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders', filter: `store_id=eq.${store.id}` }, (payload) => {
-        if (payload.new.status === 'pending') {
-          playNotificationSound();
-          sendNotification('🔔 Novo Pedido Recebido!', {
-            body: `Pedido #${payload.new.id} no valor de R$ ${payload.new.total.toFixed(2)}. Acesse o painel para aceitar.`,
-          });
-        }
-        fetchOrders(store.id);
-        setLastUpdate(Date.now());
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders', filter: `store_id=eq.${store.id}` }, () => {
-        fetchOrders(store.id);
-        setLastUpdate(Date.now());
-      })
-      .subscribe();
-
-    storeOrdersChannelRef.current = channelOrders;
-
-    return () => {
-      if (storeOrdersChannelRef.current) {
-        supabase.removeChannel(storeOrdersChannelRef.current);
-        storeOrdersChannelRef.current = null;
-      }
-    };
-  }, [store?.id, sendNotification]);
-
-  useEffect(() => {
-    if (!store?.id) return;
-    const interval = setInterval(() => {
-      fetchOrders(store.id);
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [store?.id]);
-
-  useEffect(() => {
-    return () => {
-      stopNotificationSound();
-      if (storeChatsChannelRef.current) {
-        supabase.removeChannel(storeChatsChannelRef.current);
-        storeChatsChannelRef.current = null;
-      }
-      if (storeOrdersChannelRef.current) {
-        supabase.removeChannel(storeOrdersChannelRef.current);
-        storeOrdersChannelRef.current = null;
-      }
-    };
-  }, []);
-
-  const fetchProducts = async (storeId: number) => {
-    const { data, error } = await supabase.from('products')
-      .select('*, product_categories(name)')
-      .eq('store_id', storeId)
-      .order('name');
-    if (error) { console.warn(`products(store_id=${storeId}):`, error.message); return; }
-    if (data) setProducts(data);
-  };
-
-  const fetchProductCategories = async (storeId: number) => {
-    const { data, error } = await supabase.from('product_categories')
-      .select('*')
-      .eq('store_id', storeId)
-      .order('sort_order', { ascending: true });
-    if (error) { console.warn(`product_categories(store_id=${storeId}):`, error.message); return; }
-    if (data) setProductCategories(data);
-  };
-
-  const fetchSubcategories = async (categoryId: number) => {
-    const { data, error } = await supabase
-      .from('product_subcategories')
-      .select('*')
-      .eq('category_id', categoryId)
-      .order('sort_order');
-    if (error) { console.warn('fetchSubcategories:', error.message); return; }
-    setSubcategories(data || []);
-  };
-
-  const fetchSubItems = async (subcategoryId: number) => {
-    const { data, error } = await supabase
-      .from('subcategory_items')
-      .select('*')
-      .eq('subcategory_id', subcategoryId)
-      .order('sort_order');
-    if (error) { console.warn('fetchSubItems:', error.message); return; }
-    setSubItems(data || []);
-  };
-
-  const handleSaveSubcategory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!store || !selectedCategoryForSub) return;
-    setActionLoading(-10);
-    try {
-      const data = {
-        store_id: store.id,
-        category_id: selectedCategoryForSub.id,
-        name: subcategoryForm.name,
-        description: subcategoryForm.description,
-        min_selections: parseInt(subcategoryForm.min_selections) || 0,
-        max_selections: parseInt(subcategoryForm.max_selections) || 1,
-        is_required: subcategoryForm.is_required,
-      };
-      if (editingSubcategory) {
-        await supabase.from('product_subcategories').update(data).eq('id', editingSubcategory.id);
-        showToast('Subcategoria atualizada!');
-      } else {
-        await supabase.from('product_subcategories').insert(data);
-        showToast('Subcategoria criada!');
-      }
-      setShowSubcategoryModal(false);
-      fetchSubcategories(selectedCategoryForSub.id);
-    } catch (err) {
-      showToast('Erro ao salvar subcategoria', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleDeleteSubcategory = (id: number) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Excluir Subcategoria',
-      message: 'Isso vai excluir a subcategoria e todos os seus itens. Confirmar?',
-      onConfirm: async () => {
-        setConfirmModal(null);
-        await supabase.from('product_subcategories').delete().eq('id', id);
-        showToast('Subcategoria excluída');
-        if (selectedCategoryForSub) fetchSubcategories(selectedCategoryForSub.id);
-      }
-    });
-  };
-
-  const handleSaveSubItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!store || !selectedSubcategoryForItem) return;
-    setActionLoading(-11);
-    try {
-      let imageUrl = subItemForm.image_url;
-      if (subItemImageFile) {
-        const ext = subItemImageFile.name.split('.').pop();
-        const fileName = `subitem_${store.id}_${Date.now()}.${ext}`;
-        const { error: uploadErr } = await supabase.storage.from('products').upload(fileName, subItemImageFile, { upsert: false });
-        if (uploadErr) throw new Error('Erro ao fazer upload da imagem.');
-        const { data: urlData } = supabase.storage.from('products').getPublicUrl(fileName);
-        imageUrl = urlData.publicUrl;
-      }
-      const data = {
-        subcategory_id: selectedSubcategoryForItem.id,
-        store_id: store.id,
-        name: subItemForm.name,
-        description: subItemForm.description,
-        price: parseFloat(subItemForm.price) || 0,
-        image_url: imageUrl || null,
-      };
-      if (editingSubItem) {
-        await supabase.from('subcategory_items').update(data).eq('id', editingSubItem.id);
-        showToast('Item atualizado!');
-      } else {
-        await supabase.from('subcategory_items').insert(data);
-        showToast('Item criado!');
-      }
-      setShowSubItemModal(false);
-      fetchSubItems(selectedSubcategoryForItem.id);
-    } catch (err: any) {
-      showToast(err.message || 'Erro ao salvar item', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleDeleteSubItem = (id: number) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Excluir Item',
-      message: 'Confirma a exclusão deste item?',
-      onConfirm: async () => {
-        setConfirmModal(null);
-        await supabase.from('subcategory_items').delete().eq('id', id);
-        showToast('Item excluído');
-        if (selectedSubcategoryForItem) fetchSubItems(selectedSubcategoryForItem.id);
-      }
-    });
-  };
-
-  const fetchCoupons = async (storeId: number) => {
-    const { data, error } = await supabase
-      .from('coupons')
-      .select('*')
-      .eq('store_id', storeId)
-      .order('created_at', { ascending: false });
-    if (error) { console.warn(`coupons(store_id=${storeId}):`, error.message); return; }
-    if (data) setCoupons(data);
-  };
-
-  const toggleStoreStatus = async (isOpen: boolean) => {
-    if (!store) return;
-    setLoading(true);
-    try {
-      await supabase.from('stores').update({ is_open: isOpen }).eq('id', store.id);
-      setStore({ ...store, is_open: isOpen });
-      showToast(isOpen ? 'Loja aberta!' : 'Loja fechada!', 'success');
-    } catch (error) {
-      showToast('Erro ao alterar status da loja', 'error');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAcceptOrder = async (order: any) => {
-    stopNotificationSound();
-    await updateOrderStatus(order.id, 'preparing');
-    printOrder(order);
-  };
-
-  const handleRejectOrder = async (orderId: number) => {
-    stopNotificationSound();
-    await updateOrderStatus(orderId, 'cancelled');
-  };
-
-  const printOrder = (order: any) => {
-    const printWindow = window.open('', '_blank', 'width=400,height=600');
-    if (!printWindow) return;
-
-    const items = order.order_items?.map((item: any) => {
-      const selections = item.order_item_selections?.map((sel: any) =>
-        `<tr><td style="padding:1px 0 1px 12px;font-size:11px;color:#666">↳ ${sel.item_name}${sel.item_price > 0 ? ` +R$ ${Number(sel.item_price).toFixed(2)}` : ''}</td><td></td></tr>`
-      ).join('') || '';
-      return `<tr>
-        <td style="padding:2px 0">${item.quantity}x ${item.product_name}</td>
-        <td style="text-align:right;padding:2px 0">R$ ${(item.unit_price * item.quantity).toFixed(2)}</td>
-      </tr>${selections}`;
-    }).join('') || '';
-
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('pt-BR');
-    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="utf-8"/>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body {
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            width: 80mm;
-            padding: 4mm;
-            color: #000;
-          }
-          .center { text-align: center; }
-          .bold { font-weight: bold; }
-          .large { font-size: 16px; }
-          .xlarge { font-size: 22px; font-weight: bold; }
-          .divider { border-top: 1px dashed #000; margin: 6px 0; }
-          .divider-solid { border-top: 2px solid #000; margin: 6px 0; }
-          table { width: 100%; border-collapse: collapse; }
-          td { vertical-align: top; font-size: 12px; }
-          .total-row td { font-size: 14px; font-weight: bold; padding-top: 4px; }
-          .tag {
-            display: inline-block;
-            border: 1px solid #000;
-            padding: 1px 6px;
-            font-size: 11px;
-            font-weight: bold;
-          }
-          @media print {
-            @page { margin: 0; size: 80mm auto; }
-            body { width: 80mm; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="center">
-          <p class="large bold">${store?.name || 'Tá Na Mão'}</p>
-          <p style="font-size:11px;margin-top:2px">${dateStr} às ${timeStr}</p>
-        </div>
-
-        <div class="divider-solid"></div>
-
-        <div class="center">
-          <p style="font-size:11px">PEDIDO</p>
-          <p class="xlarge">#${order.id}</p>
-        </div>
-
-        <div class="divider"></div>
-
-        <p class="bold">CLIENTE</p>
-        <p>${order.users?.name || 'Cliente'}</p>
-
-        ${order.addresses ? `
-          <div style="margin-top:4px">
-            <p class="bold">ENTREGAR EM</p>
-            <p>${order.addresses.street}, ${order.addresses.number}${order.addresses.complement ? ' - ' + order.addresses.complement : ''}</p>
-            <p>${order.addresses.neighborhood} - ${order.addresses.city}</p>
-          </div>
-        ` : ''}
-
-        <div class="divider"></div>
-
-        <p class="bold" style="margin-bottom:4px">ITENS</p>
-        <table>${items}</table>
-
-        ${order.subtotal !== order.total ? `
-          <div class="divider"></div>
-          <table>
-            <tr><td>Subtotal</td><td style="text-align:right">R$ ${order.subtotal?.toFixed(2) || order.total.toFixed(2)}</td></tr>
-            <tr><td>Taxa de entrega</td><td style="text-align:right">R$ ${order.delivery_fee?.toFixed(2) || '0.00'}</td></tr>
-            ${order.discount_amount > 0 ? `<tr><td>Desconto</td><td style="text-align:right">- R$ ${order.discount_amount.toFixed(2)}</td></tr>` : ''}
-          </table>
-        ` : ''}
-
-        <div class="divider-solid"></div>
-
-        <table>
-          <tr class="total-row">
-            <td>TOTAL</td>
-            <td style="text-align:right">R$ ${order.total.toFixed(2)}</td>
-          </tr>
-        </table>
-
-        <div style="margin-top:6px">
-          <span class="tag">${order.payment_method === 'cash' ? '💵 DINHEIRO' : order.payment_method === 'pix' ? '📱 PIX' : '💳 CARTÃO'}</span>
-          ${order.payment_method === 'cash' && order.change_for ? `
-            <p style="margin-top:3px;font-size:11px">Troco para: R$ ${order.change_for.toFixed(2)}</p>
-          ` : ''}
-        </div>
-
-        ${order.client_notes ? `
-          <div class="divider"></div>
-          <p class="bold">⚠ OBSERVAÇÕES</p>
-          <p style="font-size:12px">${order.client_notes}</p>
-        ` : ''}
-
-        <div class="divider"></div>
-        <p class="center" style="font-size:10px">Tá Na Mão Delivery</p>
-
-        <script>
-          window.onload = function() {
-            window.print();
-            window.onafterprint = function() { window.close(); };
-          };
-        </script>
-      </body>
-      </html>
-    `);
-
-    printWindow.document.close();
-  };
-
-  const updateOrderStatus = async (orderId: number, status: string) => {
-    setActionLoading(orderId);
-    try {
-      const updateData: any = { status };
-      if (status === 'cancelled') updateData.cancelled_by = 'store';
-      
-      const { error: updateErr } = await supabase.from('orders').update(updateData).eq('id', orderId);
-      if (updateErr) throw updateErr;
-
-      if (status === 'ready') {
-        const courierFee = Math.max(Number(store?.delivery_fee) || 0, 2.00);
-        
-        const { error: deliveryErr } = await supabase.from('deliveries').insert({
-          order_id: orderId,
-          status: 'offered',
-          courier_earning: courierFee
-        });
-        
-        if (deliveryErr) {
-          console.error("Erro RLS ao despachar:", deliveryErr);
-          showToast('Erro ao chamar motoboy. Verifique as permissões do sistema.', 'error');
-          return;
-        }
-        
-        showToast(`Procurando motoboys... (Ganho: R$ ${courierFee.toFixed(2)})`);
-      } else {
-        showToast('Status do pedido atualizado!');
-      }
-
-      fetchOrders(store!.id);
-      setLastUpdate(Date.now());
-    } catch (error: any) {
-      showToast("Erro ao atualizar pedido.", 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleOwnDelivery = async (orderId: number) => {
-    setActionLoading(orderId);
-    try {
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          status: 'delivering',
-          own_delivery: true
-        })
-        .eq('id', orderId);
-
-      if (error) throw error;
-
-      showToast('Entrega própria iniciada. Confirme quando entregar.');
-      fetchOrders(store!.id);
-      setLastUpdate(Date.now());
-    } catch (error) {
-      showToast('Erro ao iniciar entrega própria.', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleConfirmOwnDelivery = async (orderId: number) => {
-    setActionLoading(orderId);
-    try {
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          status: 'delivered',
-          delivered_at: new Date().toISOString()
-        })
-        .eq('id', orderId);
-
-      if (error) throw error;
-
-      showToast('Entrega confirmada!', 'success');
-      fetchOrders(store!.id);
-      setLastUpdate(Date.now());
-    } catch (error) {
-      showToast('Erro ao confirmar entrega.', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleSendStoreMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatInput.trim() || !activeChatOrderId || !user) return;
-    const msg = chatInput.trim(); setChatInput('');
-    try {
-      const { data, error } = await supabase.from('order_chats').insert({
-        order_id: activeChatOrderId, sender_id: user.id, message: msg, is_system_message: false
-      }).select().single();
-      if (error) throw error;
-      if (data) setOrders(prev => {
-        const idx = prev.findIndex(o => o.id === activeChatOrderId);
-        if (idx === -1) return prev;
-        const updated = [...prev]; const order = { ...updated[idx] };
-        if (!order.order_chats?.find((m: any) => m.id === data.id))
-          order.order_chats = [...(order.order_chats || []), data];
-        updated[idx] = order; return updated;
-      });
-    } catch { showToast('Erro ao enviar mensagem', 'error'); }
-  };
-
-  // --- CATEGORY ACTIONS ---
-  const handleSaveCategory = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!store) return;
-    setActionLoading(-3);
-    try {
-      const categoryData = {
-        store_id: store.id,
-        name: categoryForm.name,
-        sort_order: parseInt(categoryForm.sort_order) || 0,
-        is_active: categoryForm.is_active
-      };
-
-      if (editingCategory) {
-        await supabase.from('product_categories').update(categoryData).eq('id', editingCategory.id);
-        showToast('Categoria atualizada!');
-      } else {
-        await supabase.from('product_categories').insert(categoryData);
-        showToast('Categoria criada!');
-      }
-      setShowCategoryModal(false);
-      fetchProductCategories(store.id);
-    } catch (error) {
-      showToast('Erro ao salvar categoria', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleDeleteCategory = (id: number) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Excluir Categoria',
-      message: 'Tem certeza que deseja excluir esta categoria? Os produtos associados a ela ficarão sem categoria.',
-      onConfirm: async () => {
-        setConfirmModal(null);
-        try {
-          await supabase.from('products').update({ category_id: null }).eq('category_id', id);
-          await supabase.from('product_categories').delete().eq('id', id);
-          showToast('Categoria excluída');
-          fetchProductCategories(store!.id);
-          fetchProducts(store!.id);
-        } catch (error) {
-          showToast('Erro ao excluir categoria', 'error');
-        }
-      }
-    });
-  };
-
-  const toggleCategoryStatus = async (category: any) => {
-    try {
-      await supabase.from('product_categories').update({ is_active: !category.is_active }).eq('id', category.id);
-      fetchProductCategories(store!.id);
-    } catch (error) {
-      showToast('Erro ao atualizar status', 'error');
-    }
-  };
-
-  const openNewCategoryModal = () => {
-    setEditingCategory(null);
-    setCategoryForm({ name: '', sort_order: '0', is_active: true });
-    setShowCategoryModal(true);
-  };
-
-  const openEditCategoryModal = (category: any) => {
-    setEditingCategory(category);
-    setCategoryForm({ name: category.name, sort_order: category.sort_order.toString(), is_active: category.is_active });
-    setShowCategoryModal(true);
-  };
-
-  // --- PRODUCT ACTIONS ---
-  const handleProductImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      if (file.size > 10 * 1024 * 1024) { 
-        showToast('A imagem deve ter no máximo 10MB', 'warning');
-        return;
-      }
-      setProductImageFile(file);
-      const readerProduct = new FileReader();
-      readerProduct.onload = (ev) => { if (ev.target?.result) setProductImagePreview(ev.target.result as string); };
-      readerProduct.onerror = () => setProductImagePreview(null);
-      readerProduct.readAsDataURL(file);
-    }
-  };
-
-  const handleSaveProduct = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!store) return;
-    setActionLoading(-1); 
+  // POLING DE CORRIDAS PENDENTES
+  const checkPendingOffers = async () => {
+    if (deliveryStateRef.current !== 'none') return;
     
     try {
-      let finalImageUrl = productForm.image_url;
+      const { data: delivery } = await supabase
+        .from('deliveries')
+        .select('*')
+        .eq('status', 'offered')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (productImageFile) {
-        const fileExt = productImageFile.name.split('.').pop();
-        const fileName = `product_${store.id}_${Date.now()}.${fileExt}`;
-        
-        const { error: uploadError } = await supabase.storage
-          .from('products')
-          .upload(fileName, productImageFile, { cacheControl: '3600', upsert: false });
+      if (delivery) {
+        // Ignora corridas muito antigas (mais de 65 segundos)
+        const elapsed = Date.now() - new Date(delivery.created_at).getTime();
+        if (elapsed > 65000) return;
 
-        if (uploadError) {
-          console.error("Upload error:", uploadError);
-          throw new Error('Erro ao fazer upload da imagem.');
-        }
+        const { data: order } = await supabase
+          .from('orders')
+          .select('*, stores(name, addresses(*)), addresses(*), users:client_id(name, phone), order_items(*)')
+          .eq('id', delivery.order_id)
+          .maybeSingle();
 
-        const { data: publicUrlData } = supabase.storage.from('products').getPublicUrl(fileName);
-        finalImageUrl = publicUrlData.publicUrl;
-      }
+        if (order && deliveryStateRef.current === 'none') {
+          setActiveDelivery({ ...delivery, order });
+          setDeliveryState('offered');
+          
+          let timeLeft = 60 - Math.floor(elapsed / 1000);
+          if (timeLeft < 1 || timeLeft > 60) timeLeft = 60;
+          setAcceptTimer(timeLeft);
 
-      const productData = {
-        store_id: store.id,
-        name: productForm.name,
-        description: productForm.description,
-        price: parseFloat(productForm.price),
-        image_url: finalImageUrl || null,
-        is_available: productForm.is_available,
-        category_id: productForm.category_id ? parseInt(productForm.category_id) : null
-      };
-
-      if (editingProduct) {
-        await supabase.from('products').update(productData).eq('id', editingProduct.id);
-        showToast('Produto atualizado!');
-      } else {
-        await supabase.from('products').insert(productData);
-        showToast('Produto criado!');
-      }
-      
-      setShowProductModal(false);
-      fetchProducts(store.id);
-    } catch (error: any) {
-      showToast(error.message || 'Erro ao salvar produto', 'error');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleDeleteProduct = (id: number) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Excluir Produto',
-      message: 'Tem certeza que deseja excluir este produto? Esta ação não pode ser desfeita.',
-      onConfirm: async () => {
-        setConfirmModal(null);
-        try {
-          await supabase.from('products').delete().eq('id', id);
-          showToast('Produto excluído');
-          fetchProducts(store!.id);
-        } catch (error) {
-          showToast('Erro ao excluir produto', 'error');
+          await sendNotification('🏍️ Nova Corrida Disponível!', {
+            body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${order.stores?.name}. Aceite rápido!`,
+          });
+          navigator.vibrate?.([300, 100, 300, 100, 300]);
         }
       }
-    });
-  };
-
-  const toggleProductAvailability = async (product: Product) => {
-    try {
-      await supabase.from('products').update({ is_available: !product.is_available }).eq('id', product.id);
-      fetchProducts(store!.id);
-    } catch (error) {
-      showToast('Erro ao atualizar status', 'error');
+    } catch (err) {
+      console.error('Erro ao buscar ofertas:', err);
     }
   };
 
-  const openNewProductModal = () => {
-    setEditingProduct(null);
-    setProductForm({ name: '', description: '', price: '', image_url: '', is_available: true, category_id: '' });
-    setProductImageFile(null);
-    setProductImagePreview(null);
-    setShowProductModal(true);
-  };
-
-  const openEditProductModal = (product: any) => {
-    setEditingProduct(product);
-    setProductForm({
-      name: product.name,
-      description: product.description || '',
-      price: product.price.toString(),
-      image_url: product.image_url || '',
-      is_available: product.is_available,
-      category_id: product.category_id?.toString() || ''
-    });
-    setProductImageFile(null);
-    setProductImagePreview(product.image_url || null);
-    setShowProductModal(true);
-  };
-
-  // --- COUPON ACTIONS ---
-  const handleSaveCoupon = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!store || !user) return;
-    setActionLoading(-2);
-
-    try {
-      const couponData = {
-        store_id: store.id,
-        created_by: user.id,
-        code: couponForm.code.toUpperCase().replace(/\s+/g, ''),
-        type: couponForm.type,
-        value: parseFloat(couponForm.value),
-        min_order_value: parseFloat(couponForm.min_order_value || '0'),
-        expires_at: couponForm.expires_at ? new Date(couponForm.expires_at).toISOString() : null,
-        is_active: couponForm.is_active,
-        max_uses_per_user: 1
-      };
-
-      const { error } = await supabase.from('coupons').insert(couponData);
-      if (error) {
-        if (error.message.includes('duplicate key')) throw new Error('Este código de cupom já existe.');
-        throw error;
-      }
-
-      const createdCode = couponData.code;
-      setNewCouponCode(createdCode);
-      setShowCouponModal(false);
-      fetchCoupons(store.id);
-      setShowNotifyModal(true);
-    } catch (error: any) {
-      showToast(error.message || 'Erro ao criar cupom', 'error');
-    } finally {
-      setActionLoading(null);
+  // Checa a cada 3 segundos se há corridas pendentes
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (courier?.is_online && deliveryState === 'none') {
+      // Checa imediatamente ao ficar online
+      checkPendingOffers();
+      interval = setInterval(() => {
+        checkPendingOffers();
+      }, 3000);
     }
-  };
+    return () => clearInterval(interval);
+  }, [courier?.is_online, deliveryState]);
 
-  const toggleCouponStatus = async (coupon: Coupon) => {
-    try {
-      await supabase.from('coupons').update({ is_active: !coupon.is_active }).eq('id', coupon.id);
-      fetchCoupons(store!.id);
-      showToast(coupon.is_active ? 'Cupom desativado' : 'Cupom ativado');
-    } catch (error) {
-      showToast('Erro ao atualizar cupom', 'error');
-    }
-  };
-
-  const handleDeleteCoupon = (id: number) => {
-    setConfirmModal({
-      isOpen: true,
-      title: 'Excluir Cupom',
-      message: 'Tem certeza que deseja excluir este cupom? Clientes não poderão mais utilizá-lo.',
-      onConfirm: async () => {
-        setConfirmModal(null);
-        try {
-          await supabase.from('coupons').delete().eq('id', id);
-          showToast('Cupom excluído');
-          fetchCoupons(store!.id);
-        } catch (error) {
-          showToast('Erro ao excluir cupom', 'error');
+  const subscribeToDeliveries = (courierId: number) => {
+    const channel = supabase.channel(`courier_offers_${courierId}_${Date.now()}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'deliveries' }, () => {
+        console.log('Nova entrega detectada via realtime!');
+        setTimeout(checkPendingOffers, 300);
+        setTimeout(checkPendingOffers, 1000);
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'deliveries' }, (payload) => {
+        const updated = payload.new;
+        if (
+          deliveryStateRef.current === 'offered' &&
+          activeDeliveryRef.current?.id === updated.id &&
+          updated.status !== 'offered' &&
+          updated.courier_id !== courierId
+        ) {
+          showToast('Corrida aceita por outro motoboy ou cancelada pela loja.', 'warning');
+          setDeliveryState('none');
+          setActiveDelivery(null);
+          setDeliveryCodeInput('');
+          setDeliveryCodeError(false);
         }
-      }
-    });
-  };
-
-  // --- SETTINGS ACTIONS ---
-  const handleSettingsChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value, type, checked } = e.target;
-    setSettingsForm(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value
-    }));
-  };
-
-  const handleLogoFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      if (file.size > 5 * 1024 * 1024) { 
-        showToast('A imagem deve ter no máximo 5MB', 'warning');
-        return;
-      }
-      setLogoFile(file);
-      const readerLogo = new FileReader();
-      readerLogo.onload = (ev) => { if (ev.target?.result) setLogoPreview(ev.target.result as string); };
-      readerLogo.onerror = () => setLogoPreview(null);
-      readerLogo.readAsDataURL(file);
-    }
-  };
-
-  const handleBannerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      if (file.size > 10 * 1024 * 1024) { 
-        showToast('A imagem do banner deve ter no máximo 10MB', 'warning');
-        return;
-      }
-      setBannerFile(file);
-      const readerBanner = new FileReader();
-      readerBanner.onload = (ev) => { if (ev.target?.result) setBannerPreview(ev.target.result as string); };
-      readerBanner.onerror = () => setBannerPreview(null);
-      readerBanner.readAsDataURL(file);
-    }
-  };
-
-  const handleUpdateStoreSettings = async (
-    e: React.FormEvent,
-    section: 'profile' | 'delivery' | 'payment' = 'profile'
-  ) => {
-    e.preventDefault();
-    if (!store || !user) return;
-    setSettingsLoading(true);
-
-    try {
-      const storeUpdateData: any = {};
-
-      if (section === 'profile') {
-        let updatedLogoUrl = settingsForm.logo_url;
-        let updatedBannerUrl = settingsForm.banner_url;
-
-        if (logoFile) {
-          const fileExt = logoFile.name.split('.').pop();
-          const fileName = `store_logo_${store.id}_${Date.now()}.${fileExt}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from('stores')
-            .upload(fileName, logoFile, { cacheControl: '3600', upsert: true });
-
-          if (uploadError) {
-            console.error("Upload error:", uploadError);
-            throw new Error('Erro ao fazer upload do logo.');
-          }
-
-          const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
-          updatedLogoUrl = publicUrlData.publicUrl;
-        }
-
-        if (bannerFile) {
-          const fileExt = bannerFile.name.split('.').pop();
-          const fileName = `store_banner_${store.id}_${Date.now()}.${fileExt}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from('stores')
-            .upload(fileName, bannerFile, { cacheControl: '3600', upsert: true });
-
-          if (uploadError) {
-            console.error("Upload banner error:", uploadError);
-            throw new Error('Erro ao fazer upload do banner.');
-          }
-
-          const { data: publicUrlData } = supabase.storage.from('stores').getPublicUrl(fileName);
-          updatedBannerUrl = publicUrlData.publicUrl;
-        }
-
-        storeUpdateData.name = settingsForm.name;
-        storeUpdateData.phone = settingsForm.phone;
-        storeUpdateData.logo_url = updatedLogoUrl;
-        storeUpdateData.banner_url = updatedBannerUrl;
-      }
-
-      if (section === 'delivery') {
-        storeUpdateData.delivery_fee = parseFloat(settingsForm.delivery_fee);
-        storeUpdateData.min_order_value = parseFloat(settingsForm.min_order_value);
-        storeUpdateData.avg_prep_time_min = parseInt(settingsForm.avg_prep_time_min, 10);
-      }
-
-      if (section === 'payment') {
-        storeUpdateData.accepts_pix = settingsForm.accepts_pix;
-        storeUpdateData.accepts_card = settingsForm.accepts_card;
-        storeUpdateData.accepts_cash = settingsForm.accepts_cash;
-      }
-
-      const { error: storeError } = await supabase
-        .from('stores')
-        .update(storeUpdateData)
-        .eq('id', store.id);
-
-      if (storeError) throw storeError;
-
-      if (section === 'profile') {
-        const { error: userPhoneError } = await supabase
-          .from('users')
-          .update({ phone: settingsForm.phone })
-          .eq('id', user.id);
-
-        if (userPhoneError) console.warn("Could not update user's phone:", userPhoneError.message);
-      }
-
-      setStore(prev => prev ? { ...prev, ...storeUpdateData } : null);
-      if (section === 'profile') {
-        setLogoFile(null);
-        setBannerFile(null);
-      }
-      showToast('Configurações da loja atualizadas!', 'success');
-    } catch (error: any) {
-      showToast(error.message || 'Erro ao atualizar configurações da loja.', 'error');
-    } finally {
-      setSettingsLoading(false);
-    }
-  };
-
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-    if (settingsForm.newPassword !== settingsForm.confirmPassword) {
-      showToast('As senhas não coincidem.', 'warning');
-      return;
-    }
-    if (settingsForm.newPassword.length < 6) {
-      showToast('A senha deve ter no mínimo 6 caracteres.', 'warning');
-      return;
-    }
-
-    setSettingsLoading(true);
-    try {
-      const { error } = await supabase.auth.updateUser({
-        password: settingsForm.newPassword
+      })
+      .subscribe((status) => {
+        console.log('Realtime status:', status);
       });
+
+    return channel;
+  };
+
+  // Cleanup effect for Realtime channel
+  useEffect(() => {
+    let channel: any;
+    if (courier?.is_online) {
+      channel = subscribeToDeliveries(courier.id);
+    }
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [courier?.is_online]);
+
+  const toggleOnline = async () => {
+    if (!courier) return;
+
+    if (!courier.is_online) {
+      setLoading(true);
+      setGpsError(false);
+      try {
+        if (isNativeApp()) {
+          // App nativo — usa plugin Capacitor (pede popup nativo de permissão)
+          const { Geolocation } = await import('@capacitor/geolocation');
+          const permission = await Geolocation.requestPermissions();
+          if (permission.location !== 'granted' && permission.coarseLocation !== 'granted') {
+            setGpsError(true);
+            showToast('Permissão de localização negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
+            setLoading(false);
+            return;
+          }
+          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
+          await supabase.from('couriers').update({
+            is_online: true,
+            last_lat: pos.coords.latitude,
+            last_lng: pos.coords.longitude,
+            location_at: new Date().toISOString()
+          }).eq('id', courier.id);
+        } else {
+          // Web — usa navigator.geolocation
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            if (!navigator.geolocation) { reject(new Error('GPS não suportado')); return; }
+            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 });
+          });
+          await supabase.from('couriers').update({
+            is_online: true,
+            last_lat: pos.coords.latitude,
+            last_lng: pos.coords.longitude,
+            location_at: new Date().toISOString()
+          }).eq('id', courier.id);
+        }
+        setCourier({ ...courier, is_online: true });
+        showToast('Você está online! 🟢', 'success');
+        setTimeout(checkPendingOffers, 1000);
+      } catch (error: any) {
+        console.warn('Erro GPS:', error);
+        setGpsError(true);
+        if (error.message?.includes('denied') || error.code === 1) {
+          showToast('Permissão negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
+        } else {
+          showToast('Erro ao obter localização. Verifique se o GPS está ativo.', 'error');
+        }
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      // Desligar — para o watch
+      if (watchIdRef.current) {
+        if (isNativeApp()) {
+          const { Geolocation } = await import('@capacitor/geolocation');
+          await Geolocation.clearWatch({ id: watchIdRef.current });
+        } else {
+          navigator.geolocation.clearWatch(Number(watchIdRef.current));
+        }
+        watchIdRef.current = null;
+      }
+      setLoading(true);
+      try {
+        await supabase.from('couriers').update({ is_online: false }).eq('id', courier.id);
+        setCourier({ ...courier, is_online: false });
+        showToast('Você está offline.', 'success');
+      } catch (error) {
+        showToast('Erro ao ficar offline.', 'error');
+      } finally {
+        setLoading(false);
+      }
+    }
+  };
+
+  const fetchEarningsHistory = async (page = 0, append = false) => {
+    setLoading(true);
+    try {
+      const from = page * EARNINGS_PAGE_SIZE;
+      const to = from + EARNINGS_PAGE_SIZE - 1;
+      const { data } = await supabase
+        .from('deliveries')
+        .select('*, orders(store_id, stores(name), created_at)')
+        .eq('courier_id', courier.id)
+        .eq('status', 'delivered')
+        .order('delivered_at', { ascending: false })
+        .range(from, to);
+
+      if (data) {
+        setDeliveriesHistory(prev => append ? [...prev, ...data] : data);
+        setEarningsHasMore(data.length === EARNINGS_PAGE_SIZE);
+      }
+    } catch (error) {
+      showToast('Erro ao carregar histórico de entregas', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calcPeriodEarnings = (period: 'today' | 'week' | 'month') => {
+    const now = new Date();
+    let start: Date;
+
+    if (period === 'today') {
+      start = new Date(now); start.setHours(0, 0, 0, 0);
+    } else if (period === 'week') {
+      start = new Date(now); start.setDate(now.getDate() - 7);
+    } else {
+      start = new Date(now); start.setDate(now.getDate() - 30);
+    }
+
+    const filtered = deliveriesHistory.filter(d => {
+      const date = new Date(d.orders?.created_at);
+      return date >= start;
+    });
+
+    setPeriodDeliveries(filtered.length);
+    setPeriodEarnings(filtered.reduce((acc: number, d: any) => acc + (d.courier_earning || 0), 0));
+  };
+
+  const handleSaveProfile = async () => {
+    if (!profileForm.name.trim()) {
+      showToast('Nome não pode ser vazio', 'warning');
+      return;
+    }
+    setProfileLoading(true);
+    try {
+      const { error } = await supabase
+        .from('users')
+        .update({ name: profileForm.name, phone: profileForm.phone })
+        .eq('id', user!.id);
 
       if (error) throw error;
 
-      showToast('Senha atualizada com sucesso!', 'success');
-      setSettingsForm(prev => ({ ...prev, newPassword: '', confirmPassword: '' }));
-    } catch (error: any) {
-      showToast(error.message || 'Erro ao atualizar senha.', 'error');
+      setCourier((prev: any) => ({
+        ...prev,
+        users: { ...prev.users, name: profileForm.name, phone: profileForm.phone }
+      }));
+      setShowProfileEdit(false);
+      showToast('Perfil atualizado!', 'success');
+    } catch {
+      showToast('Erro ao salvar perfil', 'error');
     } finally {
-      setSettingsLoading(false);
+      setProfileLoading(false);
     }
   };
 
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (deliveryState === 'offered' && acceptTimer > 0) {
+      interval = setInterval(() => setAcceptTimer(prev => prev - 1), 1000);
+    } else if (deliveryState === 'offered' && acceptTimer <= 0) {
+      showToast('Tempo esgotado.', 'warning');
+      setDeliveryState('none');
+      setActiveDelivery(null);
+      setDeliveryCodeInput('');
+      setDeliveryCodeError(false);
+    }
+    return () => clearInterval(interval);
+  }, [deliveryState, acceptTimer]);
 
-  const formatTime = (dateString: string) => {
-    return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(dateString));
+  useEffect(() => {
+    if (!courier?.is_online || !courier?.id) return;
+
+    const startWatch = async () => {
+      try {
+        if (isNativeApp()) {
+          // App nativo — usa plugin Capacitor
+          const { Geolocation } = await import('@capacitor/geolocation');
+          if (watchIdRef.current) {
+            await Geolocation.clearWatch({ id: watchIdRef.current });
+            watchIdRef.current = null;
+          }
+          const id = await Geolocation.watchPosition(
+            { enableHighAccuracy: true, timeout: 30000 },
+            async (pos, err) => {
+              if (err || !pos) { setGpsError(true); return; }
+              setGpsError(false);
+              await supabase.from('couriers').update({
+                last_lat: pos.coords.latitude,
+                last_lng: pos.coords.longitude,
+                location_at: new Date().toISOString()
+              }).eq('id', courier.id);
+            }
+          );
+          watchIdRef.current = id;
+        } else {
+          // Web — usa navigator.geolocation
+          if (!navigator.geolocation) return;
+          const watchId = navigator.geolocation.watchPosition(
+            async (pos) => {
+              setGpsError(false);
+              await supabase.from('couriers').update({
+                last_lat: pos.coords.latitude,
+                last_lng: pos.coords.longitude,
+                location_at: new Date().toISOString()
+              }).eq('id', courier.id);
+            },
+            (err) => { console.warn('GPS watch error:', err); setGpsError(true); },
+            { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 }
+          );
+          watchIdRef.current = String(watchId);
+        }
+      } catch (err) {
+        console.warn('Erro ao iniciar rastreamento:', err);
+      }
+    };
+
+    startWatch();
+
+    return () => {
+      if (watchIdRef.current) {
+        if (isNativeApp()) {
+          import('@capacitor/geolocation').then(({ Geolocation }) => {
+            Geolocation.clearWatch({ id: watchIdRef.current! });
+          });
+        } else {
+          navigator.geolocation.clearWatch(Number(watchIdRef.current));
+        }
+        watchIdRef.current = null;
+      }
+    };
+  }, [courier?.is_online, courier?.id]);
+
+  const handleAccept = async () => {
+    setActionLoading(true);
+    try {
+      const { data: updated, error: delErr } = await supabase
+        .from('deliveries')
+        .update({
+          status: 'going_to_store',
+          courier_id: courier!.id,
+          accepted_at: new Date().toISOString()
+        })
+        .eq('id', activeDelivery.id)
+        .eq('status', 'offered')
+        .select()
+        .maybeSingle();
+
+      if (delErr || !updated) {
+        showToast('Corrida já foi aceita por outro motoboy.', 'warning');
+        setDeliveryState('none');
+        setActiveDelivery(null);
+        return;
+      }
+
+      const { error: ordErr } = await supabase
+        .from('orders')
+        .update({ courier_id: courier!.id, status: 'accepted' })
+        .eq('id', activeDelivery.order_id);
+
+      if (ordErr) throw ordErr;
+
+      setDeliveryState('going_to_store');
+      showToast('Corrida aceita! Siga para a loja.');
+    } catch (e: any) {
+      showToast('Erro ao aceitar corrida.', 'error');
+    } finally {
+      setActionLoading(false);
+    }
   };
 
-  const menuItems = [
-    { id: 'dashboard', icon: <LayoutDashboard size={20} />, label: 'Dashboard' },
-    { id: 'orders', icon: <ShoppingBag size={20} />, label: 'Pedidos Ativos' },
-    { id: 'chats', icon: <MessageSquare size={20} />, label: 'Chats' },
-    { id: 'history', icon: <History size={20} />, label: 'Histórico' },
-    { id: 'categories', icon: <FolderTree size={20} />, label: 'Categorias' },
-    { id: 'products', icon: <Package size={20} />, label: 'Cardápio' },
-    { id: 'coupons', icon: <Ticket size={20} />, label: 'Cupons' },
-    { id: 'reviews', icon: <Star size={20} />, label: 'Avaliações' },
-    { id: 'settings', icon: <Settings size={20} />, label: 'Configurações' },
-  ];
+  const handleReject = () => {
+    setDeliveryState('none');
+    setActiveDelivery(null);
+    setDeliveryCodeInput('');
+    setDeliveryCodeError(false);
+  };
 
-  if (loading && !store) {
+  const handleArrivedStore = async () => {
+    setActionLoading(true);
+    try {
+      await supabase.from('deliveries').update({ status: 'at_store', pickup_at: new Date().toISOString() }).eq('id', activeDelivery.id);
+      setDeliveryState('at_store');
+    } catch (e) { showToast('Erro ao atualizar status', 'error'); } finally { setActionLoading(false); }
+  };
+
+  const handlePickup = async () => {
+    setActionLoading(true);
+    try {
+      await supabase.from('deliveries').update({ status: 'delivering' }).eq('id', activeDelivery.id);
+      await supabase.from('orders').update({ status: 'delivering' }).eq('id', activeDelivery.order_id);
+      setDeliveryState('going_to_client');
+      showToast('Pedido retirado! Siga para o cliente.');
+    } catch (e) { showToast('Erro ao atualizar status', 'error'); } finally { setActionLoading(false); }
+  };
+
+  const handleDelivered = async () => {
+    if (activeDelivery.order.delivery_code && deliveryCodeInput.trim() !== activeDelivery.order.delivery_code) {
+      setDeliveryCodeError(true);
+      showToast('Código incorreto. Peça ao cliente o código de 4 dígitos.', 'error');
+      return;
+    }
+    
+    setDeliveryCodeError(false);
+    setActionLoading(true);
+    try {
+      await supabase.from('deliveries').update({ status: 'delivered', delivered_at: new Date().toISOString() }).eq('id', activeDelivery.id);
+      await supabase.from('orders').update({ status: 'delivered', delivered_at: new Date().toISOString() }).eq('id', activeDelivery.order_id);
+
+      const newBalance = (courier.available_balance || 0) + activeDelivery.courier_earning;
+      const newTotal = (courier.total_deliveries || 0) + 1;
+      await supabase.from('couriers').update({ available_balance: newBalance, total_deliveries: newTotal }).eq('id', courier.id);
+      setCourier({ ...courier, available_balance: newBalance, total_deliveries: newTotal });
+
+      setDeliveryCodeInput('');
+      setDeliveryState('none');
+      setActiveDelivery(null);
+      setActiveTab('earnings');
+      showToast('Entrega confirmada com sucesso! 🎉', 'success');
+    } catch (e) {
+      showToast('Erro ao finalizar entrega', 'error');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const isDeliveryActive = deliveryState !== 'none';
+
+  if (loading && !courier && activeTab !== 'earnings') {
     return (
-      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50">
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-900">
         <Loader2 className="animate-spin text-brand-primary mb-4" size={48} />
-        <p className="text-gray-500 font-medium">Carregando painel da loja...</p>
+        <p className="text-gray-400 font-medium">Carregando painel do motoboy...</p>
       </div>
     );
   }
 
-  if (!loading && !store) {
+  if (!loading && !courier) {
     return (
-      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-50">
-        <p className="text-red-500 font-bold mb-4">Loja não encontrada ou não aprovada.</p>
-        <button onClick={onExit} className="px-6 py-2 bg-gray-200 rounded-xl font-bold">Sair do Painel</button>
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-gray-900">
+        <p className="text-red-400 font-bold mb-4">Perfil de motoboy não encontrado.</p>
+        <button onClick={onExit} className="px-6 py-2 bg-gray-800 text-white rounded-xl font-bold">Sair do App</button>
       </div>
     );
   }
 
-  if (!store) return null;
+  if (!courier) return null;
 
   return (
-    <div className="flex h-screen bg-gray-50 w-full font-sans" style={{paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)', paddingLeft: 'env(safe-area-inset-left, 0px)', paddingRight: 'env(safe-area-inset-right, 0px)'}}>
+    <div className="w-full max-w-lg mx-auto h-screen bg-gray-900 flex flex-col relative shadow-2xl overflow-hidden sm:rounded-3xl sm:h-[900px] sm:my-8 md:max-w-2xl md:h-[95vh] border-4 border-gray-800 font-sans" style={{paddingTop: 'env(safe-area-inset-top, 0px)'}}>
       {toast && <Toast {...toast} onClose={() => setToast(null)} />}
       
-      {/* OVERLAY MOBILE */}
-      {isMobileMenuOpen && (
-        <div 
-          className="fixed inset-0 bg-black/50 z-40 md:hidden" 
-          onClick={() => setIsMobileMenuOpen(false)} 
-        />
+      {!isDeliveryActive && (
+        <div className="bg-gray-900 text-white p-5 flex justify-between items-center border-b border-gray-800 shrink-0">
+          <div className="flex items-center">
+            <div className="relative">
+              {courier.users?.avatar_url ? (
+                <img src={courier.users.avatar_url} alt="Perfil" className="w-12 h-12 rounded-full object-cover border-2 border-gray-700" />
+              ) : (
+                <div className="w-12 h-12 bg-gray-700 rounded-full flex items-center justify-center font-bold text-xl border-2 border-gray-700">
+                  {courier.users?.name?.charAt(0).toUpperCase() || 'M'}
+                </div>
+              )}
+              {courier.is_online ? (
+                gpsError ? (
+                  <div className="absolute bottom-0 right-0 w-4 h-4 bg-yellow-500 rounded-full border-2 border-gray-900 flex items-center justify-center"><AlertTriangle size={10} className="text-gray-900"/></div>
+                ) : (
+                  <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-brand-primary rounded-full border-2 border-gray-900"></div>
+                )
+              ) : (
+                <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-gray-500 rounded-full border-2 border-gray-900"></div>
+              )}
+            </div>
+            <div className="ml-3">
+              <h2 className="font-bold text-sm">{courier.users?.name || 'Motoboy'}</h2>
+              {courier.is_online && (
+                <p className={`text-[10px] font-bold ${gpsError ? 'text-yellow-500' : 'text-brand-primary'}`}>
+                  {gpsError ? '⚠️ Sinal GPS fraco' : '● GPS Ativo'}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* SIDEBAR */}
-      <div className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-200 flex flex-col shadow-2xl md:shadow-sm transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-black text-brand-dark flex items-center"><span className="text-brand-primary mr-2">Tá Na Mão</span></h1>
-            <p className="text-sm text-gray-500 mt-1 font-medium">Portal do Parceiro</p>
-          </div>
-          <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-gray-500 hover:text-gray-700">
-            <X size={24} />
-          </button>
-        </div>
-        <nav className="flex-1 overflow-y-auto p-4 space-y-1 scrollbar-hide">
-          {menuItems.map(item => (
-            <button 
-              key={item.id} 
-              onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }} 
-              className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all relative ${activeTab === item.id ? 'bg-brand-primary text-white shadow-md shadow-brand-primary/20' : 'text-gray-600 hover:bg-brand-light hover:text-brand-primary'}`}
-            >
-              {item.icon}<span>{item.label}</span>
-              {item.id === 'chats' && orders.some(o => o.order_chats?.length > 0) && (
-                <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse absolute top-3 right-4"></span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="p-4 border-t border-gray-100">
-          <button onClick={onExit} className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-red-500 hover:bg-red-50 font-medium transition-colors">
-            <LogOut size={20} /><span>Sair do Painel</span>
-          </button>
-        </div>
-      </div>
-
-      {/* MAIN CONTENT AREA */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        {loading && <div className="absolute top-0 left-0 w-full h-1 bg-brand-primary animate-pulse z-50"></div>}
+      <div className="flex-1 overflow-y-auto scrollbar-hide flex flex-col">
         
-        <header className="bg-white border-b border-gray-200 h-20 flex items-center justify-between px-4 md:px-8 shrink-0">
-          <div className="flex items-center space-x-3 md:space-x-4">
-            <button onClick={() => setIsMobileMenuOpen(true)} className="md:hidden p-2 -ml-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-              <Menu size={24} />
+        {/* BANNER DE NOTIFICAÇÕES */}
+        {!isDeliveryActive && activeTab === 'home' && notifPermission === 'default' && (
+          <div className="m-4 bg-gray-800 border border-gray-700 rounded-2xl p-4 flex items-center justify-between shadow-sm">
+            <div className="flex items-center">
+              <div className="w-10 h-10 bg-gray-700 text-brand-primary rounded-full flex items-center justify-center mr-3">
+                <BellRing size={20} />
+              </div>
+              <div>
+                <h3 className="font-bold text-white text-sm">Ative as Notificações</h3>
+                <p className="text-[10px] text-gray-400">Para não perder nenhuma corrida.</p>
+              </div>
+            </div>
+            <button onClick={requestPermission} className="bg-brand-primary text-white px-4 py-2 rounded-xl font-bold text-xs hover:bg-green-600 transition-colors">
+              Ativar
             </button>
-            <div className="w-10 h-10 bg-brand-light text-brand-primary rounded-lg flex items-center justify-center font-bold text-xl shrink-0">{store.name.charAt(0)}</div>
-            <div className="hidden sm:block">
-              <h2 className="font-bold text-brand-dark leading-tight truncate max-w-[150px] md:max-w-xs">{store.name}</h2>
-              <p className="text-xs text-gray-500">{store.is_approved ? 'Verificada' : 'Pendente'}</p>
-            </div>
           </div>
-          <div className="flex items-center space-x-6">
-            <div className="flex items-center bg-gray-50 p-1.5 rounded-full border border-gray-200">
-              <button onClick={() => toggleStoreStatus(false)} className={`px-4 py-1.5 rounded-full text-sm font-bold transition-all ${!store.is_open ? 'bg-white text-red-500 shadow-sm' : 'text-gray-400'}`}>Fechada</button>
-              <button onClick={() => toggleStoreStatus(true)} className={`px-4 py-1.5 rounded-full text-sm font-bold transition-all ${store.is_open ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-400'}`}>Aberta</button>
-            </div>
-          </div>
-        </header>
+        )}
 
-        <main className="flex-1 overflow-y-auto p-4 md:p-8">
-          
-          {/* BANNER DE NOTIFICAÇÕES */}
-          {notifPermission === 'default' && (
-            <div className="max-w-6xl mx-auto mb-6 bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-center justify-between shadow-sm">
-              <div className="flex items-center">
-                <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mr-4 shrink-0">
-                  <BellRing size={20} />
-                </div>
-                <div>
-                  <h3 className="font-bold text-blue-900">Ative as Notificações</h3>
-                  <p className="text-sm text-blue-700 hidden sm:block">Seja avisado imediatamente quando um novo pedido chegar.</p>
+        {deliveryState === 'offered' && activeDelivery && (
+          <div className="flex-1 flex flex-col bg-gray-900 p-4 justify-center relative">
+            <div className="bg-gray-800 w-full rounded-3xl p-6 shadow-2xl relative z-10 border border-gray-700">
+              <div className="text-center mb-6"><span className="bg-brand-secondary text-brand-dark text-xs font-bold px-4 py-1.5 rounded-full uppercase tracking-wider animate-pulse">Nova Entrega Disponível</span></div>
+              
+              <div className="mb-6 bg-gray-900 p-4 rounded-xl border border-gray-700">
+                <div className="flex items-start mb-3">
+                  <Store className="text-brand-primary mr-3 mt-1" size={20} />
+                  <div>
+                    <p className="text-white font-bold">{activeDelivery.order.stores?.name}</p>
+                    <p className="text-gray-400 text-xs mt-1">{activeDelivery.order.stores?.addresses?.street}, {activeDelivery.order.stores?.addresses?.number} - {activeDelivery.order.stores?.addresses?.neighborhood}</p>
+                  </div>
                 </div>
               </div>
-              <button onClick={requestPermission} className="bg-blue-600 text-white px-5 py-2 rounded-xl font-bold text-sm hover:bg-blue-700 transition-colors shadow-sm shrink-0 ml-2">
-                Ativar
+
+              <div className="flex justify-between items-end mb-8">
+                <div><p className="text-gray-400 text-sm mb-1">Seu Ganho</p><p className="text-5xl font-black text-brand-primary">R$ {activeDelivery.courier_earning?.toFixed(2) || '0.00'}</p></div>
+              </div>
+              <div className="w-full bg-gray-700 rounded-full h-2 mb-6 overflow-hidden">
+                <div className="bg-brand-secondary h-2 rounded-full transition-all duration-1000 ease-linear" style={{ width: `${(acceptTimer / 60) * 100}%` }}></div>
+              </div>
+              <div className="flex space-x-3">
+                <button onClick={handleReject} disabled={actionLoading} className="flex-1 py-4 rounded-xl font-bold text-gray-300 bg-gray-700">Recusar ({acceptTimer}s)</button>
+                <button onClick={handleAccept} disabled={actionLoading} className="flex-[2] py-4 rounded-xl font-bold text-white bg-brand-primary flex justify-center items-center">
+                  {actionLoading ? <Loader2 className="animate-spin" size={20}/> : 'Aceitar Corrida'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {deliveryState === 'going_to_store' && activeDelivery && (
+          <div className="flex-1 flex flex-col bg-gray-900 p-6 overflow-y-auto">
+            <div className="mt-4 mb-auto">
+              <h2 className="text-gray-400 text-sm font-bold uppercase tracking-widest mb-2">Coleta na Loja</h2>
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 mb-4">
+                <h3 className="text-2xl font-black text-white mb-1">{activeDelivery.order.stores?.name}</h3>
+                <p className="text-gray-400 text-sm flex items-start mt-2"><MapPin size={16} className="mr-2 shrink-0 mt-0.5"/> {activeDelivery.order.stores?.addresses?.street}, {activeDelivery.order.stores?.addresses?.number} - {activeDelivery.order.stores?.addresses?.neighborhood}</p>
+              </div>
+              
+              {/* MAPA E NAVEGAÇÃO PARA A LOJA */}
+              <AddressMap 
+                address={activeDelivery.order.stores?.addresses ? `${activeDelivery.order.stores.addresses.street}, ${activeDelivery.order.stores.addresses.number} - ${activeDelivery.order.stores.addresses.neighborhood}, ${activeDelivery.order.stores.addresses.city}` : ''} 
+              />
+              
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 mb-4">
+                <p className="text-gray-400 text-xs mb-2">Pedido #{activeDelivery.order_id}</p>
+                <div className="space-y-1">
+                  {activeDelivery.order.order_items?.map((item:any) => (
+                    <p key={item.id} className="text-white text-sm font-medium">{item.quantity}x {item.product_name}</p>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            <button onClick={handleArrivedStore} disabled={actionLoading} className="w-full mt-4 bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-brand-primary/20 shrink-0">
+              {actionLoading ? <Loader2 className="animate-spin" size={24}/> : 'Cheguei na Loja'}
+            </button>
+          </div>
+        )}
+
+        {deliveryState === 'at_store' && activeDelivery && (
+          <div className="flex-1 flex flex-col bg-gray-900 p-6 justify-center">
+            <div className="bg-brand-primary/10 border border-brand-primary/30 rounded-2xl p-6 text-center mb-6">
+              <p className="text-brand-primary text-sm font-bold mb-1 uppercase tracking-widest">Apresente o número</p>
+              <p className="text-6xl font-black text-white">#{activeDelivery?.order_id}</p>
+            </div>
+            <button onClick={handlePickup} disabled={actionLoading} className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center">
+              {actionLoading ? <Loader2 className="animate-spin" size={24}/> : <><CheckCircle size={20} className="mr-2" /> Confirmar Retirada</>}
+            </button>
+          </div>
+        )}
+
+        {deliveryState === 'going_to_client' && activeDelivery && (
+          <div className="flex-1 flex flex-col bg-gray-900 p-6 overflow-y-auto">
+            <div className="mt-4 mb-auto">
+              <h2 className="text-gray-400 text-sm font-bold uppercase tracking-widest mb-2">Entrega no Cliente</h2>
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700 mb-4">
+                <div className="flex items-center justify-between mb-1">
+                  <h3 className="text-xl font-bold text-white">{activeDelivery.order.users?.name}</h3>
+                  {activeDelivery.order.users?.phone && (
+                    <a
+                      href={`tel:${activeDelivery.order.users.phone.replace(/\D/g, '')}`}
+                      className="flex items-center gap-1.5 bg-green-500 hover:bg-green-400 text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors"
+                    >
+                      📞 Ligar
+                    </a>
+                  )}
+                </div>
+                {activeDelivery.order.users?.phone && (
+                  <p className="text-gray-400 text-sm mb-2">{activeDelivery.order.users.phone}</p>
+                )}
+                <p className="text-gray-400 text-sm flex items-start mt-2"><MapPin size={16} className="mr-2 shrink-0 mt-0.5"/> {activeDelivery.order.addresses?.street}, {activeDelivery.order.addresses?.number} {activeDelivery.order.addresses?.complement ? `- ${activeDelivery.order.addresses?.complement}` : ''}</p>
+                <p className="text-gray-400 text-sm ml-6">{activeDelivery.order.addresses?.neighborhood}</p>
+              </div>
+
+              {/* MAPA E NAVEGAÇÃO PARA O CLIENTE */}
+              <AddressMap 
+                address={activeDelivery.order.addresses ? `${activeDelivery.order.addresses.street}, ${activeDelivery.order.addresses.number} - ${activeDelivery.order.addresses.neighborhood}, ${activeDelivery.order.addresses.city}` : ''} 
+              />
+
+              {/* OBSERVAÇÕES DO CLIENTE */}
+              {activeDelivery.order.client_notes && (
+                <div className="bg-yellow-900/30 border border-yellow-600/50 p-4 rounded-2xl mb-4">
+                  <div className="flex items-center text-yellow-500 font-bold mb-2 text-sm"><FileText size={18} className="mr-2"/> OBSERVAÇÕES DO CLIENTE</div>
+                  <p className="text-yellow-100 text-sm font-medium">{activeDelivery.order.client_notes}</p>
+                </div>
+              )}
+
+              {activeDelivery.order.payment_method === 'cash' ? (
+                <div className="bg-green-900/40 border border-green-500/50 p-5 rounded-2xl mb-4">
+                  <div className="flex items-center text-green-400 font-bold mb-2"><Banknote size={20} className="mr-2"/> COBRAR EM DINHEIRO</div>
+                  <p className="text-3xl font-black text-white">R$ {activeDelivery.order.total.toFixed(2)}</p>
+                  {activeDelivery.order.change_for && (
+                    <p className="text-green-300 text-sm mt-2 font-medium">Levar troco para R$ {activeDelivery.order.change_for.toFixed(2)}</p>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-blue-900/40 border border-blue-500/50 p-5 rounded-2xl mb-4">
+                  <div className="flex items-center text-blue-400 font-bold mb-1"><CreditCard size={20} className="mr-2"/> PAGAMENTO PIX</div>
+                  <p className="text-blue-200 text-sm">O cliente já escolheu pagar via PIX. Combine a chave na entrega. Valor: R$ {activeDelivery.order.total.toFixed(2)}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Input de código de confirmação */}
+            <div className="space-y-3 mt-4 shrink-0">
+              {activeDelivery.order.delivery_code ? (
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2 text-center">
+                    Digite o código do cliente para confirmar a entrega
+                  </p>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={4}
+                    value={deliveryCodeInput}
+                    onChange={e => {
+                      setDeliveryCodeError(false);
+                      setDeliveryCodeInput(e.target.value.slice(0, 4));
+                    }}
+                    placeholder="0000"
+                    className={`w-full text-center text-4xl font-black tracking-[0.4em] bg-gray-800 border-2 ${
+                      deliveryCodeError ? 'border-red-500 text-red-400' : 'border-gray-600 text-white'
+                    } rounded-2xl py-5 focus:border-brand-primary focus:outline-none transition-colors`}
+                  />
+                  {deliveryCodeError && (
+                    <p className="text-red-400 text-xs text-center mt-2 font-medium">
+                      Código incorreto. Verifique com o cliente.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="bg-yellow-900/30 border border-yellow-600/50 p-4 rounded-2xl text-center">
+                  <p className="text-yellow-500 text-sm font-bold">Pedido Legado</p>
+                  <p className="text-yellow-100 text-xs mt-1">Este pedido não possui código de confirmação. Confirme a entrega diretamente.</p>
+                </div>
+              )}
+              <button
+                onClick={handleDelivered}
+                disabled={actionLoading || (activeDelivery.order.delivery_code && deliveryCodeInput.length !== 4)}
+                className="w-full bg-brand-primary text-white py-4 rounded-xl font-bold text-lg flex justify-center items-center shadow-lg shadow-brand-primary/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {actionLoading ? <Loader2 className="animate-spin" size={24}/> : <><CheckCircle size={20} className="mr-2"/> Confirmar Entrega</>}
               </button>
             </div>
-          )}
-
-          {/* DASHBOARD */}
-          {activeTab === 'dashboard' && (
-            <div className="max-w-6xl mx-auto space-y-8">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <h2 className="text-2xl md:text-3xl font-black text-brand-dark">Olá, Parceiro! 👋</h2>
-                <div className="flex flex-col items-end gap-2 w-full md:w-auto">
-                  <div className="flex bg-white p-1 rounded-xl shadow-sm border border-gray-200 w-full overflow-x-auto scrollbar-hide">
-                    <button onClick={() => setDashboardFilter('today')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === 'today' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hoje</button>
-                    <button onClick={() => setDashboardFilter('7days')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === '7days' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>7 dias</button>
-                    <button onClick={() => setDashboardFilter('15days')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === '15days' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>15 dias</button>
-                    <button onClick={() => setDashboardFilter('30days')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === '30days' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>30 dias</button>
-                    <button onClick={() => setDashboardFilter('custom')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${dashboardFilter === 'custom' ? 'bg-brand-primary text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Personalizado</button>
-                  </div>
-                  {dashboardFilter === 'custom' && (
-                    <div className="flex gap-2 items-center bg-white p-2 rounded-xl shadow-sm border border-gray-200 w-full md:w-auto justify-between">
-                      <input type="date" value={customStartDate} onChange={e => setCustomStartDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent w-full md:w-auto" />
-                      <span className="text-gray-400 text-sm font-medium">até</span>
-                      <input type="date" value={customEndDate} onChange={e => setCustomEndDate(e.target.value)} className="text-sm border-none outline-none text-gray-700 bg-transparent w-full md:w-auto" />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
-                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
-                  <div className="p-3 bg-blue-50 rounded-xl text-blue-500 w-fit mb-4"><ShoppingBag size={24} /></div>
-                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">{dashboardMetrics.totalOrders}</h3>
-                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Pedidos no período</p>
-                </div>
-                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
-                  <div className="p-3 bg-green-50 rounded-xl text-green-500 w-fit mb-4"><Check size={24} /></div>
-                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">{dashboardMetrics.deliveredOrders}</h3>
-                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Entregues no período</p>
-                </div>
-                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
-                  <div className="p-3 bg-red-50 rounded-xl text-red-500 w-fit mb-4"><X size={24} /></div>
-                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">{dashboardMetrics.cancelledOrders}</h3>
-                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Cancelados no período</p>
-                </div>
-                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
-                  <div className="p-3 bg-brand-light rounded-xl text-brand-primary w-fit mb-4"><DollarSign size={24} /></div>
-                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">R$ {dashboardMetrics.revenue.toFixed(2)}</h3>
-                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Faturamento no período</p>
-                </div>
-                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100 col-span-2 md:col-span-1 lg:col-span-1">
-                  <div className="p-3 bg-yellow-50 rounded-xl text-yellow-500 w-fit mb-4"><Star size={24} /></div>
-                  <h3 className="text-2xl md:text-3xl font-black text-brand-dark">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</h3>
-                  <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Avaliação geral</p>
-                </div>
-                {/* Card de Saldo Disponível */}
-                <div className="col-span-2 md:col-span-3 lg:col-span-5 bg-gradient-to-r from-brand-primary to-green-600 p-6 rounded-2xl shadow-md text-white">
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className="p-2 bg-white/20 rounded-xl">
-                          <DollarSign size={20} className="text-white" />
-                        </div>
-                        <p className="font-bold text-white/80 text-sm uppercase tracking-wider">Saldo a Receber</p>
-                      </div>
-                      <h3 className="text-3xl md:text-4xl font-black text-white mt-2">
-                        {storeBalance !== null ? `R$ ${storeBalance.toFixed(2)}` : '—'}
-                      </h3>
-                      <p className="text-white/70 text-sm mt-1">
-                        Pagamentos digitais confirmados aguardando repasse
-                      </p>
-                    </div>
-                    <div className="bg-white/20 rounded-2xl p-4 text-center w-full md:w-auto min-w-[180px]">
-                      <p className="text-white/80 text-xs font-bold uppercase tracking-wider mb-1">Próximo repasse</p>
-                      <p className="text-white font-black text-sm capitalize">{nextPayoutDate || 'Toda segunda-feira'}</p>
-                      <p className="text-white/70 text-xs mt-1">via PIX cadastrado</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* KANBAN PEDIDOS */}
-          {activeTab === 'orders' && (
-            <div className="max-w-7xl mx-auto h-full flex flex-col">
-              <h2 className="text-2xl font-bold text-brand-dark mb-6">Gestor de Pedidos</h2>
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-y-auto md:overflow-hidden pb-10 md:pb-0">
-                
-                {/* Novos */}
-                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[500px] md:h-full">
-                  <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
-                    Novos <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'pending').length}</span>
-                  </h3>
-                  <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-                    {orders.filter(o => o.status === 'pending').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido novo</p>}
-                    {orders.filter(o => o.status === 'pending').map(order => (
-                      <div key={order.id} className="bg-white rounded-2xl p-4 md:p-5 shadow-sm border-l-4 border-l-brand-secondary relative">
-                        <div className="flex justify-between items-start mb-2">
-                          <div>
-                            <span className="text-xs font-bold text-gray-400">#{order.id}</span>
-                            <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
-                            {order.users?.phone && (
-                              <a
-                                href={`https://wa.me/55${order.users.phone.replace(/\D/g, '')}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center text-xs text-green-600 font-bold mt-1 hover:underline"
-                              >
-                                📞 {order.users.phone}
-                              </a>
-                            )}
-                          </div>
-                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
-                        </div>
-                        
-                        {order.addresses && (
-                          <p className="text-xs text-gray-500 mb-3 flex items-start">
-                            <MapPin size={12} className="mr-1 shrink-0 mt-0.5"/>
-                            {order.addresses.street}, {order.addresses.number} - {order.addresses.neighborhood}
-                          </p>
-                        )}
-
-                        {order.client_notes && (
-                          <div className="bg-yellow-50 text-yellow-800 text-xs p-2 rounded-lg mb-3 flex items-start border border-yellow-200">
-                            <span className="mr-1">📝</span> <span className="font-medium">{order.client_notes}</span>
-                          </div>
-                        )}
-
-                        <div className="text-sm text-gray-600 mb-3 space-y-1">
-                          {order.order_items?.map((item:any) => (
-                            <div key={item.id}>
-                              <p className="font-medium">{item.quantity}x {item.product_name}</p>
-                              {item.order_item_selections?.map((sel:any) => (
-                                <p key={sel.id} className="text-xs text-gray-400 pl-3">↳ {sel.item_name}{sel.item_price > 0 ? ` +R$ ${Number(sel.item_price).toFixed(2)}` : ''}</p>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
-                        <div className="flex justify-between items-center mb-4">
-                          <div className="font-black text-brand-dark text-lg">R$ {order.total.toFixed(2)}</div>
-                          {order.payment_method === 'cash' ? (
-                            <span className="text-[10px] font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded border border-yellow-200">💵 DINHEIRO</span>
-                          ) : order.payment_method === 'pix' ? (
-                            <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded border border-blue-200">📱 PIX</span>
-                          ) : (
-                            <span className="text-[10px] font-bold bg-orange-100 text-orange-800 px-2 py-1 rounded border border-orange-200">💳 CARTÃO</span>
-                          )}
-                        </div>
-                        <div className="flex space-x-2">
-                          <button 
-                            onClick={() => handleAcceptOrder(order)} 
-                            disabled={actionLoading === order.id} 
-                            className="flex-1 bg-brand-primary text-white py-2.5 rounded-xl text-sm font-bold flex justify-center items-center"
-                          >
-                            {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : 'Aceitar e Preparar'}
-                          </button>
-                          <button onClick={() => handleRejectOrder(order.id)} disabled={actionLoading === order.id} className="px-4 bg-gray-100 text-gray-500 py-2.5 rounded-xl text-sm font-bold">Recusar</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Em Preparo */}
-                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[500px] md:h-full">
-                  <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
-                    Em Preparo <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'preparing').length}</span>
-                  </h3>
-                  <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-                    {orders.filter(o => o.status === 'preparing').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido em preparo</p>}
-                    {orders.filter(o => o.status === 'preparing').map(order => (
-                      <div key={order.id} className="bg-white rounded-2xl p-4 md:p-5 shadow-sm border-l-4 border-l-blue-500 relative">
-                        <button
-                          onClick={() => printOrder(order)}
-                          title="Reimprimir comanda"
-                          className="absolute top-3 right-3 p-1.5 text-gray-400 hover:text-brand-primary hover:bg-gray-100 rounded-lg transition-colors"
-                        >
-                          <Printer size={14} />
-                        </button>
-                        <div className="flex justify-between items-start mb-2 pr-6">
-                          <div>
-                            <span className="text-xs font-bold text-gray-400">#{order.id}</span>
-                            <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
-                            {order.users?.phone && (
-                              <a
-                                href={`https://wa.me/55${order.users.phone.replace(/\D/g, '')}`}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center text-xs text-green-600 font-bold mt-1 hover:underline"
-                              >
-                                📞 {order.users.phone}
-                              </a>
-                            )}
-                          </div>
-                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
-                        </div>
-
-                        {order.addresses && (
-                          <p className="text-xs text-gray-500 mb-3 flex items-start">
-                            <MapPin size={12} className="mr-1 shrink-0 mt-0.5"/>
-                            {order.addresses.street}, {order.addresses.number} - {order.addresses.neighborhood}
-                          </p>
-                        )}
-
-                        {order.client_notes && (
-                          <div className="bg-yellow-50 text-yellow-800 text-xs p-2 rounded-lg mb-3 flex items-start border border-yellow-200">
-                            <span className="mr-1">📝</span> <span className="font-medium">{order.client_notes}</span>
-                          </div>
-                        )}
-
-                        <div className="text-sm text-gray-600 mb-4 space-y-1 bg-gray-50 p-3 rounded-xl border border-gray-100">
-                          {order.order_items?.map((item:any) => (
-                            <div key={item.id}>
-                              <p className="font-medium">{item.quantity}x {item.product_name}</p>
-                              {item.order_item_selections?.map((sel:any) => (
-                                <p key={sel.id} className="text-xs text-gray-400 pl-3">↳ {sel.item_name}{sel.item_price > 0 ? ` +R$ ${Number(sel.item_price).toFixed(2)}` : ''}</p>
-                              ))}
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className="flex flex-col sm:flex-row gap-2 mt-3">
-                          <button
-                            onClick={() => updateOrderStatus(order.id, 'ready')}
-                            disabled={actionLoading === order.id}
-                            className="flex-1 bg-blue-50 text-blue-600 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center hover:bg-blue-100 transition-colors"
-                          >
-                            {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : <><Bike size={14} className="mr-1.5"/>Chamar Motoboy</>}
-                          </button>
-                          <button
-                            onClick={() => handleOwnDelivery(order.id)}
-                            disabled={actionLoading === order.id}
-                            className="flex-1 bg-purple-50 text-purple-600 py-2.5 rounded-xl text-sm font-bold flex justify-center items-center hover:bg-purple-100 transition-colors"
-                          >
-                            {actionLoading === order.id ? <Loader2 size={16} className="animate-spin"/> : <><User size={14} className="mr-1.5"/>Entrega Própria</>}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Prontos */}
-                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[500px] md:h-full">
-                  <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
-                    Prontos / Rota <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'ready' || o.status === 'delivering').length}</span>
-                  </h3>
-                  <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-                    {orders.filter(o => o.status === 'ready' || o.status === 'delivering').length === 0 && <p className="text-center text-gray-400 text-sm mt-10">Nenhum pedido aguardando entrega</p>}
-                    {orders.filter(o => o.status === 'ready' || o.status === 'delivering').map(order => (
-                      <div key={order.id} className={`bg-white rounded-2xl p-4 md:p-5 shadow-sm border-l-4 ${order.own_delivery ? 'border-l-purple-500' : order.courier_id ? 'border-l-brand-primary' : 'border-l-yellow-400'} opacity-90`}>
-                        <div className="flex justify-between items-start mb-2">
-                          <span className="text-xs font-bold text-gray-400">#{order.id}</span>
-                          <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded-lg flex items-center"><Clock size={12} className="mr-1"/>{formatTime(order.created_at)}</span>
-                        </div>
-                        <h4 className="font-bold text-brand-dark mt-1">{order.users?.name || 'Cliente'}</h4>
-                        {order.users?.phone && (
-                          <a
-                            href={`https://wa.me/55${order.users.phone.replace(/\D/g, '')}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center text-xs text-green-600 font-bold mt-1 hover:underline"
-                          >
-                            📞 {order.users.phone}
-                          </a>
-                        )}
-                        
-                        {order.addresses && (
-                          <p className="text-xs text-gray-500 mb-2 flex items-start mt-1">
-                            <MapPin size={12} className="mr-1 shrink-0 mt-0.5"/>
-                            {order.addresses.street}, {order.addresses.number} - {order.addresses.neighborhood}
-                          </p>
-                        )}
-                        
-                        {order.own_delivery ? (
-                          <div className="mt-3 space-y-2">
-                            <div className="bg-purple-50 text-purple-700 text-xs font-bold p-2 rounded-lg flex items-center border border-purple-200">
-                              <User size={14} className="mr-1"/> Entrega Própria
-                            </div>
-                            {order.status === 'delivering' && (
-                              <button
-                                onClick={() => handleConfirmOwnDelivery(order.id)}
-                                disabled={actionLoading === order.id}
-                                className="w-full bg-brand-primary text-white py-2.5 rounded-xl text-sm font-bold flex justify-center items-center hover:bg-green-600 transition-colors"
-                              >
-                                {actionLoading === order.id
-                                  ? <Loader2 size={16} className="animate-spin"/>
-                                  : <><CheckCircle size={14} className="mr-1.5"/>Confirmar Entrega</>
-                                }
-                              </button>
-                            )}
-                          </div>
-                        ) : order.courier_id ? (
-                          <div className="mt-3 bg-green-50 text-green-700 text-xs font-bold p-2 rounded-lg flex items-center">
-                            <Bike size={14} className="mr-1"/> Com motoboy
-                          </div>
-                        ) : (
-                          (() => {
-                            const offer = order.deliveries?.find((d: any) => d.status === 'offered');
-                            let timeLeft = 60;
-                            if (offer) {
-                              const elapsed = Math.floor((now - new Date(offer.created_at).getTime()) / 1000);
-                              timeLeft = Math.max(0, Math.min(60, 60 - elapsed));
-                            }
-                            return (
-                              <div className="mt-3 bg-yellow-50 text-yellow-700 text-xs font-bold p-2 rounded-lg flex items-center justify-between border border-yellow-200">
-                                <div className="flex items-center">
-                                  <Loader2 size={14} className="mr-1 animate-spin"/> Aguardando motoboy
-                                </div>
-                                {offer && <span className="font-mono bg-yellow-100 px-1.5 py-0.5 rounded text-[10px]">0:{timeLeft.toString().padStart(2, '0')}</span>}
-                              </div>
-                            );
-                          })()
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-              </div>
-            </div>
-          )}
-
-          {/* CHATS */}
-          {activeTab === 'chats' && (
-            <div className="max-w-6xl mx-auto h-[calc(100vh-8rem)] flex flex-col">
-              <h2 className="text-2xl font-black text-gray-800 mb-6 shrink-0">Chat com Clientes</h2>
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 min-h-0">
-                <div className={`md:col-span-1 bg-white rounded-2xl shadow-sm border border-gray-200 overflow-y-auto ${activeChatOrderId ? 'hidden md:block' : 'block'}`}>
-                  {orders.length === 0 && <p className="p-8 text-center text-gray-500 text-sm">Nenhum pedido ativo.</p>}
-                  {orders.map(order => {
-                    const msgs = order.order_chats || [];
-                    const last = msgs[msgs.length - 1];
-                    return (
-                      <button key={order.id} onClick={() => setActiveChatOrderId(order.id)}
-                        className={`w-full p-4 border-b border-gray-100 text-left hover:bg-gray-50 ${activeChatOrderId === order.id ? 'bg-brand-light border-l-4 border-l-brand-primary' : 'border-l-4 border-l-transparent'}`}>
-                        <div className="flex justify-between mb-1">
-                          <span className="font-bold text-gray-800">Pedido #{order.id}</span>
-                          <span className="text-xs text-gray-500">{order.users?.name}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <p className={`text-xs truncate max-w-[80%] ${last?.is_system_message ? 'text-red-500 font-bold' : 'text-gray-500'}`}>
-                            {last ? last.message : 'Sem mensagens'}
-                          </p>
-                          {msgs.length > 0 && <span className="bg-gray-200 text-gray-600 text-[10px] font-bold px-2 py-0.5 rounded-full">{msgs.length}</span>}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className={`md:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-200 flex flex-col overflow-hidden ${!activeChatOrderId ? 'hidden md:flex' : 'flex h-[600px] md:h-auto'}`}>
-                  {!activeChatOrderId ? (
-                    <div className="h-full flex flex-col items-center justify-center text-gray-400 p-8">
-                      <MessageSquare size={48} className="mb-4 opacity-30" />
-                      <p className="text-sm">Selecione um pedido para ver o chat.</p>
-                    </div>
-                  ) : (() => {
-                    const order = orders.find(o => o.id === activeChatOrderId);
-                    if (!order) return null;
-                    const msgs = (order.order_chats || []).sort((a: any, b: any) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-                    return (
-                      <>
-                        <div className="p-4 border-b bg-gray-50 shrink-0 flex justify-between items-center">
-                          <div className="flex items-center">
-                            <button onClick={() => setActiveChatOrderId(null)} className="md:hidden p-2 -ml-2 mr-2 text-gray-600 hover:bg-gray-200 rounded-lg">
-                              <ChevronLeft size={24} />
-                            </button>
-                            <div>
-                              <h3 className="font-bold text-gray-800">Pedido #{order.id}</h3>
-                              <p className="text-xs text-gray-500">Cliente: {order.users?.name}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="bg-white px-3 py-1 rounded-full text-xs font-bold border border-gray-200 text-gray-600 hidden sm:inline-block">
-                              {order.status === 'pending' ? 'Novo' : order.status === 'preparing' ? 'Em Preparo' : 'Pronto/Rota'}
-                            </span>
-                            {['pending', 'preparing', 'ready', 'delivering'].includes(order.status) && (
-                              <button 
-                                onClick={() => {
-                                  setConfirmModal({
-                                    isOpen: true,
-                                    title: 'Cancelar Pedido',
-                                    message: 'Tem certeza que deseja cancelar este pedido? O cliente será notificado.',
-                                    onConfirm: async () => {
-                                      await handleRejectOrder(order.id);
-                                      setActiveChatOrderId(null);
-                                      setConfirmModal(null);
-                                    }
-                                  });
-                                }}
-                                className="bg-red-500 text-white px-3 md:px-4 py-2 rounded-xl text-xs font-bold hover:bg-red-600 transition-colors flex items-center shadow-sm"
-                              >
-                                <XCircle size={14} className="mr-1.5" /> <span className="hidden sm:inline">Cancelar Pedido</span><span className="sm:hidden">Cancelar</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
-                          {msgs.length === 0 && <div className="h-full flex flex-col items-center justify-center text-gray-400"><MessageSquare size={48} className="mb-4 opacity-50" /><p className="text-sm">Sem mensagens.</p></div>}
-                          {msgs.map((msg: any) => {
-                            if (msg.is_system_message) return (
-                              <div key={msg.id} className="flex justify-center">
-                                <span className="bg-red-100 text-red-800 text-xs font-bold px-4 py-2 rounded-xl border border-red-200 text-center max-w-[85%]">{msg.message}</span>
-                              </div>
-                            );
-                            const isStore = msg.sender_id === user?.id;
-                            return (
-                              <div key={msg.id} className={`flex flex-col ${isStore ? 'items-end' : 'items-start'}`}>
-                                <div className={`max-w-[80%] p-3 text-sm ${isStore ? 'bg-brand-primary text-white rounded-2xl rounded-tr-sm' : 'bg-green-100 text-green-900 border border-green-200 rounded-2xl rounded-tl-sm'}`}>{msg.message}</div>
-                                <span className="text-[10px] text-gray-400 mt-1">{new Date(msg.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
-                              </div>
-                            );
-                          })}
-                          <div ref={chatEndRef} />
-                        </div>
-                        <div className="p-4 bg-white border-t shrink-0">
-                          <form onSubmit={handleSendStoreMessage} className="flex items-center gap-2">
-                            <input value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="Digite sua mensagem..."
-                              className="flex-1 bg-gray-100 rounded-full px-4 py-3 text-sm outline-none" />
-                            <button type="submit" disabled={!chatInput.trim()}
-                              className="w-12 h-12 bg-brand-primary text-white rounded-full flex items-center justify-center disabled:opacity-50 shrink-0">
-                              <Send size={18} className="ml-1" />
-                            </button>
-                          </form>
-                        </div>
-                      </>
-                    );
-                  })()}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* HISTÓRICO DE PEDIDOS */}
-          {activeTab === 'history' && (
-            <div className="max-w-6xl mx-auto">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-                <h2 className="text-2xl font-bold text-brand-dark">Histórico de Pedidos</h2>
-                <div className="flex bg-gray-200 p-1 rounded-xl w-full md:w-auto overflow-x-auto scrollbar-hide">
-                  <button onClick={() => setHistoryFilter('today')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${historyFilter === 'today' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Hoje</button>
-                  <button onClick={() => setHistoryFilter('yesterday')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${historyFilter === 'yesterday' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Ontem</button>
-                  <button onClick={() => setHistoryFilter('week')} className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-all ${historyFilter === 'week' ? 'bg-white text-brand-dark shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>Últimos 7 dias</button>
-                </div>
-              </div>
-              
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[800px]">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
-                      <th className="p-4 font-medium">#ID</th>
-                      <th className="p-4 font-medium">Cliente</th>
-                      <th className="p-4 font-medium">Itens</th>
-                      <th className="p-4 font-medium">Total</th>
-                      <th className="p-4 font-medium">Pagamento</th>
-                      <th className="p-4 font-medium">Status</th>
-                      <th className="p-4 font-medium">Horário</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {historyOrders.map(order => (
-                      <tr key={order.id} className="hover:bg-gray-50">
-                        <td className="p-4 font-bold text-gray-400">#{order.id}</td>
-                        <td className="p-4 font-bold text-brand-dark">{order.users?.name || 'Cliente'}</td>
-                        <td className="p-4 text-sm text-gray-600 max-w-[200px]">
-                          <div className="space-y-0.5">
-                            {order.order_items?.map((item:any) => (
-                              <div key={item.id}>
-                                <span>{item.quantity}x {item.product_name}</span>
-                                {item.order_item_selections?.length > 0 && (
-                                  <span className="text-xs text-gray-400"> ({item.order_item_selections.map((s:any) => s.item_name).join(', ')})</span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="p-4 font-bold text-brand-dark">R$ {order.total.toFixed(2)}</td>
-                        <td className="p-4">
-                          {order.payment_method === 'cash' ? (
-                            <span className="text-[10px] font-bold bg-yellow-100 text-yellow-800 px-2 py-1 rounded">💵 DINHEIRO</span>
-                          ) : order.payment_method === 'pix' ? (
-                            <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded">📱 PIX</span>
-                          ) : (
-                            <span className="text-[10px] font-bold bg-orange-100 text-orange-800 px-2 py-1 rounded">💳 CARTÃO</span>
-                          )}
-                        </td>
-                        <td className="p-4">
-                          {order.status === 'delivered' ? (
-                            <span className="text-[10px] font-bold bg-green-100 text-green-700 px-2 py-1 rounded flex items-center w-fit"><Check size={12} className="mr-1"/> Entregue</span>
-                          ) : (
-                            <div className="flex flex-col">
-                              <span className="text-[10px] font-bold bg-red-100 text-red-700 px-2 py-1 rounded flex items-center w-fit"><X size={12} className="mr-1"/> Cancelado</span>
-                              {order.status === 'cancelled' && order.cancel_reason && (
-                                <span className="text-[10px] text-red-400 mt-1">"{order.cancel_reason}"</span>
-                              )}
-                            </div>
-                          )}
-                        </td>
-                        <td className="p-4 text-sm text-gray-500">
-                          {new Date(order.created_at).toLocaleDateString('pt-BR')} às {formatTime(order.created_at)}
-                        </td>
-                      </tr>
-                    ))}
-                    {historyOrders.length === 0 && !loading && (
-                      <tr>
-                        <td colSpan={7} className="p-12 text-center text-gray-500">
-                          Nenhum pedido no período selecionado.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-                {historyHasMore && historyOrders.length > 0 && (
-                  <div className="flex justify-center my-6">
-                    <button
-                      onClick={() => {
-                        const nextPage = historyPage + 1;
-                        setHistoryPage(nextPage);
-                        fetchHistoryOrders(nextPage, true);
-                      }}
-                      disabled={loading}
-                      className="px-8 py-3 bg-white border border-gray-200 text-gray-600 rounded-xl font-bold hover:bg-gray-50 transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
-                    >
-                      {loading ? <Loader2 size={16} className="animate-spin" /> : null}
-                      Carregar mais pedidos
-                    </button>
-                  </div>
-                )}
-                {!historyHasMore && historyOrders.length > 0 && (
-                  <p className="text-center text-gray-400 text-sm mt-6 pb-4">Todos os pedidos foram carregados.</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* CATEGORIAS DO CARDÁPIO */}
-          {activeTab === 'categories' && !showSubcategoryPanel && (
-            <div className="max-w-6xl mx-auto">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-brand-dark">Categorias do Cardápio</h2>
-                <button onClick={openNewCategoryModal} className="bg-brand-primary text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm md:text-base">
-                  <Plus size={20} className="mr-1 md:mr-2" /> <span className="hidden sm:inline">Nova Categoria</span><span className="sm:hidden">Nova</span>
-                </button>
-              </div>
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[600px]">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
-                      <th className="p-4 font-medium">Nome da Categoria</th>
-                      <th className="p-4 font-medium">Ordem</th>
-                      <th className="p-4 font-medium">Status</th>
-                      <th className="p-4 font-medium text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {productCategories.map(c => (
-                      <tr key={c.id} className="hover:bg-gray-50">
-                        <td className="p-4 font-bold text-brand-dark">{c.name}</td>
-                        <td className="p-4 text-gray-600">{c.sort_order}</td>
-                        <td className="p-4">
-                          <button onClick={() => toggleCategoryStatus(c)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${c.is_active ? 'bg-brand-light text-brand-primary hover:bg-green-100' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>
-                            {c.is_active ? 'Ativa' : 'Inativa'}
-                          </button>
-                        </td>
-                        <td className="p-4 text-right">
-                          <button
-                            onClick={() => {
-                              setSelectedCategoryForSub(c);
-                              setShowSubcategoryPanel(true);
-                              fetchSubcategories(c.id);
-                            }}
-                            className="p-2 text-gray-400 hover:text-purple-500 transition-colors"
-                            title="Gerenciar Subcategorias/Adicionais"
-                          ><Plus size={18}/></button>
-                          <button onClick={() => openEditCategoryModal(c)} className="p-2 text-gray-400 hover:text-blue-500 transition-colors"><Edit2 size={18}/></button>
-                          <button onClick={() => handleDeleteCategory(c.id)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
-                        </td>
-                      </tr>
-                    ))}
-                    {productCategories.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="p-12 text-center text-gray-500">
-                          <div className="flex flex-col items-center justify-center">
-                            <FolderTree size={48} className="text-gray-300 mb-4" />
-                            <p className="font-medium">Nenhuma categoria criada ainda.</p>
-                            <p className="text-sm mt-1">Crie categorias (ex: Lanches, Bebidas) para organizar seu cardápio.</p>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* SUBCATEGORIAS PANEL */}
-          {activeTab === 'categories' && showSubcategoryPanel && selectedCategoryForSub && (
-            <div className="max-w-6xl mx-auto">
-              <div className="flex items-center gap-3 mb-6">
-                <button onClick={() => { setShowSubcategoryPanel(false); setSubcategories([]); setSubItems([]); setSelectedSubcategoryForItem(null); }} className="p-2 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors">
-                  <ChevronLeft size={24} />
-                </button>
-                <div>
-                  <h2 className="text-2xl font-bold text-brand-dark">Subcategorias / Adicionais</h2>
-                  <p className="text-sm text-gray-500">Categoria: <span className="font-bold text-brand-primary">{selectedCategoryForSub.name}</span></p>
-                </div>
-                <button
-                  onClick={() => {
-                    setEditingSubcategory(null);
-                    setSubcategoryForm({ name: '', description: '', min_selections: '0', max_selections: '5', is_required: false });
-                    setShowSubcategoryModal(true);
-                  }}
-                  className="ml-auto bg-brand-primary text-white px-4 py-2.5 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm"
-                >
-                  <Plus size={18} className="mr-1" /> Nova Subcategoria
-                </button>
-              </div>
-
-              <p className="text-sm text-gray-500 mb-4 bg-blue-50 border border-blue-200 rounded-xl p-3">
-                💡 Subcategorias aparecem como grupos de opções quando o cliente escolhe um produto desta categoria. Ex: "Adicionais", "Tamanho", "Complementos".
-              </p>
-
-              {subcategories.length === 0 && (
-                <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-500">
-                  <Plus size={48} className="text-gray-300 mx-auto mb-4" />
-                  <p className="font-medium">Nenhuma subcategoria criada.</p>
-                  <p className="text-sm mt-1">Crie grupos de opções extras para os produtos desta categoria.</p>
-                </div>
-              )}
-
-              <div className="space-y-4">
-                {subcategories.map(sub => (
-                  <div key={sub.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm">
-                    <div className="p-4 flex items-center justify-between border-b border-gray-100">
-                      <div>
-                        <h3 className="font-bold text-brand-dark">{sub.name}</h3>
-                        {sub.description && <p className="text-xs text-gray-500 mt-0.5">{sub.description}</p>}
-                        <div className="flex gap-2 mt-1">
-                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Mín: {sub.min_selections}</span>
-                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Máx: {sub.max_selections}</span>
-                          {sub.is_required && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Obrigatório</span>}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setSelectedSubcategoryForItem(sub);
-                            setEditingSubItem(null);
-                            setSubItemForm({ name: '', description: '', price: '0', image_url: '' });
-                            setSubItemImageFile(null);
-                            setSubItemImagePreview(null);
-                            setShowSubItemModal(true);
-                            fetchSubItems(sub.id);
-                          }}
-                          className="text-xs bg-brand-light text-brand-primary px-3 py-1.5 rounded-lg font-bold hover:bg-green-100 transition-colors flex items-center gap-1"
-                        >
-                          <Plus size={14} /> Novo Item
-                        </button>
-                        <button onClick={() => {
-                          setEditingSubcategory(sub);
-                          setSubcategoryForm({ name: sub.name, description: sub.description || '', min_selections: sub.min_selections.toString(), max_selections: sub.max_selections.toString(), is_required: sub.is_required });
-                          setShowSubcategoryModal(true);
-                        }} className="p-2 text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button>
-                        <button onClick={() => handleDeleteSubcategory(sub.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
-                      </div>
-                    </div>
-                    <SubItemsList subcategoryId={sub.id} storeId={store!.id} onEdit={(item) => {
-                      setSelectedSubcategoryForItem(sub);
-                      setEditingSubItem(item);
-                      setSubItemForm({ name: item.name, description: item.description || '', price: item.price.toString(), image_url: item.image_url || '' });
-                      setSubItemImageFile(null);
-                      setSubItemImagePreview(item.image_url || null);
-                      fetchSubItems(sub.id);
-                      setShowSubItemModal(true);
-                    }} onDelete={(id) => handleDeleteSubItem(id)} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* PRODUTOS */}
-          {activeTab === 'products' && !showSubcategoryPanel && (
-            <div className="max-w-6xl mx-auto space-y-6">
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold text-brand-dark">Gestão de Cardápio</h2>
-                <button onClick={openNewProductModal} className="bg-brand-primary text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm md:text-base">
-                  <Plus size={20} className="mr-1 md:mr-2" /> <span className="hidden sm:inline">Novo Produto</span><span className="sm:hidden">Novo</span>
-                </button>
-              </div>
-
-              {/* Produtos sem categoria */}
-              {products.filter(p => !p.category_id).length > 0 && (
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                  <div className="px-5 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-                    <h3 className="font-bold text-gray-700 flex items-center gap-2">
-                      <FolderTree size={18} className="text-gray-400" /> Sem categoria
-                    </h3>
-                  </div>
-                  <div className="divide-y divide-gray-100">
-                    {products.filter(p => !p.category_id).map(p => (
-                      <div key={p.id} className="flex items-center gap-3 p-4 hover:bg-gray-50">
-                        {p.image_url ? (
-                          <img src={p.image_url} alt={p.name} className="w-12 h-12 rounded-xl object-cover border border-gray-200 shrink-0" />
-                        ) : (
-                          <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-gray-400 border border-gray-200 shrink-0"><ImageIcon size={20}/></div>
-                        )}
-                        <div className="flex-1 min-w-0">
-                          <p className="font-bold text-brand-dark truncate">{p.name}</p>
-                          <p className="text-xs text-gray-500 truncate">{p.description}</p>
-                        </div>
-                        <div className="flex items-center gap-3 shrink-0">
-                          <span className="font-bold text-brand-dark">R$ {p.price.toFixed(2)}</span>
-                          <button onClick={() => toggleProductAvailability(p)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${p.is_available ? 'bg-brand-light text-brand-primary' : 'bg-gray-200 text-gray-600'}`}>
-                            {p.is_available ? 'Ativo' : 'Pausado'}
-                          </button>
-                          <button onClick={() => openEditProductModal(p)} className="p-2 text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button>
-                          <button onClick={() => handleDeleteProduct(p.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Produtos agrupados por categoria */}
-              {productCategories.map(cat => {
-                const catProducts = products.filter(p => p.category_id === cat.id);
-                return (
-                  <div key={cat.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-                    {/* Cabeçalho da categoria */}
-                    <div className="px-5 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
-                      <h3 className="font-bold text-gray-700 flex items-center gap-2">
-                        <FolderTree size={18} className="text-brand-primary" />
-                        {cat.name}
-                        <span className="text-xs font-normal text-gray-400">({catProducts.length} produto{catProducts.length !== 1 ? 's' : ''})</span>
-                      </h3>
-                      <button
-                        onClick={async () => {
-                          setSelectedCategoryForSub(cat);
-                          setShowSubcategoryPanel(true);
-                          await fetchSubcategories(cat.id);
-                        }}
-                        className="flex items-center gap-1.5 text-xs font-bold text-purple-600 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors border border-purple-200"
-                      >
-                        <Plus size={14} /> Gerenciar adicionais
-                      </button>
-                    </div>
-
-                    {/* Produtos da categoria */}
-                    {catProducts.length === 0 ? (
-                      <div className="p-6 text-center text-gray-400 text-sm">
-                        Nenhum produto nesta categoria ainda.
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-gray-100">
-                        {catProducts.map(p => (
-                          <div key={p.id} className="flex items-center gap-3 p-4 hover:bg-gray-50">
-                            {p.image_url ? (
-                              <img src={p.image_url} alt={p.name} className="w-12 h-12 rounded-xl object-cover border border-gray-200 shrink-0" />
-                            ) : (
-                              <div className="w-12 h-12 rounded-xl bg-gray-100 flex items-center justify-center text-gray-400 border border-gray-200 shrink-0"><ImageIcon size={20}/></div>
-                            )}
-                            <div className="flex-1 min-w-0">
-                              <p className="font-bold text-brand-dark truncate">{p.name}</p>
-                              <p className="text-xs text-gray-500 truncate">{p.description}</p>
-                            </div>
-                            <div className="flex items-center gap-3 shrink-0">
-                              <span className="font-bold text-brand-dark">R$ {p.price.toFixed(2)}</span>
-                              <button onClick={() => toggleProductAvailability(p)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${p.is_available ? 'bg-brand-light text-brand-primary' : 'bg-gray-200 text-gray-600'}`}>
-                                {p.is_available ? 'Ativo' : 'Pausado'}
-                              </button>
-                              <button onClick={() => openEditProductModal(p)} className="p-2 text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button>
-                              <button onClick={() => handleDeleteProduct(p.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-
-              {products.length === 0 && productCategories.length === 0 && (
-                <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-500">
-                  <Package size={48} className="text-gray-300 mx-auto mb-4" />
-                  <p className="font-medium">Nenhum produto cadastrado ainda.</p>
-                  <p className="text-sm mt-1">Clique em "Novo Produto" para começar a vender.</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* SUBCATEGORIAS PANEL — acessível também pela aba de produtos */}
-          {activeTab === 'products' && showSubcategoryPanel && selectedCategoryForSub && (
-            <div className="max-w-6xl mx-auto">
-              <div className="flex items-center gap-3 mb-6">
-                <button onClick={() => { setShowSubcategoryPanel(false); setSubcategories([]); setSubItems([]); setSelectedSubcategoryForItem(null); }} className="p-2 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors">
-                  <ChevronLeft size={24} />
-                </button>
-                <div>
-                  <h2 className="text-2xl font-bold text-brand-dark">Adicionais do Cardápio</h2>
-                  <p className="text-sm text-gray-500">Categoria: <span className="font-bold text-brand-primary">{selectedCategoryForSub.name}</span> — aparecem em todos os produtos desta categoria</p>
-                </div>
-                <button
-                  onClick={() => {
-                    setEditingSubcategory(null);
-                    setSubcategoryForm({ name: '', description: '', min_selections: '0', max_selections: '5', is_required: false });
-                    setShowSubcategoryModal(true);
-                  }}
-                  className="ml-auto bg-brand-primary text-white px-4 py-2.5 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm"
-                >
-                  <Plus size={18} className="mr-1" /> Novo Grupo
-                </button>
-              </div>
-
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 mb-4 text-sm text-blue-700">
-                💡 Os grupos de adicionais criados aqui aparecem automaticamente quando o cliente abre qualquer produto da categoria <strong>{selectedCategoryForSub.name}</strong>.
-              </div>
-
-              {subcategories.length === 0 && (
-                <div className="bg-white rounded-2xl border border-gray-200 p-12 text-center text-gray-500">
-                  <Plus size={48} className="text-gray-300 mx-auto mb-4" />
-                  <p className="font-medium">Nenhum grupo de adicionais criado.</p>
-                  <p className="text-sm mt-1">Clique em "Novo Grupo" para criar grupos como "Molhos", "Extras", "Tamanho".</p>
-                </div>
-              )}
-
-              <div className="space-y-4">
-                {subcategories.map(sub => (
-                  <div key={sub.id} className="bg-white rounded-2xl border border-gray-200 shadow-sm">
-                    <div className="p-4 flex items-center justify-between border-b border-gray-100">
-                      <div>
-                        <h3 className="font-bold text-brand-dark">{sub.name}</h3>
-                        {sub.description && <p className="text-xs text-gray-500 mt-0.5">{sub.description}</p>}
-                        <div className="flex gap-2 mt-1">
-                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Mín: {sub.min_selections}</span>
-                          <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">Máx: {sub.max_selections}</span>
-                          {sub.is_required && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">Obrigatório</span>}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setSelectedSubcategoryForItem(sub);
-                            setEditingSubItem(null);
-                            setSubItemForm({ name: '', description: '', price: '0', image_url: '' });
-                            setSubItemImageFile(null);
-                            setSubItemImagePreview(null);
-                            setShowSubItemModal(true);
-                            fetchSubItems(sub.id);
-                          }}
-                          className="text-xs bg-brand-light text-brand-primary px-3 py-1.5 rounded-lg font-bold hover:bg-green-100 transition-colors flex items-center gap-1"
-                        >
-                          <Plus size={14} /> Novo Item
-                        </button>
-                        <button onClick={() => {
-                          setEditingSubcategory(sub);
-                          setSubcategoryForm({ name: sub.name, description: sub.description || '', min_selections: sub.min_selections.toString(), max_selections: sub.max_selections.toString(), is_required: sub.is_required });
-                          setShowSubcategoryModal(true);
-                        }} className="p-2 text-gray-400 hover:text-blue-500"><Edit2 size={16}/></button>
-                        <button onClick={() => handleDeleteSubcategory(sub.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={16}/></button>
-                      </div>
-                    </div>
-                    <SubItemsList subcategoryId={sub.id} storeId={store!.id} onEdit={(item) => {
-                      setSelectedSubcategoryForItem(sub);
-                      setEditingSubItem(item);
-                      setSubItemForm({ name: item.name, description: item.description || '', price: item.price.toString(), image_url: item.image_url || '' });
-                      setSubItemImageFile(null);
-                      setSubItemImagePreview(item.image_url || null);
-                      fetchSubItems(sub.id);
-                      setShowSubItemModal(true);
-                    }} onDelete={(id) => handleDeleteSubItem(id)} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* CUPONS */}
-          {activeTab === 'coupons' && (
-            <div className="max-w-6xl mx-auto">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-brand-dark">Cupons de Desconto</h2>
-                <button onClick={() => { setCouponForm({ code: '', type: 'percentage', value: '', min_order_value: '0', expires_at: '', is_active: true }); setShowCouponModal(true); }} className="bg-brand-primary text-white px-4 md:px-6 py-2.5 md:py-3 rounded-xl font-bold flex items-center shadow-md hover:bg-green-600 transition-colors text-sm md:text-base">
-                  <Plus size={20} className="mr-1 md:mr-2" /> <span className="hidden sm:inline">Novo Cupom</span><span className="sm:hidden">Novo</span>
-                </button>
-              </div>
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[800px]">
-                  <thead>
-                    <tr className="bg-gray-50 border-b border-gray-200 text-sm text-gray-500">
-                      <th className="p-4 font-medium">Código</th>
-                      <th className="p-4 font-medium">Desconto</th>
-                      <th className="p-4 font-medium">Pedido Mínimo</th>
-                      <th className="p-4 font-medium">Validade</th>
-                      <th className="p-4 font-medium">Status</th>
-                      <th className="p-4 font-medium text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {coupons.map(c => (
-                      <tr key={c.id} className="hover:bg-gray-50">
-                        <td className="p-4">
-                          <span className="font-black text-brand-dark bg-gray-100 px-3 py-1.5 rounded-lg tracking-wider border border-gray-200">{c.code}</span>
-                        </td>
-                        <td className="p-4 font-bold text-brand-primary">
-                          {c.type === 'percentage' ? `${c.value}%` : `R$ ${c.value.toFixed(2)}`}
-                        </td>
-                        <td className="p-4 text-gray-600 text-sm">
-                          {c.min_order_value > 0 ? `R$ ${c.min_order_value.toFixed(2)}` : 'Sem mínimo'}
-                        </td>
-                        <td className="p-4 text-gray-600 text-sm">
-                          {c.expires_at ? new Date(c.expires_at).toLocaleDateString('pt-BR') : 'Sem validade'}
-                        </td>
-                        <td className="p-4">
-                          <button onClick={() => toggleCouponStatus(c)} className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${c.is_active ? 'bg-brand-light text-brand-primary hover:bg-green-100' : 'bg-gray-200 text-gray-600 hover:bg-gray-300'}`}>
-                            {c.is_active ? 'Ativo' : 'Inativo'}
-                          </button>
-                        </td>
-                        <td className="p-4 text-right">
-                          <button onClick={() => handleDeleteCoupon(c.id)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18}/></button>
-                        </td>
-                      </tr>
-                    ))}
-                    {coupons.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="p-12 text-center text-gray-500">
-                          <div className="flex flex-col items-center justify-center">
-                            <Ticket size={48} className="text-gray-300 mb-4" />
-                            <p className="font-medium">Nenhuma cupom criado ainda.</p>
-                            <p className="text-sm mt-1">Crie promoções para atrair mais clientes!</p>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* AVALIAÇÕES */}
-          {activeTab === 'reviews' && (
-            <div className="max-w-6xl mx-auto">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-brand-dark">Avaliações dos Clientes</h2>
-                <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-gray-100 flex items-center">
-                  <Star className="text-yellow-400 mr-2 fill-current" size={20} />
-                  <span className="font-black text-brand-dark text-lg">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</span>
-                  <span className="text-gray-400 text-sm ml-2 font-medium hidden sm:inline">({reviews.length} avaliações)</span>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {reviews.map(review => (
-                  <div key={review.id} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-brand-light text-brand-primary rounded-full flex items-center justify-center font-black">
-                          {review.users?.name?.charAt(0).toUpperCase() || 'C'}
-                        </div>
-                        <div>
-                          <p className="font-bold text-brand-dark">{review.users?.name || 'Cliente'}</p>
-                          <p className="text-xs text-gray-500">{new Date(review.created_at).toLocaleDateString('pt-BR')}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center">
-                        {[...Array(5)].map((_, i) => (
-                          <Star key={i} size={14} className={i < review.rating ? 'text-yellow-400 fill-current' : 'text-gray-200'} />
-                        ))}
-                      </div>
-                    </div>
-                    {review.comment && (
-                      <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-xl italic">"{review.comment}"</p>
-                    )}
-                  </div>
-                ))}
-              </div>
-              
-              {reviews.length === 0 && (
-                <div className="text-center py-16 bg-white rounded-2xl border border-gray-100 shadow-sm">
-                  <Star size={48} className="text-gray-300 mx-auto mb-4" />
-                  <p className="text-gray-500 font-medium text-lg">Nenhuma avaliação recebida ainda.</p>
-                  <p className="text-gray-400 text-sm mt-1">Continue prestando um ótimo serviço para receber 5 estrelas!</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* SETTINGS */}
-          {activeTab === 'settings' && (
-            <div className="max-w-4xl mx-auto space-y-8 pb-8">
-              <h2 className="text-2xl md:text-3xl font-black text-brand-dark">Configurações da Loja</h2>
-
-              {/* Store Profile Settings */}
-              <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
-                <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><StoreIcon size={20} className="mr-2 text-brand-primary"/> Perfil da Loja</h3>
-                <form onSubmit={(e) => handleUpdateStoreSettings(e, 'profile')} className="space-y-5">
-                  <div className="flex flex-col items-center justify-center mb-4">
-                    <label htmlFor="logo-upload" className="w-32 h-32 rounded-full bg-gray-100 border-4 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative shadow-inner cursor-pointer hover:bg-gray-200 transition-colors group">
-                      {logoPreview ? (
-                        <>
-                          <img src={logoPreview} alt="Logo Preview" className="w-full h-full object-cover" />
-                          <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-full">
-                            <span className="text-white font-bold text-sm flex items-center"><UploadCloud size={18} className="mr-2"/> Trocar</span>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="flex flex-col items-center text-gray-400">
-                          <ImageIcon size={32} className="mb-1" />
-                          <span className="text-[10px] font-bold uppercase text-center leading-tight px-2">Adicionar<br/>Logo</span>
-                        </div>
-                      )}
-                    </label>
-                    <input
-                      id="logo-upload"
-                      type="file"
-                      accept="image/*"
-                      onChange={handleLogoFileChange}
-                      className="hidden"
-                    />
-                    <p className="text-xs text-gray-500 mt-3 text-center">
-                      Envie o logo da sua loja (JPG, PNG, max 2MB).
-                    </p>
-                  </div>
-
-                  {/* Banner Upload */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-bold text-gray-700 mb-2">Banner da Loja</label>
-                    <div className="flex flex-col items-center justify-center">
-                      <label htmlFor="banner-upload" className="w-full h-32 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative cursor-pointer hover:bg-gray-100 transition-colors group">
-                        {bannerPreview ? (
-                          <>
-                            <img src={bannerPreview} alt="Banner Preview" className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                              <span className="text-white font-bold text-sm flex items-center"><UploadCloud size={18} className="mr-2"/> Trocar Banner</span>
-                            </div>
-                          </>
-                        ) : (
-                          <div className="flex flex-col items-center text-gray-400">
-                            <ImageIcon size={32} className="mb-2" />
-                            <span className="text-sm font-bold">Clique para enviar banner</span>
-                            <span className="text-xs mt-1">Max: 5MB</span>
-                          </div>
-                        )}
-                      </label>
-                      <input
-                        id="banner-upload"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleBannerFileChange}
-                        className="hidden"
-                      />
-                      <p className="text-xs text-gray-500 mt-3 text-center">
-                        Envie uma imagem de banner para sua loja (JPG, PNG, max 5MB).
-                      </p>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label htmlFor="name" className="block text-sm font-bold text-gray-700 mb-1">Nome da Loja</label>
-                    <input type="text" id="name" name="name" value={settingsForm.name} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
-                  </div>
-                  <div>
-                    <label htmlFor="phone" className="block text-sm font-bold text-gray-700 mb-1">Telefone / WhatsApp</label>
-                    <input type="tel" id="phone" name="phone" value={settingsForm.phone} onChange={handleSettingsChange} className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
-                  </div>
-                  <button type="submit" disabled={settingsLoading} className="w-full bg-brand-primary text-white py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
-                    {settingsLoading ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Perfil da Loja'}
-                  </button>
-                </form>
-              </div>
-
-              {/* Delivery Settings */}
-              <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
-                <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><Bike size={20} className="mr-2 text-brand-primary"/> Configurações de Entrega</h3>
-                <form onSubmit={(e) => handleUpdateStoreSettings(e, 'delivery')} className="space-y-5">
-                  <div>
-                    <label htmlFor="delivery_fee" className="block text-sm font-bold text-gray-700 mb-1">Taxa de Entrega Padrão (R$)</label>
-                    <input type="number" step="0.01" id="delivery_fee" name="delivery_fee" value={settingsForm.delivery_fee} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
-                  </div>
-                  <div>
-                    <label htmlFor="min_order_value" className="block text-sm font-bold text-gray-700 mb-1">Valor Mínimo do Pedido (R$)</label>
-                    <input type="number" step="0.01" id="min_order_value" name="min_order_value" value={settingsForm.min_order_value} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
-                  </div>
-                  <div>
-                    <label htmlFor="avg_prep_time_min" className="block text-sm font-bold text-gray-700 mb-1">Tempo Médio de Preparo (minutos)</label>
-                    <input type="number" id="avg_prep_time_min" name="avg_prep_time_min" value={settingsForm.avg_prep_time_min} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
-                  </div>
-                  <button type="submit" disabled={settingsLoading} className="w-full bg-brand-primary text-white py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
-                    {settingsLoading ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Configurações de Entrega'}
-                  </button>
-                </form>
-              </div>
-
-              {/* Payment Methods */}
-              <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
-                <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><CreditCard size={20} className="mr-2 text-brand-primary"/> Formas de Pagamento</h3>
-                <form onSubmit={(e) => handleUpdateStoreSettings(e, 'payment')} className="space-y-4">
-                  <label className="flex items-center text-gray-700 font-medium">
-                    <input type="checkbox" name="accepts_pix" checked={settingsForm.accepts_pix} onChange={handleSettingsChange} className="mr-3 w-5 h-5 accent-brand-primary" />
-                    Aceita PIX
-                  </label>
-                  <label className="flex items-center text-gray-700 font-medium">
-                    <input type="checkbox" name="accepts_card" checked={settingsForm.accepts_card} onChange={handleSettingsChange} className="mr-3 w-5 h-5 accent-brand-primary" />
-                    Aceita Cartão (Débito/Crédito)
-                  </label>
-                  <label className="flex items-center text-gray-700 font-medium">
-                    <input type="checkbox" name="accepts_cash" checked={settingsForm.accepts_cash} onChange={handleSettingsChange} className="mr-3 w-5 h-5 accent-brand-primary" />
-                    Aceita Dinheiro
-                  </label>
-                  <button type="submit" disabled={settingsLoading} className="w-full bg-brand-primary text-white py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors mt-5">
-                    {settingsLoading ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Formas de Pagamento'}
-                  </button>
-                </form>
-              </div>
-
-              {/* Password Change */}
-              <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-gray-100">
-                <h3 className="font-bold text-xl text-brand-dark mb-4 flex items-center"><Lock size={20} className="mr-2 text-brand-primary"/> Alterar Senha</h3>
-                <form onSubmit={handleChangePassword} className="space-y-5">
-                  <div>
-                    <label htmlFor="newPassword" className="block text-sm font-bold text-gray-700 mb-1">Nova Senha</label>
-                    <input type="password" id="newPassword" name="newPassword" value={settingsForm.newPassword} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
-                  </div>
-                  <div>
-                    <label htmlFor="confirmPassword" className="block text-sm font-bold text-gray-700 mb-1">Confirmar Nova Senha</label>
-                    <input type="password" id="confirmPassword" name="confirmPassword" value={settingsForm.confirmPassword} onChange={handleSettingsChange} required className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none" />
-                  </div>
-                  <button type="submit" disabled={settingsLoading || !settingsForm.newPassword || !settingsForm.confirmPassword} className="w-full bg-brand-primary text-white py-3 rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
-                    {settingsLoading ? <Loader2 size={20} className="animate-spin"/> : 'Alterar Senha'}
-                  </button>
-                </form>
-              </div>
-            </div>
-          )}
-        </main>
-      </div>
-
-      {/* CATEGORY MODAL */}
-      {showCategoryModal && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-brand-dark">{editingCategory ? 'Editar Categoria' : 'Nova Categoria'}</h2>
-              <button onClick={() => setShowCategoryModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
-            </div>
-            <form onSubmit={handleSaveCategory} className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Nome da Categoria</label>
-                <input type="text" required placeholder="Ex: Lanches, Bebidas" value={categoryForm.name} onChange={e => setCategoryForm({...categoryForm, name: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-              </div>
-              <div className="flex space-x-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Ordem de Exibição</label>
-                  <input type="number" required value={categoryForm.sort_order} onChange={e => setCategoryForm({...categoryForm, sort_order: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-                  <p className="text-[10px] text-gray-500 mt-1">Menor número aparece primeiro</p>
-                </div>
-                <div className="flex-1 flex items-center pt-4">
-                  <label className="flex items-center cursor-pointer">
-                    <input type="checkbox" checked={categoryForm.is_active} onChange={e => setCategoryForm({...categoryForm, is_active: e.target.checked})} className="mr-2 w-5 h-5 accent-brand-primary" />
-                    <span className="font-bold text-gray-700">Ativa</span>
-                  </label>
-                </div>
-              </div>
-              <div className="pt-4 flex space-x-3">
-                <button type="button" onClick={() => setShowCategoryModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-colors">Cancelar</button>
-                <button type="submit" disabled={actionLoading === -3} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
-                  {actionLoading === -3 ? <Loader2 size={20} className="animate-spin"/> : 'Salvar'}
-                </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* PRODUCT MODAL */}
-      {showProductModal && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto scrollbar-hide">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-brand-dark">{editingProduct ? 'Editar Produto' : 'Novo Produto'}</h2>
-              <button onClick={() => setShowProductModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
+        {!isDeliveryActive && activeTab === 'home' && (
+          <div className="flex-1 flex flex-col p-6 items-center justify-center">
+            <button onClick={toggleOnline} disabled={loading} className={`w-56 h-56 rounded-full flex flex-col items-center justify-center shadow-2xl transition-all duration-500 ${courier.is_online ? 'bg-brand-primary scale-105' : 'bg-gray-800 border-4 border-gray-700 hover:bg-gray-700'}`}>
+              {loading ? <Loader2 className="animate-spin text-white" size={48}/> : (
+                <>
+                  <Power size={56} className={`mb-3 ${courier.is_online ? 'text-white' : 'text-gray-400'}`} />
+                  <span className={`font-black text-2xl tracking-wider ${courier.is_online ? 'text-white' : 'text-gray-400'}`}>{courier.is_online ? 'ONLINE' : 'OFFLINE'}</span>
+                </>
+              )}
+            </button>
+            <p className="text-gray-400 mt-10 text-center text-sm font-medium">{courier.is_online ? 'Rastreamento GPS ativado. Buscando entregas...' : 'Toque para ligar o GPS e ficar online.'}</p>
+            {gpsError && (
+              <div className="mt-6 bg-red-900/40 border border-red-500/50 rounded-2xl p-4 text-center mx-4">
+                <p className="text-red-400 font-bold text-sm mb-1">⚠️ Permissão de localização negada</p>
+                <p className="text-red-300 text-xs">Vá em <span className="font-bold">Configurações {'>'} Tá Na Mão {'>'} Localização</span> e selecione <span className="font-bold">"Ao usar o app"</span>.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isDeliveryActive && activeTab === 'earnings' && (
+          <div className="flex-1 flex flex-col p-6 overflow-y-auto">
+            <h2 className="text-2xl font-bold text-white mb-5">Seus Ganhos</h2>
+
+            {/* Cards de saldo total */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700">
+                <div className="w-10 h-10 bg-brand-primary/20 rounded-full flex items-center justify-center text-brand-primary mb-3">
+                  <DollarSign size={20}/>
+                </div>
+                <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Saldo Disponível</p>
+                <p className="text-2xl font-black text-white mt-1">R$ {courier.available_balance?.toFixed(2) || '0.00'}</p>
+              </div>
+              <div className="bg-gray-800 p-5 rounded-2xl border border-gray-700">
+                <div className="w-10 h-10 bg-blue-500/20 rounded-full flex items-center justify-center text-blue-400 mb-3">
+                  <Bike size={20}/>
+                </div>
+                <p className="text-gray-400 text-xs font-bold uppercase tracking-wider">Total de Entregas</p>
+                <p className="text-2xl font-black text-white mt-1">{courier.total_deliveries || 0}</p>
+              </div>
             </div>
-            <form onSubmit={handleSaveProduct} className="space-y-4">
+
+            {/* Filtro de período */}
+            <div className="bg-gray-800 rounded-2xl border border-gray-700 p-4 mb-6">
+              <div className="flex bg-gray-900 p-1 rounded-xl mb-4">
+                {([['today', 'Hoje'], ['week', '7 dias'], ['month', '30 dias']] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    onClick={() => setEarningsPeriod(val)}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${earningsPeriod === val ? 'bg-brand-primary text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="text-center">
+                  <p className="text-brand-primary text-2xl font-black">R$ {periodEarnings.toFixed(2)}</p>
+                  <p className="text-gray-400 text-xs mt-1">Ganhos no período</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-white text-2xl font-black">{periodDeliveries}</p>
+                  <p className="text-gray-400 text-xs mt-1">Entregas no período</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Histórico */}
+            <h3 className="text-lg font-bold text-white mb-4">Histórico de Entregas</h3>
+            <div className="space-y-3">
+              {loading && deliveriesHistory.length === 0 ? (
+                <div className="flex justify-center py-8"><Loader2 className="animate-spin text-brand-primary" size={32}/></div>
+              ) : deliveriesHistory.length === 0 ? (
+                <div className="text-center py-10 bg-gray-800 rounded-2xl border border-gray-700">
+                  <Bike size={40} className="text-gray-600 mx-auto mb-3" />
+                  <p className="text-gray-400 text-sm">Nenhuma entrega realizada ainda.<br/>Fique online para receber corridas!</p>
+                </div>
+              ) : (
+                deliveriesHistory.map(delivery => (
+                  <div key={delivery.id} className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex justify-between items-center">
+                    <div>
+                      <p className="font-bold text-white">{delivery.orders?.stores?.name || 'Loja'}</p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        {new Date(delivery.orders?.created_at).toLocaleDateString('pt-BR')} às {new Date(delivery.orders?.created_at).toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'})}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-black text-brand-primary">R$ {delivery.courier_earning?.toFixed(2)}</p>
+                      <span className="text-[10px] font-bold bg-green-900/40 text-green-400 px-2 py-0.5 rounded mt-1 inline-block">
+                        <CheckCircle size={10} className="inline mr-1 mb-0.5"/> Entregue
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
               
-              {/* IMAGE UPLOAD AREA */}
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Foto do Produto</label>
-                <div className="flex flex-col items-center justify-center">
-                  <label htmlFor="product-image-upload" className="w-full h-40 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative cursor-pointer hover:bg-gray-100 transition-colors group">
-                    {productImagePreview ? (
-                      <>
-                        <img src={productImagePreview} alt="Preview" className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                          <span className="text-white font-bold text-sm flex items-center"><UploadCloud size={18} className="mr-2"/> Trocar Imagem</span>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex flex-col items-center text-gray-400">
-                        <ImageIcon size={32} className="mb-2" />
-                        <span className="text-sm font-bold">Clique para enviar foto</span>
-                        <span className="text-xs mt-1">Max: 5MB</span>
-                      </div>
-                    )}
-                  </label>
+              {/* Botão carregar mais */}
+              {earningsHasMore && deliveriesHistory.length > 0 && (
+                <div className="flex justify-center mt-4">
+                  <button
+                    onClick={() => {
+                      const next = earningsPage + 1;
+                      setEarningsPage(next);
+                      fetchEarningsHistory(next, true);
+                    }}
+                    disabled={loading}
+                    className="px-6 py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-xl font-bold hover:bg-gray-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {loading ? <Loader2 size={16} className="animate-spin" /> : null}
+                    Carregar mais
+                  </button>
+                </div>
+              )}
+              {!earningsHasMore && deliveriesHistory.length > 0 && (
+                <p className="text-center text-gray-500 text-sm mt-4 pb-4">Todas as entregas foram carregadas.</p>
+              )}
+            </div>
+          </div>
+        )}
+
+        {!isDeliveryActive && activeTab === 'profile' && (
+          <div className="flex-1 flex flex-col p-6 overflow-y-auto">
+            <h2 className="text-2xl font-bold text-white mb-6">Meu Perfil</h2>
+
+            {/* Avatar e nome */}
+            <div className="flex flex-col items-center mb-8">
+              <div className="w-24 h-24 rounded-full bg-gray-800 border-4 border-brand-primary flex items-center justify-center text-brand-primary font-black text-4xl mb-4 overflow-hidden">
+                {courier?.users?.avatar_url
+                  ? <img src={courier.users.avatar_url} alt="Perfil" className="w-full h-full object-cover" />
+                  : (courier?.users?.name?.charAt(0).toUpperCase() || 'M')
+                }
+              </div>
+              <h3 className="text-xl font-black text-white">{courier?.users?.name || 'Motoboy'}</h3>
+              <p className="text-gray-400 text-sm mt-1">{courier?.users?.email}</p>
+              <div className="flex items-center gap-2 mt-2">
+                {courier?.is_approved
+                  ? <span className="text-xs font-bold bg-green-900/40 text-green-400 px-3 py-1 rounded-full border border-green-800">✓ Aprovado</span>
+                  : <span className="text-xs font-bold bg-yellow-900/40 text-yellow-400 px-3 py-1 rounded-full border border-yellow-800">⏳ Em análise</span>
+                }
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 text-center">
+                <p className="text-2xl font-black text-brand-primary">{courier?.total_deliveries || 0}</p>
+                <p className="text-gray-400 text-xs mt-1">Entregas realizadas</p>
+              </div>
+              <div className="bg-gray-800 p-4 rounded-2xl border border-gray-700 text-center">
+                <p className="text-2xl font-black text-white">R$ {courier?.available_balance?.toFixed(2) || '0.00'}</p>
+                <p className="text-gray-400 text-xs mt-1">Saldo disponível</p>
+              </div>
+            </div>
+
+            {/* Dados editáveis */}
+            {!showProfileEdit ? (
+              <div className="bg-gray-800 rounded-2xl border border-gray-700 p-5 space-y-4">
+                <div className="flex justify-between items-center mb-2">
+                  <h4 className="font-bold text-white">Dados Pessoais</h4>
+                  <button
+                    onClick={() => {
+                      setProfileForm({ name: courier?.users?.name || '', phone: courier?.users?.phone || '' });
+                      setShowProfileEdit(true);
+                    }}
+                    className="text-brand-primary text-sm font-bold hover:underline"
+                  >
+                    Editar
+                  </button>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Nome</p>
+                  <p className="text-white font-medium">{courier?.users?.name || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">E-mail</p>
+                  <p className="text-white font-medium">{courier?.users?.email || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-xs font-bold uppercase tracking-wider mb-1">Telefone</p>
+                  <p className="text-white font-medium">{courier?.users?.phone || 'Não informado'}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-gray-800 rounded-2xl border border-gray-700 p-5 space-y-4">
+                <h4 className="font-bold text-white mb-2">Editar Dados</h4>
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Nome</label>
                   <input
-                    id="product-image-upload"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleProductImageChange}
-                    className="hidden"
+                    type="text"
+                    value={profileForm.name}
+                    onChange={e => setProfileForm({ ...profileForm, name: e.target.value })}
+                    className="w-full bg-gray-900 border border-gray-600 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none"
                   />
                 </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Nome do Produto</label>
-                <input type="text" required value={productForm.name} onChange={e => setProductForm({...productForm, name: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Categoria</label>
-                <select value={productForm.category_id} onChange={e => setProductForm({...productForm, category_id: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-brand-primary outline-none bg-white">
-                  <option value="">Sem categoria</option>
-                  {productCategories.map(cat => (
-                    <option key={cat.id} value={cat.id}>{cat.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Descrição</label>
-                <textarea required value={productForm.description} onChange={e => setProductForm({...productForm, description: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none h-20 resize-none" />
-              </div>
-              <div className="flex space-x-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Preço (R$)</label>
-                  <input type="number" step="0.01" required value={productForm.price} onChange={e => setProductForm({...productForm, price: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
+                <div>
+                  <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Telefone</label>
+                  <input
+                    type="tel"
+                    value={profileForm.phone}
+                    onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })}
+                    placeholder="(00) 00000-0000"
+                    className="w-full bg-gray-900 border border-gray-600 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-brand-primary outline-none"
+                  />
                 </div>
-                <div className="flex-1 flex items-end pb-2">
-                  <label className="flex items-center cursor-pointer">
-                    <input type="checkbox" checked={productForm.is_available} onChange={e => setProductForm({...productForm, is_available: e.target.checked})} className="mr-2 w-5 h-5 accent-brand-primary" />
-                    <span className="font-bold text-gray-700">Disponível</span>
-                  </label>
+                <div className="flex gap-3 pt-2">
+                  <button
+                    onClick={() => setShowProfileEdit(false)}
+                    className="flex-1 py-3 bg-gray-700 text-gray-300 rounded-xl font-bold hover:bg-gray-600 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleSaveProfile}
+                    disabled={profileLoading}
+                    className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center disabled:opacity-50"
+                  >
+                    {profileLoading ? <Loader2 size={18} className="animate-spin" /> : 'Salvar'}
+                  </button>
                 </div>
               </div>
-              
-              <div className="pt-4 flex space-x-3">
-                <button type="button" onClick={() => setShowProductModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 transition-colors">Cancelar</button>
-                <button type="submit" disabled={actionLoading === -1} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center hover:bg-green-600 transition-colors">
-                  {actionLoading === -1 ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Produto'}
-                </button>
-              </div>
-            </form>
+            )}
+
+            {/* Sair */}
+            <button
+              onClick={onExit}
+              className="mt-6 w-full py-3 bg-gray-800 border border-gray-700 text-red-400 rounded-xl font-bold hover:bg-gray-700 transition-colors flex items-center justify-center gap-2"
+            >
+              <LogOut size={18} /> Sair do App
+            </button>
+            <button
+              onClick={() => setShowDeleteAccountModal(true)}
+              className="mt-2 w-full py-3 bg-gray-900 border border-gray-700 text-gray-500 rounded-xl font-medium hover:bg-gray-800 transition-colors flex items-center justify-center gap-2 text-sm"
+            >
+              <Trash2 size={16} /> Excluir minha conta
+            </button>
           </div>
-        </div>
-      )}
-
-      {/* COUPON MODAL */}
-      {showCouponModal && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold text-brand-dark flex items-center"><Ticket className="mr-2 text-brand-primary" size={24}/> Novo Cupom</h2>
-              <button onClick={() => setShowCouponModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
+        )}
+      </div>
+      {/* Modal de confirmação de exclusão de conta */}
+      {showDeleteAccountModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-gray-900 border border-gray-700 rounded-3xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="flex flex-col items-center text-center mb-5">
+              <div className="w-16 h-16 bg-red-900/40 rounded-full flex items-center justify-center mb-4">
+                <AlertTriangle size={32} className="text-red-400" />
+              </div>
+              <h2 className="text-xl font-black text-white mb-2">Excluir conta?</h2>
+              <p className="text-gray-400 text-sm">Esta ação é permanente. Seus dados serão removidos e você não poderá mais acessar sua conta.</p>
             </div>
-            <form onSubmit={handleSaveCoupon} className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Código do Cupom</label>
-                <input type="text" required placeholder="Ex: BEMVINDO10" value={couponForm.code} onChange={e => setCouponForm({...couponForm, code: e.target.value.toUpperCase()})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none uppercase font-bold tracking-wider" />
-              </div>
-              <div className="flex space-x-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Tipo de Desconto</label>
-                  <select value={couponForm.type} onChange={e => setCouponForm({...couponForm, type: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-brand-primary outline-none bg-white">
-                    <option value="percentage">Porcentagem (%)</option>
-                    <option value="fixed">Valor Fixo (R$)</option>
-                  </select>
-                </div>
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Valor</label>
-                  <input type="number" step="0.01" required placeholder={couponForm.type === 'percentage' ? '10' : '15.00'} value={couponForm.value} onChange={e => setCouponForm({...couponForm, value: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-                </div>
-              </div>
-              <div className="flex space-x-4">
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Pedido Mínimo (R$)</label>
-                  <input type="number" step="0.01" value={couponForm.min_order_value} onChange={e => setCouponForm({...couponForm, min_order_value: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Validade (Opcional)</label>
-                  <input type="date" value={couponForm.expires_at} onChange={e => setCouponForm({...couponForm, expires_at: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none text-sm" />
-                </div>
-              </div>
-              
-              <div className="pt-4 flex space-x-3">
-                <button type="button" onClick={() => setShowCouponModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold">Cancelar</button>
-                <button type="submit" disabled={actionLoading === -2} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center">
-                  {actionLoading === -2 ? <Loader2 size={20} className="animate-spin"/> : 'Criar Cupom'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SUBCATEGORY MODAL */}
-      {showSubcategoryModal && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl animate-in zoom-in-95 duration-200">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-brand-dark">{editingSubcategory ? 'Editar Subcategoria' : 'Nova Subcategoria'}</h2>
-              <button onClick={() => setShowSubcategoryModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
-            </div>
-            <form onSubmit={handleSaveSubcategory} className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Nome do grupo *</label>
-                <input type="text" required placeholder="Ex: Adicionais, Tamanho, Complementos" value={subcategoryForm.name} onChange={e => setSubcategoryForm({...subcategoryForm, name: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Descrição (opcional)</label>
-                <input type="text" placeholder="Ex: Escolha até 3 complementos" value={subcategoryForm.description} onChange={e => setSubcategoryForm({...subcategoryForm, description: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-              </div>
-              <div className="flex gap-3">
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Mínimo</label>
-                  <input type="number" min="0" value={subcategoryForm.min_selections} onChange={e => setSubcategoryForm({...subcategoryForm, min_selections: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-sm font-bold text-gray-700 mb-1">Máximo</label>
-                  <input type="number" min="1" value={subcategoryForm.max_selections} onChange={e => setSubcategoryForm({...subcategoryForm, max_selections: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-                </div>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input type="checkbox" checked={subcategoryForm.is_required} onChange={e => setSubcategoryForm({...subcategoryForm, is_required: e.target.checked})} className="w-5 h-5 accent-brand-primary" />
-                <span className="font-bold text-gray-700">Obrigatório</span>
-                <span className="text-xs text-gray-500">(cliente precisa escolher antes de adicionar ao carrinho)</span>
-              </label>
-              <div className="pt-2 flex gap-3">
-                <button type="button" onClick={() => setShowSubcategoryModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold">Cancelar</button>
-                <button type="submit" disabled={actionLoading === -10} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center">
-                  {actionLoading === -10 ? <Loader2 size={20} className="animate-spin"/> : 'Salvar'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* SUB ITEM MODAL */}
-      {showSubItemModal && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto scrollbar-hide">
-            <div className="flex justify-between items-center mb-4">
-              <div>
-                <h2 className="text-xl font-bold text-brand-dark">{editingSubItem ? 'Editar Item' : 'Novo Item'}</h2>
-                {selectedSubcategoryForItem && <p className="text-xs text-gray-500">Em: {selectedSubcategoryForItem.name}</p>}
-              </div>
-              <button onClick={() => setShowSubItemModal(false)} className="text-gray-400 hover:text-gray-600"><X size={24}/></button>
-            </div>
-            <form onSubmit={handleSaveSubItem} className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Foto do item</label>
-                <label htmlFor="subitem-image-upload" className="w-full h-32 rounded-2xl bg-gray-50 border-2 border-dashed border-gray-300 flex items-center justify-center overflow-hidden relative cursor-pointer hover:bg-gray-100 transition-colors group">
-                  {subItemImagePreview ? (
-                    <>
-                      <img src={subItemImagePreview} alt="Preview" className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                        <span className="text-white font-bold text-sm">Trocar</span>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex flex-col items-center text-gray-400">
-                      <ImageIcon size={28} className="mb-1" />
-                      <span className="text-sm font-bold">Clique para enviar foto</span>
-                    </div>
-                  )}
-                </label>
-                <input id="subitem-image-upload" type="file" accept="image/*" onChange={e => {
-                  if (e.target.files?.[0]) {
-                    setSubItemImageFile(e.target.files[0]);
-                    const r = new FileReader();
-                    r.onload = ev => setSubItemImagePreview(ev.target?.result as string);
-                    r.readAsDataURL(e.target.files[0]);
-                  }
-                }} className="hidden" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Nome do item *</label>
-                <input type="text" required placeholder="Ex: Bacon, Queijo extra, 300ml" value={subItemForm.name} onChange={e => setSubItemForm({...subItemForm, name: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Descrição (opcional)</label>
-                <input type="text" placeholder="Ex: Fatia grossa de bacon crocante" value={subItemForm.description} onChange={e => setSubItemForm({...subItemForm, description: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-1">Preço adicional (R$)</label>
-                <input type="number" step="0.01" min="0" value={subItemForm.price} onChange={e => setSubItemForm({...subItemForm, price: e.target.value})} className="w-full border border-gray-300 rounded-xl px-4 py-2 focus:ring-2 focus:ring-brand-primary outline-none" />
-                <p className="text-xs text-gray-500 mt-1">Use 0 para itens sem custo adicional</p>
-              </div>
-              <div className="pt-2 flex gap-3">
-                <button type="button" onClick={() => setShowSubItemModal(false)} className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-bold">Cancelar</button>
-                <button type="submit" disabled={actionLoading === -11} className="flex-[2] py-3 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center">
-                  {actionLoading === -11 ? <Loader2 size={20} className="animate-spin"/> : 'Salvar Item'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL DE CONFIRMAÇÃO GENÉRICO */}
-      {confirmModal && (
-        <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
-          <div className="bg-white p-6 rounded-2xl max-w-sm w-full shadow-2xl animate-in zoom-in-95">
-            <h3 className="font-black text-xl text-gray-800 mb-2">{confirmModal.title}</h3>
-            <p className="text-gray-600 text-sm mb-6">{confirmModal.message}</p>
-            <div className="flex space-x-3">
-              <button onClick={() => setConfirmModal(null)} className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-colors">Cancelar</button>
-              <button onClick={confirmModal.onConfirm} className="flex-1 py-3 bg-red-500 text-white rounded-xl font-bold hover:bg-red-600 transition-colors">Confirmar</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: notificar clientes sobre o cupom */}
-      {showNotifyModal && store && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-end sm:items-center justify-center p-4">
-          <div className="bg-white rounded-3xl w-full max-w-sm p-6 shadow-2xl">
-            <div className="text-center mb-5">
-              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
-                <BellRing size={28} className="text-brand-primary" />
-              </div>
-              <h2 className="text-xl font-black text-gray-800">Cupom criado! 🎉</h2>
-              <p className="text-gray-500 text-sm mt-2">
-                Quer avisar os clientes da sua cidade sobre o cupom <span className="font-bold text-brand-primary">{newCouponCode}</span>?
-              </p>
-            </div>
-
             <div className="space-y-3">
               <button
                 onClick={async () => {
-                  setSendingCouponNotif(true);
-                  try {
-                    const { data: notif } = await supabase
-                      .from('notifications')
-                      .insert({
-                        created_by: user!.id,
-                        title: `🎁 Cupom especial de ${store.name}!`,
-                        body: `Use o código ${newCouponCode} e ganhe desconto no seu próximo pedido!`,
-                        target_type: 'city',
-                        target_city: store.addresses?.city || null,
-                        store_id: store.id,
-                        status: 'pending',
-                      })
-                      .select()
-                      .single();
-
-                    await supabase.functions.invoke('send-push', {
-                      body: {
-                        notificationId: notif?.id,
-                        title: `🎁 Cupom especial de ${store.name}!`,
-                        body: `Use o código ${newCouponCode} e ganhe desconto no seu próximo pedido!`,
-                        targetType: 'city',
-                        targetCity: store.addresses?.city || null,
-                      }
-                    });
-
-                    showToast('Clientes notificados! 🔔', 'success');
-                  } catch {
-                    showToast('Cupom criado, mas falha ao notificar.', 'warning');
-                  } finally {
-                    setSendingCouponNotif(false);
-                    setShowNotifyModal(false);
-                    setNewCouponCode('');
-                  }
+                  setDeleteAccountLoading(true);
+                  try { await deleteAccount(); } finally { setDeleteAccountLoading(false); }
                 }}
-                disabled={sendingCouponNotif}
-                className="w-full py-3.5 bg-brand-primary text-white rounded-xl font-bold flex justify-center items-center gap-2 disabled:opacity-50"
+                disabled={deleteAccountLoading}
+                className="w-full bg-red-600 text-white py-4 rounded-xl font-bold flex justify-center items-center disabled:opacity-50"
               >
-                {sendingCouponNotif
-                  ? <Loader2 size={18} className="animate-spin" />
-                  : <BellRing size={18} />}
-                Sim, notificar clientes da cidade
+                {deleteAccountLoading ? <Loader2 size={20} className="animate-spin" /> : 'Sim, excluir minha conta'}
               </button>
-
-              <button
-                onClick={() => { setShowNotifyModal(false); setNewCouponCode(''); }}
-                className="w-full py-3 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm"
-              >
-                Agora não
+              <button onClick={() => setShowDeleteAccountModal(false)} className="w-full bg-gray-800 text-gray-300 py-4 rounded-xl font-bold">
+                Cancelar
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {!isDeliveryActive && (
+        <div className="bg-gray-900 border-t border-gray-800 flex justify-around py-3 shrink-0 z-20" style={{paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))'}}>
+          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center w-16 ${activeTab === 'home' ? 'text-brand-primary' : 'text-gray-500'}`}>
+            <Power size={24} /><span className="text-[10px] mt-1 font-medium">Início</span>
+          </button>
+          <button onClick={() => setActiveTab('earnings')} className={`flex flex-col items-center w-16 ${activeTab === 'earnings' ? 'text-brand-primary' : 'text-gray-500'}`}>
+            <DollarSign size={24} /><span className="text-[10px] mt-1 font-medium">Ganhos</span>
+          </button>
+          <button
+            onClick={() => {
+              setProfileForm({ name: courier?.users?.name || '', phone: courier?.users?.phone || '' });
+              setActiveTab('profile');
+            }}
+            className={`flex flex-col items-center w-16 ${activeTab === 'profile' ? 'text-brand-primary' : 'text-gray-500'}`}
+          >
+            <User size={24} /><span className="text-[10px] mt-1 font-medium">Perfil</span>
+          </button>
         </div>
       )}
     </div>
