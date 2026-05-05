@@ -4,7 +4,9 @@ import { useAuth } from '../contexts/AuthContext';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing, Map, Trash2 } from 'lucide-react';
-import { Geolocation } from '@capacitor/geolocation';
+
+// Helper — detecta se está rodando dentro do app Capacitor nativo
+const isNativeApp = () => !!(window as any).Capacitor?.isNativePlatform?.();
 
 // Componente auxiliar para renderizar o mapa e os botões de navegação
 const AddressMap = ({ address }: { address: string }) => {
@@ -240,20 +242,36 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
       setLoading(true);
       setGpsError(false);
       try {
-        const permission = await Geolocation.requestPermissions();
-        if (permission.location !== 'granted' && permission.coarseLocation !== 'granted') {
-          setGpsError(true);
-          showToast('Permissão de localização negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
-          setLoading(false);
-          return;
+        if (isNativeApp()) {
+          // App nativo — usa plugin Capacitor (pede popup nativo de permissão)
+          const { Geolocation } = await import('@capacitor/geolocation');
+          const permission = await Geolocation.requestPermissions();
+          if (permission.location !== 'granted' && permission.coarseLocation !== 'granted') {
+            setGpsError(true);
+            showToast('Permissão de localização negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
+            setLoading(false);
+            return;
+          }
+          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
+          await supabase.from('couriers').update({
+            is_online: true,
+            last_lat: pos.coords.latitude,
+            last_lng: pos.coords.longitude,
+            location_at: new Date().toISOString()
+          }).eq('id', courier.id);
+        } else {
+          // Web — usa navigator.geolocation
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            if (!navigator.geolocation) { reject(new Error('GPS não suportado')); return; }
+            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 });
+          });
+          await supabase.from('couriers').update({
+            is_online: true,
+            last_lat: pos.coords.latitude,
+            last_lng: pos.coords.longitude,
+            location_at: new Date().toISOString()
+          }).eq('id', courier.id);
         }
-        const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
-        await supabase.from('couriers').update({
-          is_online: true,
-          last_lat: pos.coords.latitude,
-          last_lng: pos.coords.longitude,
-          location_at: new Date().toISOString()
-        }).eq('id', courier.id);
         setCourier({ ...courier, is_online: true });
         showToast('Você está online! 🟢', 'success');
         setTimeout(checkPendingOffers, 1000);
@@ -269,8 +287,14 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         setLoading(false);
       }
     } else {
+      // Desligar — para o watch
       if (watchIdRef.current) {
-        await Geolocation.clearWatch({ id: watchIdRef.current });
+        if (isNativeApp()) {
+          const { Geolocation } = await import('@capacitor/geolocation');
+          await Geolocation.clearWatch({ id: watchIdRef.current });
+        } else {
+          navigator.geolocation.clearWatch(Number(watchIdRef.current));
+        }
         watchIdRef.current = null;
       }
       setLoading(true);
@@ -377,23 +401,43 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
     const startWatch = async () => {
       try {
-        if (watchIdRef.current) {
-          await Geolocation.clearWatch({ id: watchIdRef.current });
-          watchIdRef.current = null;
-        }
-        const id = await Geolocation.watchPosition(
-          { enableHighAccuracy: true, timeout: 30000 },
-          async (pos, err) => {
-            if (err || !pos) { setGpsError(true); return; }
-            setGpsError(false);
-            await supabase.from('couriers').update({
-              last_lat: pos.coords.latitude,
-              last_lng: pos.coords.longitude,
-              location_at: new Date().toISOString()
-            }).eq('id', courier.id);
+        if (isNativeApp()) {
+          // App nativo — usa plugin Capacitor
+          const { Geolocation } = await import('@capacitor/geolocation');
+          if (watchIdRef.current) {
+            await Geolocation.clearWatch({ id: watchIdRef.current });
+            watchIdRef.current = null;
           }
-        );
-        watchIdRef.current = id;
+          const id = await Geolocation.watchPosition(
+            { enableHighAccuracy: true, timeout: 30000 },
+            async (pos, err) => {
+              if (err || !pos) { setGpsError(true); return; }
+              setGpsError(false);
+              await supabase.from('couriers').update({
+                last_lat: pos.coords.latitude,
+                last_lng: pos.coords.longitude,
+                location_at: new Date().toISOString()
+              }).eq('id', courier.id);
+            }
+          );
+          watchIdRef.current = id;
+        } else {
+          // Web — usa navigator.geolocation
+          if (!navigator.geolocation) return;
+          const watchId = navigator.geolocation.watchPosition(
+            async (pos) => {
+              setGpsError(false);
+              await supabase.from('couriers').update({
+                last_lat: pos.coords.latitude,
+                last_lng: pos.coords.longitude,
+                location_at: new Date().toISOString()
+              }).eq('id', courier.id);
+            },
+            (err) => { console.warn('GPS watch error:', err); setGpsError(true); },
+            { enableHighAccuracy: true, timeout: 30000, maximumAge: 5000 }
+          );
+          watchIdRef.current = String(watchId);
+        }
       } catch (err) {
         console.warn('Erro ao iniciar rastreamento:', err);
       }
@@ -403,7 +447,13 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
     return () => {
       if (watchIdRef.current) {
-        Geolocation.clearWatch({ id: watchIdRef.current! });
+        if (isNativeApp()) {
+          import('@capacitor/geolocation').then(({ Geolocation }) => {
+            Geolocation.clearWatch({ id: watchIdRef.current! });
+          });
+        } else {
+          navigator.geolocation.clearWatch(Number(watchIdRef.current));
+        }
         watchIdRef.current = null;
       }
     };
