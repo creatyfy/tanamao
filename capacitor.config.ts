@@ -4,7 +4,7 @@ const config: CapacitorConfig = {
   appName: 'Tá Na Mão',
   webDir: 'dist',
   server: {
-    url: 'https://www.tanamao.website',
+    url: 'https://www.tanamao.website/app',
     cleartext: false,
   },
   android: {
