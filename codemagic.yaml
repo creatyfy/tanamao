@@ -165,6 +165,14 @@ workflows:
           rm -rf android
           npx cap add android
           npx cap sync android
+          # Garante permissões de localização no AndroidManifest
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "ACCESS_FINE_LOCATION" "$MANIFEST"; then
+            sed -i 's|<!-- Permissions -->|<!-- Permissions -->\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-feature android:name="android.hardware.location.gps" />|' "$MANIFEST"
+            echo "Permissões de localização adicionadas ao AndroidManifest"
+          else
+            echo "Permissões de localização já presentes"
+          fi
       - name: Copy Firebase config
         script: |
           set -euo pipefail
