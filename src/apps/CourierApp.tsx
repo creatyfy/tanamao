@@ -131,10 +131,9 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     if (deliveryStateRef.current !== 'none') return;
     
     try {
-      // Busca a oferta MAIS RECENTE com dados da loja para filtrar por cidade
       const { data: delivery } = await supabase
         .from('deliveries')
-        .select('*, orders(store_id, stores(name, addresses(city)))')
+        .select('*')
         .eq('status', 'offered')
         .order('created_at', { ascending: false })
         .limit(1)
@@ -144,24 +143,6 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         // Ignora corridas muito antigas (mais de 65 segundos)
         const elapsed = Date.now() - new Date(delivery.created_at).getTime();
         if (elapsed > 65000) return;
-
-        // Filtro por cidade — compara cidade da loja com última posição do motoboy
-        const storeCity = (delivery as any).orders?.stores?.addresses?.city;
-        if (storeCity && courier?.last_lat && courier?.last_lng) {
-          // Busca cidade do motoboy via geocoding reverso da última posição conhecida
-          try {
-            const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${courier.last_lat}&lon=${courier.last_lng}&format=json&accept-language=pt-BR`
-            );
-            const geo = await res.json();
-            const courierCity = geo?.address?.city || geo?.address?.town || geo?.address?.village || '';
-            if (courierCity && storeCity.toLowerCase() !== courierCity.toLowerCase()) {
-              return; // Motoboy em cidade diferente — ignora a corrida
-            }
-          } catch {
-            // Se geocoding falhar, não bloqueia — mostra a corrida normalmente
-          }
-        }
 
         const { data: order } = await supabase
           .from('orders')
