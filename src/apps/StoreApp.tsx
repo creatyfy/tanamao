@@ -514,7 +514,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders', filter: `store_id=eq.${store.id}` }, (payload) => {
         if (payload.new.status === 'pending') {
           playNotificationSound();
-          await sendNotification('🔔 Novo Pedido Recebido!', {
+          sendNotification('🔔 Novo Pedido Recebido!', {
             body: `Pedido #${payload.new.id} no valor de R$ ${payload.new.total.toFixed(2)}. Acesse o painel para aceitar.`,
           });
         }
