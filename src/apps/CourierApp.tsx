@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing, Map, Trash2 } from 'lucide-react';
+import { Geolocation } from '@capacitor/geolocation';
 
 // Componente auxiliar para renderizar o mapa e os botões de navegação
 const AddressMap = ({ address }: { address: string }) => {
@@ -66,6 +67,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   useEffect(() => { activeDeliveryRef.current = activeDelivery; }, [activeDelivery]);
 
   const [gpsError, setGpsError] = useState(false);
+  const watchIdRef = useRef<string | null>(null);
   
   // Delivery Code Validation
   const [deliveryCodeInput, setDeliveryCodeInput] = useState('');
@@ -223,87 +225,48 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
   const toggleOnline = async () => {
     if (!courier) return;
-    
+
     if (!courier.is_online) {
       setLoading(true);
       setGpsError(false);
-      
-      if (!navigator.geolocation) {
-        showToast('Seu dispositivo não suporta GPS.', 'error');
-        setLoading(false);
-        return;
-      }
-
-      // Pede permissão explicitamente via Permissions API se disponível
-      if (navigator.permissions) {
-        try {
-          const result = await navigator.permissions.query({ name: 'geolocation' });
-          if (result.state === 'denied') {
-            setGpsError(true);
-            showToast('Permissão de localização negada. Vá em Configurações > Tá Na Mão > Localização e ative.', 'error');
-            setLoading(false);
-            return;
-          }
-        } catch (e) {
-          // Permissions API não suportada, continua normalmente
+      try {
+        const permission = await Geolocation.requestPermissions();
+        if (permission.location !== 'granted' && permission.coarseLocation !== 'granted') {
+          setGpsError(true);
+          showToast('Permissão de localização negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
+          setLoading(false);
+          return;
         }
+        const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
+        await supabase.from('couriers').update({
+          is_online: true,
+          last_lat: pos.coords.latitude,
+          last_lng: pos.coords.longitude,
+          location_at: new Date().toISOString()
+        }).eq('id', courier.id);
+        setCourier({ ...courier, is_online: true });
+        showToast('Você está online! 🟢', 'success');
+        setTimeout(checkPendingOffers, 1000);
+      } catch (error: any) {
+        console.warn('Erro GPS:', error);
+        setGpsError(true);
+        if (error.message?.includes('denied') || error.code === 1) {
+          showToast('Permissão negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
+        } else {
+          showToast('Erro ao obter localização. Verifique se o GPS está ativo.', 'error');
+        }
+      } finally {
+        setLoading(false);
       }
-
-      // Tenta pegar localização — isso dispara o popup de permissão no iOS
-      const tryGetLocation = (highAccuracy: boolean) => {
-        navigator.geolocation.getCurrentPosition(
-          async (pos) => {
-            try {
-              const newStatus = true;
-              await supabase.from('couriers').update({ 
-                is_online: newStatus,
-                last_lat: pos.coords.latitude,
-                last_lng: pos.coords.longitude,
-                location_at: new Date().toISOString()
-              }).eq('id', courier.id);
-              
-              setCourier({ ...courier, is_online: newStatus });
-              showToast('Você está online! 🟢', 'success');
-              setTimeout(checkPendingOffers, 1000);
-            } catch (error) {
-              showToast('Erro ao ficar online.', 'error');
-            } finally {
-              setLoading(false);
-            }
-          },
-          async (error) => {
-            console.warn("Erro de localização:", error.code, error.message);
-            if (highAccuracy) {
-              // Tenta novamente sem alta precisão antes de desistir
-              tryGetLocation(false);
-            } else {
-              setGpsError(true);
-              if (error.code === 1) {
-                showToast('Permissão de GPS negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
-              } else if (error.code === 2) {
-                showToast('GPS indisponível. Verifique se o GPS está ativado.', 'error');
-              } else {
-                showToast('Tempo esgotado ao buscar localização. Tente novamente.', 'error');
-              }
-              setLoading(false);
-            }
-          },
-          { 
-            enableHighAccuracy: highAccuracy, 
-            timeout: highAccuracy ? 15000 : 30000, 
-            maximumAge: 60000 
-          }
-        );
-      };
-
-      tryGetLocation(true);
-
     } else {
+      if (watchIdRef.current) {
+        await Geolocation.clearWatch({ id: watchIdRef.current });
+        watchIdRef.current = null;
+      }
       setLoading(true);
       try {
-        const newStatus = false;
-        await supabase.from('couriers').update({ is_online: newStatus }).eq('id', courier.id);
-        setCourier({ ...courier, is_online: newStatus });
+        await supabase.from('couriers').update({ is_online: false }).eq('id', courier.id);
+        setCourier({ ...courier, is_online: false });
         showToast('Você está offline.', 'success');
       } catch (error) {
         showToast('Erro ao ficar offline.', 'error');
@@ -400,29 +363,38 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   }, [deliveryState, acceptTimer]);
 
   useEffect(() => {
-    let watchId: number;
+    if (!courier?.is_online || !courier?.id) return;
 
-    if (courier?.is_online && navigator.geolocation) {
-      watchId = navigator.geolocation.watchPosition(
-        async (pos) => {
-          setGpsError(false);
-          await supabase.from('couriers').update({
-            last_lat: pos.coords.latitude,
-            last_lng: pos.coords.longitude,
-            location_at: new Date().toISOString()
-          }).eq('id', courier.id);
-        },
-        (err) => {
-          console.warn("Sinal de GPS perdido:", err);
-          setGpsError(true);
-        },
-        { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 }
-      );
-    }
+    const startWatch = async () => {
+      try {
+        if (watchIdRef.current) {
+          await Geolocation.clearWatch({ id: watchIdRef.current });
+          watchIdRef.current = null;
+        }
+        const id = await Geolocation.watchPosition(
+          { enableHighAccuracy: true, timeout: 30000 },
+          async (pos, err) => {
+            if (err || !pos) { setGpsError(true); return; }
+            setGpsError(false);
+            await supabase.from('couriers').update({
+              last_lat: pos.coords.latitude,
+              last_lng: pos.coords.longitude,
+              location_at: new Date().toISOString()
+            }).eq('id', courier.id);
+          }
+        );
+        watchIdRef.current = id;
+      } catch (err) {
+        console.warn('Erro ao iniciar rastreamento:', err);
+      }
+    };
+
+    startWatch();
 
     return () => {
-      if (watchId !== undefined && navigator.geolocation) {
-        navigator.geolocation.clearWatch(watchId);
+      if (watchIdRef.current) {
+        Geolocation.clearWatch({ id: watchIdRef.current! });
+        watchIdRef.current = null;
       }
     };
   }, [courier?.is_online, courier?.id]);
@@ -783,7 +755,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
             {gpsError && (
               <div className="mt-6 bg-red-900/40 border border-red-500/50 rounded-2xl p-4 text-center mx-4">
                 <p className="text-red-400 font-bold text-sm mb-1">⚠️ Permissão de localização negada</p>
-                <p className="text-red-300 text-xs">Vá em <span className="font-bold">Configurações {'>'} Tá Na Mão {'>'} Localização</span> e selecione <span className="font-bold">"Ao usar o app"</span> ou <span className="font-bold">"Sempre"</span>.</p>
+                <p className="text-red-300 text-xs">Vá em <span className="font-bold">Configurações {'>'} Tá Na Mão {'>'} Localização</span> e selecione <span className="font-bold">"Ao usar o app"</span>.</p>
               </div>
             )}
           </div>
