@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Store, StoreCategory, Product, Order, Coupon, OrderChat } from '../types';
 import { Toast } from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
-import { Search, MapPin, Star, Clock, Bike, ChevronLeft, Plus, Minus, ShoppingBag, CheckCircle, History, Home, User, CreditCard, Loader2, X, Store as StoreIcon, LogOut, MessageSquare, Trash2, Ticket, BellRing, Send, Heart, AlertTriangle, Check } from 'lucide-react';
+import { Search, MapPin, Star, Clock, Bike, ChevronLeft, Plus, Minus, ShoppingBag, CheckCircle, History, Home, User, CreditCard, Loader2, X, XCircle, Store as StoreIcon, LogOut, MessageSquare, Trash2, Ticket, BellRing, Send, Heart, AlertTriangle, Check } from 'lucide-react';
 
 // Função auxiliar para normalizar strings (remove acentos, espaços e deixa minúsculo)
 const normalizeString = (str?: string) => {
