@@ -165,24 +165,27 @@ workflows:
           rm -rf android
           npx cap add android
           npx cap sync android
-          # Garante permissões de localização no AndroidManifest
+          # Adiciona permissões de localização direto no AndroidManifest
           MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if ! grep -q "ACCESS_FINE_LOCATION" "$MANIFEST"; then
-            python3 -c "
-import re
-with open('$MANIFEST', 'r') as f:
+          python3 << 'PYEOF'
+import sys
+manifest_path = "android/app/src/main/AndroidManifest.xml"
+with open(manifest_path, 'r') as f:
     content = f.read()
-permissions = '''    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />
-    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />
-    <uses-feature android:name=\"android.hardware.location.gps\" />'''
-content = content.replace('</manifest>', permissions + '\n</manifest>')
-with open('$MANIFEST', 'w') as f:
-    f.write(content)
-print('Permissoes de localizacao adicionadas')
-"
-          else
-            echo "Permissoes de localização já presentes"
-          fi
+if 'ACCESS_FINE_LOCATION' not in content:
+    permissions = (
+        '    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n'
+        '    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n'
+        '    <uses-feature android:name="android.hardware.location.gps" />\n'
+    )
+    content = content.replace('</manifest>', permissions + '</manifest>')
+    with open(manifest_path, 'w') as f:
+        f.write(content)
+    print('Permissoes de localizacao adicionadas com sucesso')
+else:
+    print('Permissoes de localizacao ja presentes')
+PYEOF
+          echo "=== VERIFICANDO MANIFEST ===" && grep -i "location\|LOCATION" android/app/src/main/AndroidManifest.xml || echo "ATENCAO: permissoes de localizacao NAO encontradas"
       - name: Copy Firebase config
         script: |
           set -euo pipefail
