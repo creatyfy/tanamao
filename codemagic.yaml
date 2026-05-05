@@ -162,10 +162,16 @@ workflows:
       - name: Setup Android platform
         script: |
           set -euo pipefail
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
+          rm -rf android
+          npx cap add android
           npx cap sync android
+          # Copia AndroidManifest com permissões de localização salvo em assets/
+          if [ -f "assets/AndroidManifest.xml" ]; then
+            cp assets/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+            echo "AndroidManifest copiado com sucesso"
+          else
+            echo "AVISO: assets/AndroidManifest.xml nao encontrado, usando o gerado pelo Capacitor"
+          fi
       - name: Copy Firebase config
         script: |
           set -euo pipefail
@@ -209,11 +215,21 @@ workflows:
 
           cd android
 
-          echo "Baixando gradle-wrapper.jar..."
+          echo "Baixando gradle-wrapper.jar oficial..."
           mkdir -p gradle/wrapper
-          curl -sL "https://github.com/gradle/gradle/raw/v8.5.0/gradle/wrapper/gradle-wrapper.jar" \
-            -o gradle/wrapper/gradle-wrapper.jar
-          echo "gradle-wrapper.jar baixado com sucesso"
+          # Baixa o jar oficial do Maven Central que é o mais confiável
+          curl -sL "https://repo1.maven.org/maven2/org/gradle/gradle-wrapper/8.5/gradle-wrapper-8.5.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar 2>/dev/null || true
+          # Se falhou, usa o gradle do sistema
+          if ! unzip -t gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
+            echo "Usando gradle do sistema..."
+            gradle_path=$(which gradle 2>/dev/null || echo "")
+            if [ -n "$gradle_path" ]; then
+              gradle_home=$(gradle --version 2>/dev/null | grep "Gradle home" | awk '{print $3}' || echo "")
+              find /usr/local/lib /opt /usr -name "gradle-wrapper.jar" 2>/dev/null | head -1 | xargs -I{} cp {} gradle/wrapper/gradle-wrapper.jar || true
+            fi
+          fi
+          echo "gradle-wrapper.jar pronto"
 
           chmod +x gradlew
           echo "Iniciando build do AAB assinado..."
