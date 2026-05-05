@@ -177,7 +177,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           if (timeLeft < 1 || timeLeft > 60) timeLeft = 60;
           setAcceptTimer(timeLeft);
 
-          sendNotification('🏍️ Nova Corrida Disponível!', {
+          await sendNotification('🏍️ Nova Corrida Disponível!', {
             body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${order.stores?.name}. Aceite rápido!`,
           });
           navigator.vibrate?.([300, 100, 300, 100, 300]);
@@ -483,7 +483,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
       const { error: ordErr } = await supabase
         .from('orders')
-        .update({ courier_id: courier!.id })
+        .update({ courier_id: courier!.id, status: 'accepted' })
         .eq('id', activeDelivery.order_id);
 
       if (ordErr) throw ordErr;
