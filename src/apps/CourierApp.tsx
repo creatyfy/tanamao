@@ -234,37 +234,70 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         return;
       }
 
-      // EXIGE GPS REAL PARA FICAR ONLINE
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          try {
-            const newStatus = true;
-            await supabase.from('couriers').update({ 
-              is_online: newStatus,
-              last_lat: pos.coords.latitude,
-              last_lng: pos.coords.longitude,
-              location_at: new Date().toISOString()
-            }).eq('id', courier.id);
-            
-            setCourier({ ...courier, is_online: newStatus });
-            showToast('Você está online!', 'success');
-            
-            // Verifica imediatamente se já tem alguma corrida esperando
-            setTimeout(checkPendingOffers, 1000);
-          } catch (error) {
-            showToast('Erro ao ficar online.', 'error');
-          } finally {
+      // Pede permissão explicitamente via Permissions API se disponível
+      if (navigator.permissions) {
+        try {
+          const result = await navigator.permissions.query({ name: 'geolocation' });
+          if (result.state === 'denied') {
+            setGpsError(true);
+            showToast('Permissão de localização negada. Vá em Configurações > Tá Na Mão > Localização e ative.', 'error');
             setLoading(false);
+            return;
           }
-        },
-        async (error) => {
-          console.warn("Erro de localização:", error);
-          setGpsError(true);
-          showToast('Ative o GPS do celular e dê permissão para ficar online.', 'error');
-          setLoading(false);
-        },
-        { enableHighAccuracy: false, timeout: 30000, maximumAge: 60000 }
-      );
+        } catch (e) {
+          // Permissions API não suportada, continua normalmente
+        }
+      }
+
+      // Tenta pegar localização — isso dispara o popup de permissão no iOS
+      const tryGetLocation = (highAccuracy: boolean) => {
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            try {
+              const newStatus = true;
+              await supabase.from('couriers').update({ 
+                is_online: newStatus,
+                last_lat: pos.coords.latitude,
+                last_lng: pos.coords.longitude,
+                location_at: new Date().toISOString()
+              }).eq('id', courier.id);
+              
+              setCourier({ ...courier, is_online: newStatus });
+              showToast('Você está online! 🟢', 'success');
+              setTimeout(checkPendingOffers, 1000);
+            } catch (error) {
+              showToast('Erro ao ficar online.', 'error');
+            } finally {
+              setLoading(false);
+            }
+          },
+          async (error) => {
+            console.warn("Erro de localização:", error.code, error.message);
+            if (highAccuracy) {
+              // Tenta novamente sem alta precisão antes de desistir
+              tryGetLocation(false);
+            } else {
+              setGpsError(true);
+              if (error.code === 1) {
+                showToast('Permissão de GPS negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
+              } else if (error.code === 2) {
+                showToast('GPS indisponível. Verifique se o GPS está ativado.', 'error');
+              } else {
+                showToast('Tempo esgotado ao buscar localização. Tente novamente.', 'error');
+              }
+              setLoading(false);
+            }
+          },
+          { 
+            enableHighAccuracy: highAccuracy, 
+            timeout: highAccuracy ? 15000 : 30000, 
+            maximumAge: 60000 
+          }
+        );
+      };
+
+      tryGetLocation(true);
+
     } else {
       setLoading(true);
       try {
@@ -747,6 +780,12 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
               )}
             </button>
             <p className="text-gray-400 mt-10 text-center text-sm font-medium">{courier.is_online ? 'Rastreamento GPS ativado. Buscando entregas...' : 'Toque para ligar o GPS e ficar online.'}</p>
+            {gpsError && (
+              <div className="mt-6 bg-red-900/40 border border-red-500/50 rounded-2xl p-4 text-center mx-4">
+                <p className="text-red-400 font-bold text-sm mb-1">⚠️ Permissão de localização negada</p>
+                <p className="text-red-300 text-xs">Vá em <span className="font-bold">Configurações {'>'} Tá Na Mão {'>'} Localização</span> e selecione <span className="font-bold">"Ao usar o app"</span> ou <span className="font-bold">"Sempre"</span>.</p>
+              </div>
+            )}
           </div>
         )}
 
