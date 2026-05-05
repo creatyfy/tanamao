@@ -209,12 +209,11 @@ workflows:
 
           cd android
 
-          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
-            echo "gradle-wrapper.jar não encontrado, baixando..."
-            mkdir -p gradle/wrapper
-            curl -sL "https://github.com/gradle/gradle/raw/v8.5.0/gradle/wrapper/gradle-wrapper.jar" \
-              -o gradle/wrapper/gradle-wrapper.jar
-          fi
+          echo "Baixando gradle-wrapper.jar..."
+          mkdir -p gradle/wrapper
+          curl -sL "https://github.com/gradle/gradle/raw/v8.5.0/gradle/wrapper/gradle-wrapper.jar" \
+            -o gradle/wrapper/gradle-wrapper.jar
+          echo "gradle-wrapper.jar baixado com sucesso"
 
           chmod +x gradlew
           echo "Iniciando build do AAB assinado..."
