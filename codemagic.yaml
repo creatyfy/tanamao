@@ -215,22 +215,6 @@ workflows:
 
           cd android
 
-          echo "Baixando gradle-wrapper.jar oficial..."
-          mkdir -p gradle/wrapper
-          # Baixa o jar oficial do Maven Central que é o mais confiável
-          curl -sL "https://repo1.maven.org/maven2/org/gradle/gradle-wrapper/8.5/gradle-wrapper-8.5.jar" \
-            -o gradle/wrapper/gradle-wrapper.jar 2>/dev/null || true
-          # Se falhou, usa o gradle do sistema
-          if ! unzip -t gradle/wrapper/gradle-wrapper.jar > /dev/null 2>&1; then
-            echo "Usando gradle do sistema..."
-            gradle_path=$(which gradle 2>/dev/null || echo "")
-            if [ -n "$gradle_path" ]; then
-              gradle_home=$(gradle --version 2>/dev/null | grep "Gradle home" | awk '{print $3}' || echo "")
-              find /usr/local/lib /opt /usr -name "gradle-wrapper.jar" 2>/dev/null | head -1 | xargs -I{} cp {} gradle/wrapper/gradle-wrapper.jar || true
-            fi
-          fi
-          echo "gradle-wrapper.jar pronto"
-
           chmod +x gradlew
           echo "Iniciando build do AAB assinado..."
           ./gradlew bundleRelease \
