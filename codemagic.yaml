@@ -200,8 +200,9 @@ workflows:
           npx @capacitor/assets generate --android
       - name: Increment Android build number
         script: |
-          sed -i '' 's/versionCode [0-9]*/versionCode 11/' android/app/build.gradle
-          sed -i '' 's/versionName "[0-9]*\.[0-9]*"/versionName "2.6"/' android/app/build.gradle
+          sed -i '' 's/versionCode [0-9]*/versionCode 12/' android/app/build.gradle
+          sed -i '' 's/versionName "[0-9]*\.[0-9]*"/versionName "2.7"/' android/app/build.gradle
+          sed -i '' 's/applicationId "com.tanamaoc.delivery"/applicationId "com.tanamao.delivery"/' android/app/build.gradle
           echo "=== build.gradle ===" && grep "applicationId\|versionCode\|versionName" android/app/build.gradle
       - name: Build Android AAB
         script: |
