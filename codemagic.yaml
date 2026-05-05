@@ -84,6 +84,10 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryUsageDescription string 'Usado para selecionar foto de perfil da loja, motoboy ou produto'" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :NSPhotoLibraryAddUsageDescription 'Usado para salvar fotos do app'" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :NSPhotoLibraryAddUsageDescription string 'Usado para salvar fotos do app'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :NSLocationWhenInUseUsageDescription 'Precisamos da sua localização para rastrear entregas em tempo real'" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :NSLocationWhenInUseUsageDescription string 'Precisamos da sua localização para rastrear entregas em tempo real'" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :NSLocationAlwaysAndWhenInUseUsageDescription 'Precisamos da sua localização em segundo plano para rastreamento contínuo das entregas'" "$PLIST" 2>/dev/null || \
+          /usr/libexec/PlistBuddy -c "Add :NSLocationAlwaysAndWhenInUseUsageDescription string 'Precisamos da sua localização em segundo plano para rastreamento contínuo das entregas'" "$PLIST"
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles
