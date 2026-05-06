@@ -137,8 +137,8 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         .from('deliveries')
         .select('*')
         .eq('status', 'offered')
-         .is('courier_id', null)   
-        .order('created_at', { ascending: false })
+        .is('courier_id', null)
+        .order('created_at', { ascending: true })
         .limit(1)
         .maybeSingle();
 
