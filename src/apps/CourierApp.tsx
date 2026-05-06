@@ -142,10 +142,21 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         .limit(1)
         .maybeSingle();
 
-      if (delivery) {
-        // Ignora corridas muito antigas (mais de 65 segundos)
-        const elapsed = Date.now() - new Date(delivery.created_at).getTime();
-        if (elapsed > 65000) return;
+      if (!delivery) return;
+
+      const elapsed = Date.now() - new Date(delivery.created_at).getTime();
+
+      // Corrida expirada — cancela no banco e checa a próxima imediatamente
+      if (elapsed > 65000) {
+        await supabase.from('deliveries')
+          .update({ status: 'cancelled' })
+          .eq('id', delivery.id)
+          .eq('status', 'offered');
+        setTimeout(checkPendingOffers, 100);
+        return;
+      }
+
+      if (true) {
 
         const { data: order } = await supabase
           .from('orders')
