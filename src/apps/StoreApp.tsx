@@ -869,6 +869,47 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       const { error: updateErr } = await supabase.from('orders').update(updateData).eq('id', orderId);
       if (updateErr) throw updateErr;
 
+      // Busca client_id do pedido para notificar via FCM
+      const { data: orderData } = await supabase
+        .from('orders')
+        .select('client_id')
+        .eq('id', orderId)
+        .single();
+
+      if (orderData?.client_id) {
+        const pushMessages: Record<string, { title: string; body: string }> = {
+          accepted:   { title: '✅ Pedido Confirmado!', body: 'Sua loja confirmou o pedido e está preparando.' },
+          preparing:  { title: '👨‍🍳 Pedido em Preparo!', body: 'Sua loja está preparando seu pedido.' },
+          ready:      { title: '📦 Pedido Pronto!', body: 'Seu pedido está pronto e aguardando motoboy.' },
+          delivering: { title: '🏍️ Pedido a Caminho!', body: 'Seu pedido saiu para entrega. Acompanhe no mapa!' },
+          delivered:  { title: '🎉 Pedido Entregue!', body: 'Bom apetite! Não esqueça de avaliar a loja.' },
+          cancelled:  { title: '❌ Pedido Cancelado', body: 'Seu pedido foi cancelado pela loja.' },
+        };
+
+        const msg = pushMessages[status];
+        if (msg) {
+          try {
+            const { data: tokenData } = await supabase
+              .from('push_tokens')
+              .select('token')
+              .eq('user_id', orderData.client_id);
+            
+            if (tokenData && tokenData.length > 0) {
+              await supabase.functions.invoke('send-push', {
+                body: {
+                  title: msg.title,
+                  body: msg.body,
+                  targetType: 'specific_tokens',
+                  tokens: tokenData.map((t: any) => t.token),
+                }
+              });
+            }
+          } catch (pushErr) {
+            console.warn('Erro ao notificar cliente:', pushErr);
+          }
+        }
+      }
+
       if (status === 'ready') {
         const courierFee = Math.max(Number(store?.delivery_fee) || 0, 2.00);
         
@@ -884,7 +925,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           return;
         }
 
-        // Notifica todos os motoboys via FCM (push notification nativa)
+        // Notifica todos os motoboys via FCM
         try {
           await supabase.functions.invoke('send-push', {
             body: {
