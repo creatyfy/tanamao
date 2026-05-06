@@ -275,7 +275,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       const balance = (pendingPayments || []).reduce((acc: number, p: any) => acc + (p.split_store_amount || 0), 0);
       setStoreBalance(balance);
 
-      // Busca ciclo de cobrança atual da loja
+      // Busca ciclo de cobrança atual
       const { data: cycle } = await supabase
         .from('billing_cycles')
         .select('*')
@@ -283,7 +283,25 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         .order('period_start', { ascending: false })
         .limit(1)
         .maybeSingle();
-      setStoreBillingCycle(cycle || null);
+
+      if (!cycle) {
+        // Ciclo não existe ainda — cria via process-billing
+        try {
+          await supabase.functions.invoke('process-billing');
+          const { data: newCycle } = await supabase
+            .from('billing_cycles')
+            .select('*')
+            .eq('store_id', store.id)
+            .order('period_start', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          setStoreBillingCycle(newCycle || null);
+        } catch (e) {
+          setStoreBillingCycle(null);
+        }
+      } else {
+        setStoreBillingCycle(cycle);
+      }
 
       // Próxima segunda-feira
       const today = new Date();
@@ -944,10 +962,17 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
       if (status === 'ready') {
         const courierFee = Math.max(Number(store?.delivery_fee) || 0, 2.00);
-        
+
+        // Cancela ofertas travadas do mesmo pedido (ex: loja clicou 2x)
+        await supabase.from('deliveries')
+          .update({ status: 'cancelled' })
+          .eq('order_id', orderId)
+          .eq('status', 'offered');
+
         const { error: deliveryErr } = await supabase.from('deliveries').insert({
           order_id: orderId,
           status: 'offered',
+          courier_id: null,
           courier_earning: courierFee
         });
         
