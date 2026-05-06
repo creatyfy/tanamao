@@ -365,7 +365,6 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           .select('*, addresses!inner(city, state, neighborhood)')
           .eq('is_approved', true)
           .eq('status', 'active')
-          .eq('is_suspended', false)
           .ilike('addresses.city', effectiveCity);
 
         if (storeErr) throw storeErr;
@@ -771,25 +770,14 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
 
   const handleCheckout = async () => {
     if (!user || !selectedStore || !userAddress) return;
-    if ((paymentMethod === 'pix' || paymentMethod === 'card') && !profile?.cpf) {
-      showToast('Você precisa informar seu CPF para pagar com PIX ou cartão. Acesse seu Perfil para atualizar.', 'warning');
-      setCurrentScreen('profile');
-      return;
-    }
     
-    // Bloqueia se a loja fechou depois que o cliente abriu o cardápio
-    // Verify store is still open before placing order
+    // Verifica se a loja ainda está aberta
     const { data: freshStore } = await supabase.from('stores').select('is_open').eq('id', selectedStore.id).single();
     if (!freshStore?.is_open) {
       showToast('A loja está fechada no momento. Aguarde ela reabrir.', 'error');
       return;
     }
 
-    if (!selectedStore.is_open) {
-      showToast('Esta loja fechou. Não é possível finalizar o pedido.', 'error');
-      return;
-    }
-    
     if (paymentMethod === 'cash' && changeFor) {
       const changeValue = parseFloat(changeFor);
       if (changeValue < finalTotal) {
@@ -800,7 +788,6 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
 
     setActionLoading(true);
     try {
-      // Gera código de 4 dígitos aleatório
       const deliveryCode = String(Math.floor(1000 + Math.random() * 9000));
 
       const { data: order, error: orderError } = await supabase.from('orders').insert({
@@ -833,7 +820,6 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
       const { error: itemsErr, data: insertedItems } = await supabase.from('order_items').insert(orderItems).select();
       if (itemsErr) throw itemsErr;
 
-      // Save subcategory selections
       if (insertedItems) {
         const allSelections: any[] = [];
         cart.forEach((item, idx) => {
@@ -841,8 +827,8 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
             item.selections.forEach((sel: any) => {
               allSelections.push({
                 order_item_id: insertedItems[idx].id,
-                subcategory_item_id: sel.id,
                 subcategory_id: sel.subcategory_id || 0,
+                subcategory_item_id: sel.id,
                 item_name: sel.name,
                 item_price: Number(sel.price || 0),
                 quantity: 1,
@@ -855,7 +841,6 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         }
       }
 
-      // Register coupon usage
       if (appliedCoupon) {
         await supabase.from('coupon_usages').insert({
           coupon_id: appliedCoupon.id,
@@ -864,63 +849,21 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
         });
       }
 
-      if (paymentMethod === 'cash') {
-        setCart([]);
-        setClientNotes('');
-        setCouponCode('');
-        setAppliedCoupon(null);
-        setActiveOrder({ ...order, order_items: orderItems, stores: { name: selectedStore.name, logo_url: selectedStore.logo_url, avg_prep_time_min: selectedStore.avg_prep_time_min } });
-        setCurrentScreen('tracking');
-        subscribeToOrder(order.id);
-        if (notifPermission === 'default') requestPermission();
-        showToast('Pedido realizado com sucesso!');
-      } else if (paymentMethod === 'pix') {
-        setPaymentLoading(true);
-        try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const { data: payData, error: payErr } = await supabase.functions.invoke('create-payment', {
-            body: { orderId: order.id, method: 'PIX' },
-            headers: { Authorization: `Bearer ${session?.access_token}` }
-          });
-          if (payErr || !payData?.success) {
-            console.error("Payment Error:", payErr, payData);
-            throw new Error(payData?.error || payErr?.message || 'Erro ao gerar PIX. Tente novamente.');
-          }
-          setPixQrCode(payData.pixQrCode);
-          setPixCopyPaste(payData.pixCopyPaste);
-          setPixExpiration(payData.pixExpiration);
-          setActiveOrder({ ...order, order_items: orderItems, stores: { name: selectedStore.name, logo_url: selectedStore.logo_url, avg_prep_time_min: selectedStore.avg_prep_time_min } });
-          subscribeToOrder(order.id);
-          setCart([]);
-          setClientNotes('');
-          setCouponCode('');
-          setAppliedCoupon(null);
-          setPaymentScreen('pix_waiting');
-          setCurrentScreen('payment');
-        } finally {
-          setPaymentLoading(false);
-        }
-      } else if (paymentMethod === 'card') {
-        setActiveOrder({ ...order, order_items: orderItems, stores: { name: selectedStore.name, logo_url: selectedStore.logo_url, avg_prep_time_min: selectedStore.avg_prep_time_min } });
-        subscribeToOrder(order.id);
-        setCart([]);
-        setClientNotes('');
-        setCouponCode('');
-        setAppliedCoupon(null);
-        
-        // Carrega cartões salvos do usuário
-        const { data: cards } = await supabase
-          .from('saved_cards')
-          .select('*')
-          .eq('user_id', user!.id)
-          .order('is_default', { ascending: false });
-        setSavedCards(cards || []);
-        setSelectedSavedCard(cards?.[0] || null);
-        setSavedCardCvv('');
-        setPaymentScreen(cards && cards.length > 0 ? 'saved_cards' : 'card_form');
-        
-        setCurrentScreen('payment');
-      }
+      // Todos os métodos vão direto para tracking — pagamento é físico
+      setCart([]);
+      setClientNotes('');
+      setCouponCode('');
+      setAppliedCoupon(null);
+      setActiveOrder({ 
+        ...order, 
+        order_items: orderItems, 
+        stores: { name: selectedStore.name, logo_url: selectedStore.logo_url, avg_prep_time_min: selectedStore.avg_prep_time_min } 
+      });
+      setCurrentScreen('tracking');
+      subscribeToOrder(order.id);
+      if (notifPermission === 'default') requestPermission();
+      showToast('Pedido realizado com sucesso! 🎉');
+
     } catch (error: any) {
       console.error("Erro no checkout:", error);
       showToast(error.message || 'Erro ao finalizar pedido.', 'error');
@@ -2114,14 +2057,20 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
                 {selectedStore?.accepts_pix && (
                   <label className={`flex items-center p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === 'pix' ? 'border-brand-primary bg-brand-light' : 'border-gray-200'}`}>
                     <input type="radio" name="payment" checked={paymentMethod === 'pix'} onChange={() => setPaymentMethod('pix')} className="text-brand-primary mr-3" />
-                    <span className="text-sm font-bold text-brand-dark">📱 PIX (Pague no app)</span>
+                    <div>
+                      <span className="text-sm font-bold text-brand-dark">📱 PIX na entrega</span>
+                      <p className="text-xs text-gray-500 mt-0.5">Pague via PIX diretamente ao entregador ou loja</p>
+                    </div>
                   </label>
                 )}
 
                 {selectedStore?.accepts_card && (
                   <label className={`flex items-center p-3 border rounded-xl cursor-pointer transition-all ${paymentMethod === 'card' ? 'border-brand-primary bg-brand-light' : 'border-gray-200'}`}>
                     <input type="radio" name="payment" checked={paymentMethod === 'card'} onChange={() => setPaymentMethod('card')} className="text-brand-primary mr-3" />
-                    <span className="text-sm font-bold text-brand-dark">💳 Cartão (Pague no app)</span>
+                    <div>
+                      <span className="text-sm font-bold text-brand-dark">💳 Cartão na entrega</span>
+                      <p className="text-xs text-gray-500 mt-0.5">Pague na maquininha ao receber o pedido</p>
+                    </div>
                   </label>
                 )}
 
