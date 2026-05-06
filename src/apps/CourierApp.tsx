@@ -562,6 +562,13 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         await notifyClient(clientId, '🎉 Pedido Entregue!', 'Seu pedido foi entregue. Bom apetite! Não esqueça de avaliar a loja.');
       }
 
+      // Atualiza billing em tempo real
+      try {
+        await supabase.functions.invoke('process-billing');
+      } catch (e) {
+        console.warn('Erro ao atualizar billing:', e);
+      }
+
       setDeliveryCodeInput('');
       setDeliveryState('none');
       setActiveDelivery(null);
