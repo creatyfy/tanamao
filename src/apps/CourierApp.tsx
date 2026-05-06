@@ -378,6 +378,14 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
       interval = setInterval(() => setAcceptTimer(prev => prev - 1), 1000);
     } else if (deliveryState === 'offered' && acceptTimer <= 0) {
       showToast('Tempo esgotado.', 'warning');
+      // Cancela a oferta no banco para não travar outros motoboys
+      if (activeDelivery?.id) {
+        supabase.from('deliveries')
+          .update({ status: 'cancelled' })
+          .eq('id', activeDelivery.id)
+          .eq('status', 'offered')
+          .then(() => {});
+      }
       setDeliveryState('none');
       setActiveDelivery(null);
       setDeliveryCodeInput('');
