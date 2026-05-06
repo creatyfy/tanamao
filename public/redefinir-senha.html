@@ -105,7 +105,7 @@
       auth: {
         autoRefreshToken: false,
         persistSession: true,
-        flowType: 'pkce',
+        flowType: 'implicit',
         storage: localStorage
       }
     })
@@ -154,13 +154,13 @@
 
       if (errorParam) { show('errorCard'); return }
 
-      // --- Estratégia 1: code PKCE na query string (formato atual do Supabase) ---
-      if (code) {
+      // --- Estratégia 1: access_token na hash (fluxo implicit) ---
+      if (accessToken && !accessToken.startsWith('pkce_')) {
         try {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
-          if (!error && data?.session) { show('formCard'); return }
-          console.error('exchangeCodeForSession(code) error:', error)
-        } catch(e) { console.error('exchangeCodeForSession(code) exception:', e) }
+          const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+          if (!error) { show('formCard'); return }
+          console.error('setSession error:', error)
+        } catch(e) { console.error('setSession exception:', e) }
       }
 
       // --- Estratégia 2: token_hash na query string ---
@@ -172,13 +172,13 @@
         } catch(e) { console.error('verifyOtp(token_hash) exception:', e) }
       }
 
-      // --- Estratégia 3: access_token normal na hash (fluxo implicit legado) ---
-      if (accessToken && !accessToken.startsWith('pkce_')) {
+      // --- Estratégia 3: code PKCE ---
+      if (code) {
         try {
-          const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
-          if (!error) { show('formCard'); return }
-          console.error('setSession error:', error)
-        } catch(e) { console.error('setSession exception:', e) }
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+          if (!error && data?.session) { show('formCard'); return }
+          console.error('exchangeCodeForSession(code) error:', error)
+        } catch(e) { console.error('exchangeCodeForSession(code) exception:', e) }
       }
 
       // --- Estratégia 4: token OTP legado ---
