@@ -151,11 +151,12 @@
       const errorParam = params.get('error')
       const accessToken = params.get('access_token')
       const refreshToken = params.get('refresh_token') || ''
+      const email = params.get('email') || ''
 
       if (errorParam) { show('errorCard'); return }
 
-      // --- Estratégia 1: access_token na hash (fluxo implicit) ---
-      if (accessToken && !accessToken.startsWith('pkce_')) {
+      // --- Estratégia 1: access_token JWT (tem pontos) ---
+      if (accessToken && accessToken.includes('.')) {
         try {
           const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
           if (!error) { show('formCard'); return }
@@ -163,7 +164,16 @@
         } catch(e) { console.error('setSession exception:', e) }
       }
 
-      // --- Estratégia 2: token_hash na query string ---
+      // --- Estratégia 2: access_token como token OTP (sem pontos) ---
+      if (accessToken && !accessToken.includes('.')) {
+        try {
+          const { data, error } = await supabase.auth.verifyOtp({ token_hash: accessToken, type: 'recovery' })
+          if (!error && data?.session) { show('formCard'); return }
+          console.error('verifyOtp(access_token as token_hash) error:', error)
+        } catch(e) { console.error('verifyOtp exception:', e) }
+      }
+
+      // --- Estratégia 3: token_hash explícito ---
       if (tokenHash) {
         try {
           const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
@@ -172,7 +182,7 @@
         } catch(e) { console.error('verifyOtp(token_hash) exception:', e) }
       }
 
-      // --- Estratégia 3: code PKCE ---
+      // --- Estratégia 4: code PKCE ---
       if (code) {
         try {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code)
@@ -181,10 +191,10 @@
         } catch(e) { console.error('exchangeCodeForSession(code) exception:', e) }
       }
 
-      // --- Estratégia 4: token OTP legado ---
+      // --- Estratégia 5: token OTP legado ---
       if (token) {
         try {
-          const { data, error } = await supabase.auth.verifyOtp({ token, type: 'recovery', email: params.get('email') || undefined })
+          const { data, error } = await supabase.auth.verifyOtp({ token, type: 'recovery', email: email || undefined })
           if (!error && data?.session) { show('formCard'); return }
           console.error('verifyOtp(token) error:', error)
         } catch(e) { console.error('verifyOtp(token) exception:', e) }
