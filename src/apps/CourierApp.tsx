@@ -232,47 +232,49 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
       setLoading(true);
       setGpsError(false);
       try {
-        if (isNativeApp()) {
-          // App nativo — usa plugin Capacitor (pede popup nativo de permissão)
-          const { Geolocation } = await import('@capacitor/geolocation');
-          const permission = await Geolocation.requestPermissions();
-          if (permission.location !== 'granted' && permission.coarseLocation !== 'granted') {
-            setGpsError(true);
-            showToast('Permissão de localização negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
-            setLoading(false);
-            return;
+        // Primeiro tenta obter posição, mas não bloqueia se falhar
+        let lat: number | null = null;
+        let lng: number | null = null;
+
+        try {
+          if (isNativeApp()) {
+            const { Geolocation } = await import('@capacitor/geolocation');
+            const permission = await Geolocation.requestPermissions();
+            if (permission.location === 'granted' || permission.coarseLocation === 'granted') {
+              const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 8000 });
+              lat = pos.coords.latitude;
+              lng = pos.coords.longitude;
+            } else {
+              setGpsError(true);
+            }
+          } else {
+            const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+              if (!navigator.geolocation) { reject(new Error('GPS não suportado')); return; }
+              navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: false, timeout: 8000 });
+            });
+            lat = pos.coords.latitude;
+            lng = pos.coords.longitude;
           }
-          const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
-          await supabase.from('couriers').update({
-            is_online: true,
-            last_lat: pos.coords.latitude,
-            last_lng: pos.coords.longitude,
-            location_at: new Date().toISOString()
-          }).eq('id', courier.id);
-        } else {
-          // Web — usa navigator.geolocation
-          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-            if (!navigator.geolocation) { reject(new Error('GPS não suportado')); return; }
-            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 15000 });
-          });
-          await supabase.from('couriers').update({
-            is_online: true,
-            last_lat: pos.coords.latitude,
-            last_lng: pos.coords.longitude,
-            location_at: new Date().toISOString()
-          }).eq('id', courier.id);
+        } catch (gpsErr: any) {
+          // GPS falhou mas não impede de ficar online — apenas marca sinal fraco
+          console.warn('GPS indisponível ao ficar online:', gpsErr);
+          setGpsError(true);
         }
+
+        // Fica online independente do GPS
+        const updateData: any = { is_online: true };
+        if (lat !== null && lng !== null) {
+          updateData.last_lat = lat;
+          updateData.last_lng = lng;
+          updateData.location_at = new Date().toISOString();
+        }
+        await supabase.from('couriers').update(updateData).eq('id', courier.id);
         setCourier({ ...courier, is_online: true });
         showToast('Você está online! 🟢', 'success');
-        setTimeout(checkPendingOffers, 1000);
+        setTimeout(checkPendingOffers, 500);
       } catch (error: any) {
-        console.warn('Erro GPS:', error);
-        setGpsError(true);
-        if (error.message?.includes('denied') || error.code === 1) {
-          showToast('Permissão negada. Vá em Configurações > Tá Na Mão > Localização.', 'error');
-        } else {
-          showToast('Erro ao obter localização. Verifique se o GPS está ativo.', 'error');
-        }
+        console.warn('Erro ao ficar online:', error);
+        showToast('Erro ao ficar online. Tente novamente.', 'error');
       } finally {
         setLoading(false);
       }
@@ -849,11 +851,16 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
                 </>
               )}
             </button>
-            <p className="text-gray-400 mt-10 text-center text-sm font-medium">{courier.is_online ? 'Rastreamento GPS ativado. Buscando entregas...' : 'Toque para ligar o GPS e ficar online.'}</p>
-            {gpsError && (
+            <p className="text-gray-400 mt-10 text-center text-sm font-medium">{courier.is_online ? 'Buscando entregas...' : 'Toque para ligar o GPS e ficar online.'}</p>
+            {gpsError && !courier.is_online && (
               <div className="mt-6 bg-red-900/40 border border-red-500/50 rounded-2xl p-4 text-center mx-4">
                 <p className="text-red-400 font-bold text-sm mb-1">⚠️ Permissão de localização negada</p>
                 <p className="text-red-300 text-xs">Vá em <span className="font-bold">Configurações {'>'} Tá Na Mão {'>'} Localização</span> e selecione <span className="font-bold">"Ao usar o app"</span>.</p>
+              </div>
+            )}
+            {gpsError && courier.is_online && (
+              <div className="mt-4 bg-yellow-900/30 border border-yellow-500/30 rounded-2xl p-3 text-center mx-4">
+                <p className="text-yellow-400 text-xs">⚠️ GPS com sinal fraco — corridas chegam normalmente</p>
               </div>
             )}
           </div>
