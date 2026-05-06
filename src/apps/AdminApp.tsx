@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { LayoutDashboard, Store, Bike, LogOut, CheckCircle, XCircle, Loader2, Users, Eye, X, MapPin, FileText, DollarSign, Clock, CreditCard, User, ShoppingBag, Package, MessageSquare, Ticket, Star, Trash2, Search, Percent, BarChart3, BellRing, RefreshCw } from 'lucide-react';
+import { LayoutDashboard, Store, Bike, LogOut, CheckCircle, XCircle, Loader2, Users, Eye, X, MapPin, FileText, DollarSign, Clock, CreditCard, User, ShoppingBag, Package, MessageSquare, Ticket, Star, Trash2, Search, Percent, BarChart3, BellRing, RefreshCw, AlertTriangle, Ban, Wallet, Calendar, TrendingUp } from 'lucide-react';
 import { Toast } from '../components/Toast';
 
 export default function AdminApp({ onExit }: { onExit: () => void }) {
@@ -58,6 +58,12 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   const [repassesLoading, setRepassesLoading] = useState(false);
   const [repassesTotal, setRepassesTotal] = useState({ stores: 0, couriers: 0, platform: 0 });
 
+  // Financeiro Tab
+  const [billingCycles, setBillingCycles] = useState<any[]>([]);
+  const [courierPayments, setCourierPayments] = useState<any[]>([]);
+  const [financialLoading, setFinancialLoading] = useState(false);
+  const [financialTab, setFinancialTab] = useState<'stores' | 'couriers'>('stores');
+
   // Notifications Tab
   const [notifications, setNotifications] = useState<any[]>([]);
   const [notifLoading, setNotifLoading] = useState(false);
@@ -110,6 +116,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     if (activeTab === 'reviews') fetchAllReviews();
     if (activeTab === 'coupons') fetchAllCoupons();
     if (activeTab === 'repasses') fetchRepasses();
+    if (activeTab === 'financeiro') fetchFinancial();
     if (activeTab === 'notifications') fetchNotifications();
   }, [activeTab, orderStatusFilter, orderDateFilter]);
 
@@ -435,6 +442,100 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
     } finally {
       setRepassesLoading(false);
     }
+  };
+
+  const fetchFinancial = async () => {
+    setFinancialLoading(true);
+    try {
+      // Busca ciclos de cobrança com dados da loja
+      const { data: cycles } = await supabase
+        .from('billing_cycles')
+        .select('*, stores(name, logo_url)')
+        .order('period_start', { ascending: false });
+
+      // Busca pagamentos de motoboys com dados do courier
+      const { data: payments } = await supabase
+        .from('courier_payments')
+        .select('*, couriers(users:user_id(name, avatar_url))')
+        .order('week_start', { ascending: false });
+
+      setBillingCycles(cycles || []);
+      setCourierPayments(payments || []);
+    } catch (err) {
+      showToast('Erro ao carregar financeiro', 'error');
+    } finally {
+      setFinancialLoading(false);
+    }
+  };
+
+  const handleMarkCharged = async (cycleId: number) => {
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() + 3);
+    try {
+      await supabase.from('billing_cycles').update({
+        status: 'charged',
+        charged_at: new Date().toISOString(),
+        due_date: dueDate.toISOString().split('T')[0],
+      }).eq('id', cycleId);
+      showToast('Cobrança marcada! Loja tem 3 dias para pagar.', 'success');
+      fetchFinancial();
+    } catch { showToast('Erro ao atualizar', 'error'); }
+  };
+
+  const handleMarkPaid = async (cycleId: number) => {
+    try {
+      await supabase.from('billing_cycles').update({
+        status: 'paid',
+        paid_at: new Date().toISOString(),
+      }).eq('id', cycleId);
+      // Remove suspensão se estava suspensa
+      const cycle = billingCycles.find(c => c.id === cycleId);
+      if (cycle) {
+        await supabase.from('stores').update({
+          is_suspended: false,
+          suspended_at: null,
+          suspension_reason: null,
+        }).eq('id', cycle.store_id);
+      }
+      showToast('Pagamento confirmado!', 'success');
+      fetchFinancial();
+    } catch { showToast('Erro ao atualizar', 'error'); }
+  };
+
+  const handleSuspendStore = async (cycleId: number, storeId: number) => {
+    try {
+      await supabase.from('stores').update({
+        is_suspended: true,
+        suspended_at: new Date().toISOString(),
+        suspension_reason: 'Inadimplência — pagamento em atraso',
+      }).eq('id', storeId);
+      await supabase.from('billing_cycles').update({ status: 'overdue' }).eq('id', cycleId);
+      showToast('Loja suspensa por inadimplência.', 'warning');
+      fetchFinancial();
+    } catch { showToast('Erro ao suspender', 'error'); }
+  };
+
+  const handleUnsuspendStore = async (storeId: number) => {
+    try {
+      await supabase.from('stores').update({
+        is_suspended: false,
+        suspended_at: null,
+        suspension_reason: null,
+      }).eq('id', storeId);
+      showToast('Loja reativada com sucesso!', 'success');
+      fetchFinancial();
+    } catch { showToast('Erro ao reativar', 'error'); }
+  };
+
+  const handleMarkCourierPaid = async (paymentId: number) => {
+    try {
+      await supabase.from('courier_payments').update({
+        status: 'paid',
+        paid_at: new Date().toISOString(),
+      }).eq('id', paymentId);
+      showToast('Motoboy marcado como pago!', 'success');
+      fetchFinancial();
+    } catch { showToast('Erro ao atualizar', 'error'); }
   };
 
   const fetchNotifications = async () => {
@@ -810,6 +911,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
           <button onClick={() => setActiveTab('coupons')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'coupons' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><Ticket size={20} /><span>Cupons</span></button>
           <button onClick={() => setActiveTab('reviews')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'reviews' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><Star size={20} /><span>Avaliações</span></button>
           <button onClick={() => setActiveTab('repasses')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'repasses' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><BarChart3 size={20} /><span>Repasses</span></button>
+          <button onClick={() => setActiveTab('financeiro')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'financeiro' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><Wallet size={20} /><span>Financeiro</span></button>
           <button onClick={() => setActiveTab('notifications')} className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-medium transition-all ${activeTab === 'notifications' ? 'bg-brand-primary text-white shadow-md' : 'text-emerald-100 hover:bg-emerald-800/50'}`}><BellRing size={20} /><span>Notificações</span></button>
         </nav>
         <div className="p-4 border-t border-emerald-800/50">
@@ -1597,6 +1699,171 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
         )}
 
         {/* REPASSES */}
+        {activeTab === 'financeiro' && (
+          <div className="max-w-6xl mx-auto">
+            <div className="flex justify-between items-center mb-6">
+              <div>
+                <h2 className="text-2xl font-black text-gray-800">Financeiro</h2>
+                <p className="text-gray-500 text-sm mt-1">Controle de cobranças das lojas e pagamentos dos motoboys</p>
+              </div>
+              <button onClick={fetchFinancial} disabled={financialLoading} className="px-4 py-2 bg-white border border-gray-200 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-50 flex items-center gap-2">
+                {financialLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} Atualizar
+              </button>
+            </div>
+
+            {/* Sub-tabs */}
+            <div className="flex gap-2 mb-6">
+              <button onClick={() => setFinancialTab('stores')} className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${financialTab === 'stores' ? 'bg-brand-primary text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+                <Store size={16} className="inline mr-2" />Lojas ({billingCycles.length})
+              </button>
+              <button onClick={() => setFinancialTab('couriers')} className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${financialTab === 'couriers' ? 'bg-brand-primary text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
+                <Bike size={16} className="inline mr-2" />Motoboys ({courierPayments.length})
+              </button>
+            </div>
+
+            {financialLoading ? (
+              <div className="flex justify-center py-20"><Loader2 className="animate-spin text-brand-primary" size={32} /></div>
+            ) : financialTab === 'stores' ? (
+              <div className="space-y-4">
+                {billingCycles.length === 0 ? (
+                  <div className="bg-white rounded-2xl p-12 text-center text-gray-400">
+                    <TrendingUp size={40} className="mx-auto mb-3 opacity-30" />
+                    <p>Nenhum ciclo de cobrança encontrado.</p>
+                    <p className="text-sm mt-1">Os ciclos são gerados automaticamente todo dia às 02:00.</p>
+                  </div>
+                ) : billingCycles.map(cycle => {
+                  const isOverdue = cycle.status === 'charged' && cycle.due_date && new Date(cycle.due_date) < new Date();
+                  const statusColors: Record<string, string> = {
+                    open: 'bg-blue-100 text-blue-700',
+                    charged: isOverdue ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700',
+                    paid: 'bg-green-100 text-green-700',
+                    overdue: 'bg-red-100 text-red-700',
+                    suspended: 'bg-gray-100 text-gray-700',
+                  };
+                  const statusLabels: Record<string, string> = {
+                    open: 'Em aberto',
+                    charged: isOverdue ? 'VENCIDO' : 'Aguardando pagamento',
+                    paid: 'Pago ✓',
+                    overdue: 'Inadimplente',
+                    suspended: 'Suspenso',
+                  };
+                  return (
+                    <div key={cycle.id} className={`bg-white rounded-2xl shadow-sm border ${isOverdue || cycle.status === 'overdue' ? 'border-red-200' : 'border-gray-100'} p-5`}>
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex items-center gap-3">
+                          {cycle.stores?.logo_url ? (
+                            <img src={cycle.stores.logo_url} className="w-10 h-10 rounded-xl object-cover" />
+                          ) : (
+                            <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center"><Store size={18} className="text-gray-400" /></div>
+                          )}
+                          <div>
+                            <p className="font-bold text-gray-800">{cycle.stores?.name || 'Loja'}</p>
+                            <p className="text-xs text-gray-400 flex items-center gap-1">
+                              <Calendar size={11} />
+                              {new Date(cycle.period_start).toLocaleDateString('pt-BR')} até {new Date(cycle.period_end).toLocaleDateString('pt-BR')}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`text-xs font-bold px-3 py-1 rounded-full ${statusColors[cycle.status] || 'bg-gray-100 text-gray-600'}`}>
+                          {statusLabels[cycle.status] || cycle.status}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                        <div className="bg-gray-50 rounded-xl p-3">
+                          <p className="text-xs text-gray-500 mb-1">Total Pedidos</p>
+                          <p className="font-black text-gray-800">R$ {Number(cycle.total_orders_amount).toFixed(2)}</p>
+                        </div>
+                        <div className="bg-blue-50 rounded-xl p-3">
+                          <p className="text-xs text-blue-600 mb-1">Comissão 4%</p>
+                          <p className="font-black text-blue-700">R$ {Number(cycle.platform_commission).toFixed(2)}</p>
+                        </div>
+                        <div className="bg-orange-50 rounded-xl p-3">
+                          <p className="text-xs text-orange-600 mb-1">Taxa Entregas</p>
+                          <p className="font-black text-orange-700">R$ {Number(cycle.delivery_fees_amount).toFixed(2)}</p>
+                        </div>
+                        <div className="bg-green-50 rounded-xl p-3">
+                          <p className="text-xs text-green-600 mb-1">Total a Cobrar</p>
+                          <p className="font-black text-green-700 text-lg">R$ {Number(cycle.total_due).toFixed(2)}</p>
+                        </div>
+                      </div>
+
+                      {cycle.due_date && cycle.status === 'charged' && (
+                        <p className={`text-xs font-bold mb-3 flex items-center gap-1 ${isOverdue ? 'text-red-600' : 'text-yellow-600'}`}>
+                          <Clock size={12} />
+                          {isOverdue ? 'VENCIDO em' : 'Vence em'} {new Date(cycle.due_date).toLocaleDateString('pt-BR')}
+                        </p>
+                      )}
+
+                      <div className="flex flex-wrap gap-2">
+                        {cycle.status === 'open' && (
+                          <button onClick={() => handleMarkCharged(cycle.id)} className="px-4 py-2 bg-yellow-500 text-white rounded-xl font-bold text-sm hover:bg-yellow-600 flex items-center gap-1">
+                            <DollarSign size={14} /> Marcar como Cobrado
+                          </button>
+                        )}
+                        {(cycle.status === 'charged' || cycle.status === 'overdue') && (
+                          <button onClick={() => handleMarkPaid(cycle.id)} className="px-4 py-2 bg-green-500 text-white rounded-xl font-bold text-sm hover:bg-green-600 flex items-center gap-1">
+                            <CheckCircle size={14} /> Confirmar Pagamento
+                          </button>
+                        )}
+                        {(isOverdue || cycle.status === 'overdue') && !cycle.stores?.is_suspended && (
+                          <button onClick={() => handleSuspendStore(cycle.id, cycle.store_id)} className="px-4 py-2 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 flex items-center gap-1">
+                            <Ban size={14} /> Suspender Loja
+                          </button>
+                        )}
+                        {cycle.stores?.is_suspended && (
+                          <button onClick={() => handleUnsuspendStore(cycle.store_id)} className="px-4 py-2 bg-gray-600 text-white rounded-xl font-bold text-sm hover:bg-gray-700 flex items-center gap-1">
+                            <CheckCircle size={14} /> Reativar Loja
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {courierPayments.length === 0 ? (
+                  <div className="bg-white rounded-2xl p-12 text-center text-gray-400">
+                    <Bike size={40} className="mx-auto mb-3 opacity-30" />
+                    <p>Nenhum pagamento de motoboy encontrado.</p>
+                  </div>
+                ) : courierPayments.map(payment => (
+                  <div key={payment.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {payment.couriers?.users?.avatar_url ? (
+                        <img src={payment.couriers.users.avatar_url} className="w-10 h-10 rounded-full object-cover" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"><Bike size={18} className="text-gray-400" /></div>
+                      )}
+                      <div>
+                        <p className="font-bold text-gray-800">{payment.couriers?.users?.name || 'Motoboy'}</p>
+                        <p className="text-xs text-gray-400">
+                          {new Date(payment.week_start).toLocaleDateString('pt-BR')} até {new Date(payment.week_end).toLocaleDateString('pt-BR')}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">{payment.total_deliveries} entrega{payment.total_deliveries !== 1 ? 's' : ''}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <p className="font-black text-xl text-brand-primary">R$ {Number(payment.total_amount).toFixed(2)}</p>
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${payment.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                          {payment.status === 'paid' ? 'Pago ✓' : 'Pendente'}
+                        </span>
+                      </div>
+                      {payment.status === 'pending' && (
+                        <button onClick={() => handleMarkCourierPaid(payment.id)} className="px-4 py-2 bg-brand-primary text-white rounded-xl font-bold text-sm hover:bg-green-600 flex items-center gap-1">
+                          <CheckCircle size={14} /> Marcar Pago
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'repasses' && (
           <div className="max-w-6xl mx-auto">
             <div className="flex justify-between items-center mb-6">
