@@ -511,12 +511,33 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     }
 
     const channelOrders = supabase.channel(`store_orders_${store.id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders', filter: `store_id=eq.${store.id}` }, (payload) => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'orders', filter: `store_id=eq.${store.id}` }, async (payload) => {
         if (payload.new.status === 'pending') {
           playNotificationSound();
           sendNotification('🔔 Novo Pedido Recebido!', {
             body: `Pedido #${payload.new.id} no valor de R$ ${payload.new.total.toFixed(2)}. Acesse o painel para aceitar.`,
           });
+          // FCM para loja com app fechado
+          try {
+            if (store.owner_id) {
+              const { data: tokenData } = await supabase
+                .from('push_tokens')
+                .select('token')
+                .eq('user_id', store.owner_id);
+              if (tokenData && tokenData.length > 0) {
+                await supabase.functions.invoke('send-push', {
+                  body: {
+                    title: '🔔 Novo Pedido Recebido!',
+                    body: `Pedido #${payload.new.id} no valor de R$ ${Number(payload.new.total).toFixed(2)}. Acesse o painel para aceitar.`,
+                    targetType: 'specific_tokens',
+                    tokens: tokenData.map((t: any) => t.token),
+                  }
+                });
+              }
+            }
+          } catch (err) {
+            console.warn('Erro ao enviar push para loja:', err);
+          }
         }
         fetchOrders(store.id);
         setLastUpdate(Date.now());
