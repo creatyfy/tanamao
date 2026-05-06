@@ -223,9 +223,10 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
         let comissaoTotal = 0;
 
         entregues.forEach(o => {
-          faturamentoTotal += o.total;
-          const baseValue = Number(o.subtotal ?? Math.max(0, o.total - (o.delivery_fee || 0)));
-          const rate = o.stores?.commission_rate ?? 4;
+          faturamentoTotal += Number(o.total ?? 0);
+          // Comissão sobre produtos: total - taxa de entrega
+          const baseValue = Math.max(0, Number(o.total ?? 0) - Number(o.delivery_fee ?? 0));
+          const rate = Number(o.stores?.commission_rate ?? 4);
           comissaoTotal += baseValue * (rate / 100);
         });
 
@@ -458,6 +459,9 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   const fetchFinancial = async () => {
     setFinancialLoading(true);
     try {
+      // Garante que ciclos e pagamentos estão atualizados
+      try { await supabase.functions.invoke('process-billing'); } catch (e) { console.warn('process-billing:', e); }
+
       const [cyclesRes, paymentsRes] = await Promise.all([
         supabase
           .from('billing_cycles')
@@ -932,8 +936,8 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   const analysisEntregues = analysisOrders.filter(o => o.status === 'delivered');
   const analysisFaturamento = analysisEntregues.reduce((acc, o) => acc + o.total, 0);
   const analysisComissao = analysisEntregues.reduce((acc, o) => {
-    const baseValue = Number(o.subtotal ?? Math.max(0, o.total - (o.delivery_fee || 0)));
-    const rate = o.stores?.commission_rate ?? 4;
+    const baseValue = Math.max(0, Number(o.total ?? 0) - Number(o.delivery_fee ?? 0));
+    const rate = Number(o.stores?.commission_rate ?? 4);
     return acc + (baseValue * (rate / 100));
   }, 0);
 
@@ -1786,6 +1790,10 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
           const totalPending = billingCycles.filter(c => c.status !== 'paid').reduce((s, c) => s + Number(c.total_due ?? 0), 0);
           const totalOverdue = billingCycles.filter(c => cycleIsOverdue(c) || c.status === 'overdue').length;
           const totalSuspended = billingCycles.filter(c => c.stores?.is_suspended).length;
+          // Totais motoboys e saldo plataforma
+          const totalComissao = billingCycles.reduce((s, c) => s + Number(c.platform_commission ?? 0), 0);
+          const totalRepasse = courierPayments.filter(p => p.status === 'pending').reduce((s, p) => s + Number(p.total_amount ?? 0), 0);
+          const saldoPlataforma = totalComissao - totalRepasse;
 
           return (
           <div className="max-w-6xl mx-auto">
@@ -1800,11 +1808,30 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
               </button>
             </div>
 
-            {/* Cards resumo (lojas) */}
+            {/* Cards de caixa — sempre visíveis */}
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                <p className="text-xs text-gray-500 mb-1">A receber das lojas</p>
+                <p className="text-xl font-black text-gray-800">R$ {totalPending.toFixed(2)}</p>
+                <p className="text-xs text-gray-400 mt-1">{totalOverdue > 0 ? <span className="text-red-500 font-bold">{totalOverdue} vencido(s)</span> : 'em dia'}</p>
+              </div>
+              <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                <p className="text-xs text-gray-500 mb-1">A repassar motoboys</p>
+                <p className="text-xl font-black text-orange-500">R$ {totalRepasse.toFixed(2)}</p>
+                <p className="text-xs text-gray-400 mt-1">{courierPayments.filter(p => p.status === 'pending').length} pagamento(s) pendente(s)</p>
+              </div>
+              <div className={`border rounded-2xl p-4 ${saldoPlataforma >= 0 ? 'bg-green-50 border-green-100' : 'bg-red-50 border-red-100'}`}>
+                <p className="text-xs text-gray-500 mb-1">Saldo da plataforma</p>
+                <p className={`text-xl font-black ${saldoPlataforma >= 0 ? 'text-green-600' : 'text-red-600'}`}>R$ {saldoPlataforma.toFixed(2)}</p>
+                <p className="text-xs text-gray-400 mt-1">comissões − repasses</p>
+              </div>
+            </div>
+
+            {/* Cards resumo lojas */}
             {financialTab === 'stores' && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                 <div className="bg-white border border-gray-100 rounded-2xl p-4">
-                  <p className="text-xs text-gray-500 mb-1">Total a receber</p>
+                  <p className="text-xs text-gray-500 mb-1">Total cobrado no ciclo</p>
                   <p className="text-xl font-black text-gray-800">R$ {totalDue.toFixed(2)}</p>
                 </div>
                 <div className="bg-white border border-gray-100 rounded-2xl p-4">
