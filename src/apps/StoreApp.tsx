@@ -975,6 +975,24 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
         showToast('Status do pedido atualizado!');
       }
 
+      // Atualiza billing em tempo real quando pedido é entregue
+      if (status === 'delivered') {
+        try {
+          await supabase.functions.invoke('process-billing');
+          // Recarrega ciclo do billing na tela
+          const { data: cycle } = await supabase
+            .from('billing_cycles')
+            .select('*')
+            .eq('store_id', store!.id)
+            .order('period_start', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          setStoreBillingCycle(cycle || null);
+        } catch (e) {
+          console.warn('Erro ao atualizar billing:', e);
+        }
+      }
+
       fetchOrders(store!.id);
       setLastUpdate(Date.now());
     } catch (error: any) {
@@ -1021,6 +1039,22 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       if (error) throw error;
 
       showToast('Entrega confirmada!', 'success');
+
+      // Atualiza billing em tempo real
+      try {
+        await supabase.functions.invoke('process-billing');
+        const { data: cycle } = await supabase
+          .from('billing_cycles')
+          .select('*')
+          .eq('store_id', store!.id)
+          .order('period_start', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        setStoreBillingCycle(cycle || null);
+      } catch (e) {
+        console.warn('Erro ao atualizar billing:', e);
+      }
+
       fetchOrders(store!.id);
       setLastUpdate(Date.now());
     } catch (error) {
