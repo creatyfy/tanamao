@@ -203,7 +203,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
 
       let query = supabase
         .from('orders')
-        .select('total, delivery_fee, status, stores(commission_rate)')
+        .select('total, subtotal, delivery_fee, status, stores(commission_rate)')
         .gte('created_at', startDate.toISOString())
         .lte('created_at', endDate.toISOString());
 
@@ -224,7 +224,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
 
         entregues.forEach(o => {
           faturamentoTotal += o.total;
-          const baseValue = Math.max(0, o.total - (o.delivery_fee || 0));
+          const baseValue = Number(o.subtotal ?? Math.max(0, o.total - (o.delivery_fee || 0)));
           const rate = o.stores?.commission_rate ?? 4;
           comissaoTotal += baseValue * (rate / 100);
         });
@@ -282,7 +282,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
 
       let query = supabase
         .from('orders')
-        .select('id, total, delivery_fee, status, payment_method, cancel_reason, created_at, users:client_id(name), stores(name, commission_rate)')
+        .select('id, total, subtotal, delivery_fee, status, payment_method, cancel_reason, created_at, users:client_id(name), stores(name, commission_rate)')
         .gte('created_at', startDate.toISOString())
         .lte('created_at', endDate.toISOString())
         .order('created_at', { ascending: false });
@@ -458,20 +458,19 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   const fetchFinancial = async () => {
     setFinancialLoading(true);
     try {
-      // Busca ciclos de cobrança com dados da loja
-      const { data: cycles } = await supabase
-        .from('billing_cycles')
-        .select('*, stores(name, logo_url, is_suspended)')
-        .order('period_start', { ascending: false });
+      const [cyclesRes, paymentsRes] = await Promise.all([
+        supabase
+          .from('billing_cycles')
+          .select('*, stores(name, logo_url, is_suspended)')
+          .order('period_start', { ascending: false }),
+        supabase
+          .from('courier_payments')
+          .select('*, couriers(id, users:user_id(name, avatar_url))')
+          .order('week_start', { ascending: false }),
+      ]);
 
-      // Busca pagamentos de motoboys com dados do courier
-      const { data: payments } = await supabase
-        .from('courier_payments')
-        .select('*, couriers(users:user_id(name, avatar_url))')
-        .order('week_start', { ascending: false });
-
-      setBillingCycles(cycles || []);
-      setCourierPayments(payments || []);
+      setBillingCycles(cyclesRes.data || []);
+      setCourierPayments(paymentsRes.data || []);
     } catch (err) {
       showToast('Erro ao carregar financeiro', 'error');
     } finally {
@@ -933,7 +932,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   const analysisEntregues = analysisOrders.filter(o => o.status === 'delivered');
   const analysisFaturamento = analysisEntregues.reduce((acc, o) => acc + o.total, 0);
   const analysisComissao = analysisEntregues.reduce((acc, o) => {
-    const baseValue = Math.max(0, o.total - (o.delivery_fee || 0));
+    const baseValue = Number(o.subtotal ?? Math.max(0, o.total - (o.delivery_fee || 0)));
     const rate = o.stores?.commission_rate ?? 4;
     return acc + (baseValue * (rate / 100));
   }, 0);
@@ -1767,12 +1766,21 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
             const matchSearch = !finSearch || (c.stores?.name ?? '').toLowerCase().includes(finSearch.toLowerCase()) || String(cycleNumbers[c.id]).includes(finSearch);
             return matchStatus && matchSearch;
           });
-          // Filtros motoboys
+          // Filtros motoboys — mescla todos os couriers com seus pagamentos
+          const couriersWithPayments = couriers.map(c => {
+            const payments = courierPayments.filter(p => p.courier_id === c.id);
+            return { courier: c, payments };
+          });
           const filteredPayments = courierPayments.filter(p => {
             const matchStatus = finStatusFilter === 'all' || p.status === finStatusFilter;
             const matchSearch = !finSearch || (p.couriers?.users?.name ?? '').toLowerCase().includes(finSearch.toLowerCase());
             return matchStatus && matchSearch;
           });
+          // Motoboys sem nenhum pagamento ainda (para exibir na lista)
+          const couriersWithoutPayments = couriers.filter(c =>
+            !courierPayments.some(p => p.courier_id === c.id) &&
+            (!finSearch || (c.users?.name ?? '').toLowerCase().includes(finSearch.toLowerCase()))
+          );
           // Totais resumo lojas
           const totalDue = billingCycles.reduce((s, c) => s + Number(c.total_due ?? 0), 0);
           const totalPending = billingCycles.filter(c => c.status !== 'paid').reduce((s, c) => s + Number(c.total_due ?? 0), 0);
@@ -1821,7 +1829,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                   <Store size={14} className="inline mr-1.5" />Lojas ({billingCycles.length})
                 </button>
                 <button onClick={() => { setFinancialTab('couriers'); setFinStatusFilter('all'); setFinSearch(''); }} className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${financialTab === 'couriers' ? 'bg-brand-primary text-white' : 'bg-gray-100 text-gray-600'}`}>
-                  <Bike size={14} className="inline mr-1.5" />Motoboys ({courierPayments.length})
+                  <Bike size={14} className="inline mr-1.5" />Motoboys ({couriers.length})
                 </button>
               </div>
               <div className="flex flex-wrap gap-2 items-center">
@@ -1925,10 +1933,10 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
               </div>
             ) : (
               <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
-                {filteredPayments.length === 0 ? (
+                {filteredPayments.length === 0 && couriersWithoutPayments.length === 0 ? (
                   <div className="p-12 text-center text-gray-400">
                     <Bike size={36} className="mx-auto mb-3 opacity-30" />
-                    <p className="font-medium">Nenhum pagamento encontrado</p>
+                    <p className="font-medium">Nenhum motoboy encontrado</p>
                   </div>
                 ) : (
                   <table className="w-full text-sm">
@@ -1969,6 +1977,27 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
                               <button onClick={() => handleMarkCourierPaid(payment.id)} className="px-2.5 py-1.5 bg-brand-primary text-white rounded-lg font-bold text-xs hover:bg-green-600 whitespace-nowrap">Marcar pago</button>
                             )}
                           </td>
+                        </tr>
+                      ))}
+                      {/* Motoboys cadastrados sem nenhuma entrega no período */}
+                      {couriersWithoutPayments.map((c, idx) => (
+                        <tr key={`no-pay-${c.id}`} className={`border-b border-gray-50 ${idx % 2 === 0 ? '' : 'bg-gray-50/40'}`}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              {c.users?.avatar_url
+                                ? <img src={c.users.avatar_url} className="w-7 h-7 rounded-full object-cover" />
+                                : <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center"><Bike size={13} className="text-gray-400" /></div>
+                              }
+                              <span className="font-semibold text-gray-600">{c.users?.name || 'Motoboy'}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-gray-400 text-xs hidden md:table-cell">—</td>
+                          <td className="px-4 py-3 text-right text-gray-400 hidden md:table-cell">0</td>
+                          <td className="px-4 py-3 text-right text-gray-400 font-medium">R$ 0,00</td>
+                          <td className="px-4 py-3 text-center">
+                            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-400">Sem entregas</span>
+                          </td>
+                          <td className="px-4 py-3"></td>
                         </tr>
                       ))}
                     </tbody>
