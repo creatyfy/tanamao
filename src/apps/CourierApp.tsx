@@ -448,6 +448,27 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     };
   }, [courier?.is_online, courier?.id]);
 
+  const notifyClient = async (clientId: number, title: string, body: string) => {
+    try {
+      const { data: tokenData } = await supabase
+        .from('push_tokens')
+        .select('token')
+        .eq('user_id', clientId);
+      if (tokenData && tokenData.length > 0) {
+        await supabase.functions.invoke('send-push', {
+          body: {
+            title,
+            body,
+            targetType: 'specific_tokens',
+            tokens: tokenData.map((t: any) => t.token),
+          }
+        });
+      }
+    } catch (err) {
+      console.warn('Erro ao notificar cliente:', err);
+    }
+  };
+
   const handleAccept = async () => {
     setActionLoading(true);
     try {
@@ -476,6 +497,12 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         .eq('id', activeDelivery.order_id);
 
       if (ordErr) throw ordErr;
+
+      // Notifica cliente que motoboy aceitou
+      const clientId = activeDelivery.order?.client_id || activeDelivery.order?.users?.id;
+      if (clientId) {
+        await notifyClient(clientId, '🏍️ Motoboy a caminho!', 'Um motoboy aceitou seu pedido e está indo buscar.');
+      }
 
       setDeliveryState('going_to_store');
       showToast('Corrida aceita! Siga para a loja.');
@@ -528,6 +555,12 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
       const newTotal = (courier.total_deliveries || 0) + 1;
       await supabase.from('couriers').update({ available_balance: newBalance, total_deliveries: newTotal }).eq('id', courier.id);
       setCourier({ ...courier, available_balance: newBalance, total_deliveries: newTotal });
+
+      // Notifica cliente que pedido foi entregue
+      const clientId = activeDelivery.order?.client_id || activeDelivery.order?.users?.id;
+      if (clientId) {
+        await notifyClient(clientId, '🎉 Pedido Entregue!', 'Seu pedido foi entregue. Bom apetite! Não esqueça de avaliar a loja.');
+      }
 
       setDeliveryCodeInput('');
       setDeliveryState('none');
