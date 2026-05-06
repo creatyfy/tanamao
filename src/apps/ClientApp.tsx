@@ -365,6 +365,7 @@ export default function ClientApp({ onExit }: { onExit: () => void }) {
           .select('*, addresses!inner(city, state, neighborhood)')
           .eq('is_approved', true)
           .eq('status', 'active')
+          .eq('is_suspended', false)
           .ilike('addresses.city', effectiveCity);
 
         if (storeErr) throw storeErr;
