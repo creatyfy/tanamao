@@ -120,6 +120,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [storeBalance, setStoreBalance] = useState<number | null>(null);
+  const [storeBillingCycle, setStoreBillingCycle] = useState<any>(null);
   const [nextPayoutDate, setNextPayoutDate] = useState<string>('');
 
   // History Tab
@@ -273,6 +274,16 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
       const balance = (pendingPayments || []).reduce((acc: number, p: any) => acc + (p.split_store_amount || 0), 0);
       setStoreBalance(balance);
+
+      // Busca ciclo de cobrança atual da loja
+      const { data: cycle } = await supabase
+        .from('billing_cycles')
+        .select('*')
+        .eq('store_id', store.id)
+        .order('period_start', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setStoreBillingCycle(cycle || null);
 
       // Próxima segunda-feira
       const today = new Date();
@@ -1629,28 +1640,56 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                   <h3 className="text-2xl md:text-3xl font-black text-brand-dark">{store.avg_rating > 0 ? store.avg_rating.toFixed(1) : '—'}</h3>
                   <p className="text-xs md:text-sm text-gray-500 font-medium mt-1">Avaliação geral</p>
                 </div>
-                {/* Card de Saldo Disponível */}
+                {/* Card Financeiro da Plataforma */}
                 <div className="col-span-2 md:col-span-3 lg:col-span-5 bg-gradient-to-r from-brand-primary to-green-600 p-6 rounded-2xl shadow-md text-white">
-                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <div className="p-2 bg-white/20 rounded-xl">
-                          <DollarSign size={20} className="text-white" />
-                        </div>
-                        <p className="font-bold text-white/80 text-sm uppercase tracking-wider">Saldo a Receber</p>
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-center gap-2">
+                      <div className="p-2 bg-white/20 rounded-xl">
+                        <DollarSign size={20} className="text-white" />
                       </div>
-                      <h3 className="text-3xl md:text-4xl font-black text-white mt-2">
-                        {storeBalance !== null ? `R$ ${storeBalance.toFixed(2)}` : '—'}
-                      </h3>
-                      <p className="text-white/70 text-sm mt-1">
-                        Pagamentos digitais confirmados aguardando repasse
+                      <p className="font-bold text-white/80 text-sm uppercase tracking-wider">Sua conta com a plataforma</p>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <div className="bg-white/20 rounded-xl p-3">
+                        <p className="text-white/70 text-xs mb-1">Pedidos no ciclo</p>
+                        <p className="text-white font-black text-lg">R$ {Number(storeBillingCycle?.total_orders_amount || 0).toFixed(2)}</p>
+                      </div>
+                      <div className="bg-white/20 rounded-xl p-3">
+                        <p className="text-white/70 text-xs mb-1">Comissão 4%</p>
+                        <p className="text-white font-black text-lg">R$ {Number(storeBillingCycle?.platform_commission || 0).toFixed(2)}</p>
+                      </div>
+                      <div className="bg-white/20 rounded-xl p-3">
+                        <p className="text-white/70 text-xs mb-1">Taxa motoboys</p>
+                        <p className="text-white font-black text-lg">R$ {Number(storeBillingCycle?.delivery_fees_amount || 0).toFixed(2)}</p>
+                      </div>
+                      <div className="bg-white/30 rounded-xl p-3 border-2 border-white/40">
+                        <p className="text-white/70 text-xs mb-1">Total a pagar</p>
+                        <p className="text-white font-black text-xl">R$ {Number(storeBillingCycle?.total_due || 0).toFixed(2)}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between bg-white/10 rounded-xl p-3">
+                      <p className="text-white/80 text-xs">
+                        {storeBillingCycle ? (
+                          <>Ciclo: {new Date(storeBillingCycle.period_start).toLocaleDateString('pt-BR')} até {new Date(storeBillingCycle.period_end).toLocaleDateString('pt-BR')}</>
+                        ) : 'Nenhum ciclo ativo ainda'}
                       </p>
+                      <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                        storeBillingCycle?.status === 'paid' ? 'bg-green-400/30 text-white' :
+                        storeBillingCycle?.status === 'charged' ? 'bg-yellow-400/30 text-white' :
+                        storeBillingCycle?.status === 'overdue' ? 'bg-red-400/30 text-white' :
+                        'bg-white/20 text-white'
+                      }`}>
+                        {storeBillingCycle?.status === 'paid' ? '✓ Pago' :
+                         storeBillingCycle?.status === 'charged' ? '⚠️ Aguardando pagamento' :
+                         storeBillingCycle?.status === 'overdue' ? '🔴 Inadimplente' :
+                         '🔄 Em aberto'}
+                      </span>
                     </div>
-                    <div className="bg-white/20 rounded-2xl p-4 text-center w-full md:w-auto min-w-[180px]">
-                      <p className="text-white/80 text-xs font-bold uppercase tracking-wider mb-1">Próximo repasse</p>
-                      <p className="text-white font-black text-sm capitalize">{nextPayoutDate || 'Toda segunda-feira'}</p>
-                      <p className="text-white/70 text-xs mt-1">via PIX cadastrado</p>
-                    </div>
+                    {storeBillingCycle?.due_date && storeBillingCycle?.status === 'charged' && (
+                      <p className="text-white/80 text-xs text-center bg-yellow-400/20 rounded-lg py-2">
+                        ⏰ Prazo para pagamento: {new Date(storeBillingCycle.due_date).toLocaleDateString('pt-BR')}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
