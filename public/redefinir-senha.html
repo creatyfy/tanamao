@@ -83,7 +83,17 @@
       <div class="icon">✅</div>
       <h1>Senha alterada!</h1>
       <p class="subtitle">Sua senha foi atualizada com sucesso. Agora faça login normalmente.</p>
-      <a href="https://tanamao.website/app" class="btn">Fazer Login</a>
+      <button class="btn" onclick="
+        // Tenta abrir o app nativo primeiro
+        var appUrl = 'com.tanamaoc.delivery://app';
+        var webUrl = 'https://tanamao.website/app';
+        var start = Date.now();
+        var timeout = setTimeout(function() {
+          if (Date.now() - start < 2000) window.location.href = webUrl;
+        }, 1500);
+        window.location.href = appUrl;
+        setTimeout(function() { clearTimeout(timeout); window.location.href = webUrl; }, 500);
+      ">Fazer Login</button>
       <p class="brand">Tá Na Mão — Delivery</p>
     </div>
 
