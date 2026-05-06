@@ -105,7 +105,7 @@
       auth: {
         autoRefreshToken: false,
         persistSession: true,
-        flowType: 'implicit',
+        flowType: 'pkce',
         storage: localStorage
       }
     })
@@ -154,41 +154,7 @@
 
       if (errorParam) { show('errorCard'); return }
 
-      // --- Estratégia 1: access_token=pkce_* na hash (variação comum em links de recovery) ---
-      // Alguns links chegam como access_token=pkce_<code>. Tentamos com e sem o prefixo.
-      if (accessToken && accessToken.startsWith('pkce_')) {
-        try {
-          const pkceCode = accessToken.replace(/^pkce_/, '')
-
-          let result = await supabase.auth.exchangeCodeForSession(accessToken)
-          if (!result.error && result.data?.session) { show('formCard'); return }
-
-          result = await supabase.auth.exchangeCodeForSession(pkceCode)
-          if (!result.error && result.data?.session) { show('formCard'); return }
-
-          console.error('exchangeCodeForSession(pkce_) error:', result.error)
-        } catch(e) { console.error('exchangeCodeForSession(pkce_) exception:', e) }
-      }
-
-      // --- Estratégia 2: access_token normal na hash (fluxo implicit real) ---
-      if (accessToken && !accessToken.startsWith('pkce_')) {
-        try {
-          const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
-          if (!error) { show('formCard'); return }
-          console.error('setSession error:', error)
-        } catch(e) { console.error('setSession exception:', e) }
-      }
-
-      // --- Estratégia 3: token_hash na query string (formato moderno) ---
-      if (tokenHash) {
-        try {
-          const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
-          if (!error && data?.session) { show('formCard'); return }
-          console.error('verifyOtp(token_hash) error:', error)
-        } catch(e) { console.error('verifyOtp(token_hash) exception:', e) }
-      }
-
-      // --- Estratégia 4: code na query string (PKCE via query) ---
+      // --- Estratégia 1: code PKCE na query string (formato atual do Supabase) ---
       if (code) {
         try {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code)
@@ -197,10 +163,28 @@
         } catch(e) { console.error('exchangeCodeForSession(code) exception:', e) }
       }
 
-      // --- Estratégia 5: token OTP legado ---
+      // --- Estratégia 2: token_hash na query string ---
+      if (tokenHash) {
+        try {
+          const { data, error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: 'recovery' })
+          if (!error && data?.session) { show('formCard'); return }
+          console.error('verifyOtp(token_hash) error:', error)
+        } catch(e) { console.error('verifyOtp(token_hash) exception:', e) }
+      }
+
+      // --- Estratégia 3: access_token normal na hash (fluxo implicit legado) ---
+      if (accessToken && !accessToken.startsWith('pkce_')) {
+        try {
+          const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken })
+          if (!error) { show('formCard'); return }
+          console.error('setSession error:', error)
+        } catch(e) { console.error('setSession exception:', e) }
+      }
+
+      // --- Estratégia 4: token OTP legado ---
       if (token) {
         try {
-          const { data, error } = await supabase.auth.verifyOtp({ token, type, email: params.get('email') || undefined })
+          const { data, error } = await supabase.auth.verifyOtp({ token, type: 'recovery', email: params.get('email') || undefined })
           if (!error && data?.session) { show('formCard'); return }
           console.error('verifyOtp(token) error:', error)
         } catch(e) { console.error('verifyOtp(token) exception:', e) }
