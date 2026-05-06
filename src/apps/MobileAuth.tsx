@@ -605,7 +605,17 @@ export default function MobileAuth() {
     const emailClean = formData.email.trim();
     if (!emailClean) throw new Error('Por favor, informe seu e-mail.');
 
-    const { error } = await supabase.auth.resetPasswordForEmail(emailClean, {
+    // Usa cliente temporário com flowType implicit para evitar problema do PKCE
+    // O code_verifier do PKCE fica preso no localStorage e não funciona quando
+    // o link é aberto em outro browser/aba
+    const { createClient } = await import('@supabase/supabase-js');
+    const tempClient = createClient(
+      'https://fgjlyvkdkhxvzsgxuuad.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZnamx5dmtka2h4dnpzZ3h1dWFkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyODg0MDEsImV4cCI6MjA4OTg2NDQwMX0.TLh27Ok-uAlaKihA1_1mE5i4yRIRWYsKcT6o_pu1TyI',
+      { auth: { flowType: 'implicit', persistSession: false } }
+    );
+
+    const { error } = await tempClient.auth.resetPasswordForEmail(emailClean, {
       redirectTo: `${window.location.origin}/redefinir-senha`,
     });
     
