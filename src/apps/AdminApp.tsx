@@ -63,6 +63,17 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
   const [courierPayments, setCourierPayments] = useState<any[]>([]);
   const [financialLoading, setFinancialLoading] = useState(false);
   const [financialTab, setFinancialTab] = useState<'stores' | 'couriers'>('stores');
+  const [finStatusFilter, setFinStatusFilter] = useState<string>('all');
+  const [finSearch, setFinSearch] = useState('');
+  // Modal loja (financeiro)
+  const [finStoreModal, setFinStoreModal] = useState<any>(null);
+  const [finStoreHistory, setFinStoreHistory] = useState<any[]>([]);
+  const [finStoreModalLoading, setFinStoreModalLoading] = useState(false);
+  // Modal motoboy (financeiro)
+  const [finCourierModal, setFinCourierModal] = useState<any>(null);
+  const [finCourierHistory, setFinCourierHistory] = useState<any[]>([]);
+  const [finCourierDeliveries, setFinCourierDeliveries] = useState<any[]>([]);
+  const [finCourierModalLoading, setFinCourierModalLoading] = useState(false);
 
   // Notifications Tab
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -450,7 +461,7 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
       // Busca ciclos de cobrança com dados da loja
       const { data: cycles } = await supabase
         .from('billing_cycles')
-        .select('*, stores(name, logo_url)')
+        .select('*, stores(name, logo_url, is_suspended)')
         .order('period_start', { ascending: false });
 
       // Busca pagamentos de motoboys com dados do courier
@@ -536,6 +547,41 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
       showToast('Motoboy marcado como pago!', 'success');
       fetchFinancial();
     } catch { showToast('Erro ao atualizar', 'error'); }
+  };
+
+  const openFinStoreModal = async (cycle: any) => {
+    setFinStoreModalLoading(true);
+    setFinStoreModal(cycle);
+    setFinStoreHistory([]);
+    try {
+      const storeId = cycle.store_id;
+      const { data: history } = await supabase
+        .from('billing_cycles')
+        .select('*')
+        .eq('store_id', storeId)
+        .order('period_start', { ascending: false });
+      setFinStoreHistory(history || []);
+    } catch { /* silent */ } finally {
+      setFinStoreModalLoading(false);
+    }
+  };
+
+  const openFinCourierModal = async (payment: any) => {
+    setFinCourierModalLoading(true);
+    setFinCourierModal(payment);
+    setFinCourierHistory([]);
+    setFinCourierDeliveries([]);
+    try {
+      const courierId = payment.courier_id;
+      const [histRes, delRes] = await Promise.all([
+        supabase.from('courier_payments').select('*').eq('courier_id', courierId).order('week_start', { ascending: false }),
+        supabase.from('deliveries').select('*, orders(total, created_at, stores(name))').eq('courier_id', courierId).order('created_at', { ascending: false }).limit(20),
+      ]);
+      setFinCourierHistory(histRes.data || []);
+      setFinCourierDeliveries(delRes.data || []);
+    } catch { /* silent */ } finally {
+      setFinCourierModalLoading(false);
+    }
   };
 
   const fetchNotifications = async () => {
@@ -1699,170 +1745,405 @@ export default function AdminApp({ onExit }: { onExit: () => void }) {
         )}
 
         {/* REPASSES */}
-        {activeTab === 'financeiro' && (
+        {activeTab === 'financeiro' && (() => {
+          // helpers de status
+          const cycleIsOverdue = (c: any) => c.status === 'charged' && c.due_date && new Date(c.due_date) < new Date();
+          const storeStatusLabel = (c: any) => {
+            if (cycleIsOverdue(c)) return 'Vencido';
+            return ({ open: 'Em aberto', charged: 'Aguardando', paid: 'Pago', overdue: 'Inadimplente', suspended: 'Suspenso' } as any)[c.status] ?? c.status;
+          };
+          const storeStatusCls = (c: any) => {
+            if (cycleIsOverdue(c) || c.status === 'overdue') return 'bg-red-100 text-red-700';
+            return ({ open: 'bg-blue-100 text-blue-700', charged: 'bg-yellow-100 text-yellow-700', paid: 'bg-green-100 text-green-700', suspended: 'bg-gray-100 text-gray-600' } as any)[c.status] ?? 'bg-gray-100 text-gray-600';
+          };
+          // Número sequencial de ciclo por loja (1 = mais antigo)
+          const cycleNumbers: Record<string, number> = {};
+          const sortedAsc = [...billingCycles].sort((a, b) => new Date(a.period_start).getTime() - new Date(b.period_start).getTime());
+          const storeCounters: Record<number, number> = {};
+          sortedAsc.forEach(c => { storeCounters[c.store_id] = (storeCounters[c.store_id] ?? 0) + 1; cycleNumbers[c.id] = storeCounters[c.store_id]; });
+          // Filtros lojas
+          const filteredCycles = billingCycles.filter(c => {
+            const matchStatus = finStatusFilter === 'all' || c.status === finStatusFilter || (finStatusFilter === 'overdue' && cycleIsOverdue(c));
+            const matchSearch = !finSearch || (c.stores?.name ?? '').toLowerCase().includes(finSearch.toLowerCase()) || String(cycleNumbers[c.id]).includes(finSearch);
+            return matchStatus && matchSearch;
+          });
+          // Filtros motoboys
+          const filteredPayments = courierPayments.filter(p => {
+            const matchStatus = finStatusFilter === 'all' || p.status === finStatusFilter;
+            const matchSearch = !finSearch || (p.couriers?.users?.name ?? '').toLowerCase().includes(finSearch.toLowerCase());
+            return matchStatus && matchSearch;
+          });
+          // Totais resumo lojas
+          const totalDue = billingCycles.reduce((s, c) => s + Number(c.total_due ?? 0), 0);
+          const totalPending = billingCycles.filter(c => c.status !== 'paid').reduce((s, c) => s + Number(c.total_due ?? 0), 0);
+          const totalOverdue = billingCycles.filter(c => cycleIsOverdue(c) || c.status === 'overdue').length;
+          const totalSuspended = billingCycles.filter(c => c.stores?.is_suspended).length;
+
+          return (
           <div className="max-w-6xl mx-auto">
-            <div className="flex justify-between items-center mb-6">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-5">
               <div>
                 <h2 className="text-2xl font-black text-gray-800">Financeiro</h2>
-                <p className="text-gray-500 text-sm mt-1">Controle de cobranças das lojas e pagamentos dos motoboys</p>
+                <p className="text-gray-500 text-sm mt-0.5">Cobranças das lojas e pagamentos dos motoboys</p>
               </div>
               <button onClick={fetchFinancial} disabled={financialLoading} className="px-4 py-2 bg-white border border-gray-200 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-50 flex items-center gap-2">
                 {financialLoading ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />} Atualizar
               </button>
             </div>
 
-            {/* Sub-tabs */}
-            <div className="flex gap-2 mb-6">
-              <button onClick={() => setFinancialTab('stores')} className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${financialTab === 'stores' ? 'bg-brand-primary text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
-                <Store size={16} className="inline mr-2" />Lojas ({billingCycles.length})
-              </button>
-              <button onClick={() => setFinancialTab('couriers')} className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${financialTab === 'couriers' ? 'bg-brand-primary text-white' : 'bg-white text-gray-600 border border-gray-200'}`}>
-                <Bike size={16} className="inline mr-2" />Motoboys ({courierPayments.length})
-              </button>
+            {/* Cards resumo (lojas) */}
+            {financialTab === 'stores' && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+                <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                  <p className="text-xs text-gray-500 mb-1">Total a receber</p>
+                  <p className="text-xl font-black text-gray-800">R$ {totalDue.toFixed(2)}</p>
+                </div>
+                <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                  <p className="text-xs text-gray-500 mb-1">Pendente de pagamento</p>
+                  <p className="text-xl font-black text-yellow-600">R$ {totalPending.toFixed(2)}</p>
+                </div>
+                <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                  <p className="text-xs text-gray-500 mb-1">Ciclos vencidos</p>
+                  <p className="text-xl font-black text-red-600">{totalOverdue}</p>
+                </div>
+                <div className="bg-white border border-gray-100 rounded-2xl p-4">
+                  <p className="text-xs text-gray-500 mb-1">Lojas suspensas</p>
+                  <p className="text-xl font-black text-gray-700">{totalSuspended}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Sub-tabs + filtros */}
+            <div className="bg-white border border-gray-100 rounded-2xl p-4 mb-4">
+              <div className="flex flex-wrap gap-2 mb-3">
+                <button onClick={() => { setFinancialTab('stores'); setFinStatusFilter('all'); setFinSearch(''); }} className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${financialTab === 'stores' ? 'bg-brand-primary text-white' : 'bg-gray-100 text-gray-600'}`}>
+                  <Store size={14} className="inline mr-1.5" />Lojas ({billingCycles.length})
+                </button>
+                <button onClick={() => { setFinancialTab('couriers'); setFinStatusFilter('all'); setFinSearch(''); }} className={`px-4 py-2 rounded-xl font-bold text-sm transition-all ${financialTab === 'couriers' ? 'bg-brand-primary text-white' : 'bg-gray-100 text-gray-600'}`}>
+                  <Bike size={14} className="inline mr-1.5" />Motoboys ({courierPayments.length})
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 items-center">
+                <div className="relative flex-1 min-w-[180px]">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <input value={finSearch} onChange={e => setFinSearch(e.target.value)} placeholder={financialTab === 'stores' ? 'Buscar loja ou nº ciclo...' : 'Buscar motoboy...'} className="w-full pl-8 pr-3 py-2 text-sm border border-gray-200 rounded-xl outline-none focus:border-brand-primary" />
+                </div>
+                {financialTab === 'stores' ? (
+                  ['all','open','charged','paid','overdue'].map(s => (
+                    <button key={s} onClick={() => setFinStatusFilter(s)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${finStatusFilter === s ? 'bg-brand-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                      {{ all:'Todos', open:'Em aberto', charged:'Aguardando', paid:'Pagos', overdue:'Vencidos' }[s]}
+                    </button>
+                  ))
+                ) : (
+                  ['all','pending','paid'].map(s => (
+                    <button key={s} onClick={() => setFinStatusFilter(s)} className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${finStatusFilter === s ? 'bg-brand-primary text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                      {{ all:'Todos', pending:'Pendentes', paid:'Pagos' }[s]}
+                    </button>
+                  ))
+                )}
+              </div>
             </div>
 
             {financialLoading ? (
               <div className="flex justify-center py-20"><Loader2 className="animate-spin text-brand-primary" size={32} /></div>
             ) : financialTab === 'stores' ? (
-              <div className="space-y-4">
-                {billingCycles.length === 0 ? (
-                  <div className="bg-white rounded-2xl p-12 text-center text-gray-400">
-                    <TrendingUp size={40} className="mx-auto mb-3 opacity-30" />
-                    <p>Nenhum ciclo de cobrança encontrado.</p>
-                    <p className="text-sm mt-1">Os ciclos são gerados automaticamente todo dia às 02:00.</p>
+              <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
+                {filteredCycles.length === 0 ? (
+                  <div className="p-12 text-center text-gray-400">
+                    <TrendingUp size={36} className="mx-auto mb-3 opacity-30" />
+                    <p className="font-medium">Nenhum ciclo encontrado</p>
                   </div>
-                ) : billingCycles.map(cycle => {
-                  const isOverdue = cycle.status === 'charged' && cycle.due_date && new Date(cycle.due_date) < new Date();
-                  const statusColors: Record<string, string> = {
-                    open: 'bg-blue-100 text-blue-700',
-                    charged: isOverdue ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700',
-                    paid: 'bg-green-100 text-green-700',
-                    overdue: 'bg-red-100 text-red-700',
-                    suspended: 'bg-gray-100 text-gray-700',
-                  };
-                  const statusLabels: Record<string, string> = {
-                    open: 'Em aberto',
-                    charged: isOverdue ? 'VENCIDO' : 'Aguardando pagamento',
-                    paid: 'Pago ✓',
-                    overdue: 'Inadimplente',
-                    suspended: 'Suspenso',
-                  };
-                  return (
-                    <div key={cycle.id} className={`bg-white rounded-2xl shadow-sm border ${isOverdue || cycle.status === 'overdue' ? 'border-red-200' : 'border-gray-100'} p-5`}>
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                          {cycle.stores?.logo_url ? (
-                            <img src={cycle.stores.logo_url} className="w-10 h-10 rounded-xl object-cover" />
-                          ) : (
-                            <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center"><Store size={18} className="text-gray-400" /></div>
-                          )}
-                          <div>
-                            <p className="font-bold text-gray-800">{cycle.stores?.name || 'Loja'}</p>
-                            <p className="text-xs text-gray-400 flex items-center gap-1">
-                              <Calendar size={11} />
-                              {new Date(cycle.period_start).toLocaleDateString('pt-BR')} até {new Date(cycle.period_end).toLocaleDateString('pt-BR')}
-                            </p>
-                          </div>
-                        </div>
-                        <span className={`text-xs font-bold px-3 py-1 rounded-full ${statusColors[cycle.status] || 'bg-gray-100 text-gray-600'}`}>
-                          {statusLabels[cycle.status] || cycle.status}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                        <div className="bg-gray-50 rounded-xl p-3">
-                          <p className="text-xs text-gray-500 mb-1">Total Pedidos</p>
-                          <p className="font-black text-gray-800">R$ {Number(cycle.total_orders_amount).toFixed(2)}</p>
-                        </div>
-                        <div className="bg-blue-50 rounded-xl p-3">
-                          <p className="text-xs text-blue-600 mb-1">Comissão 4%</p>
-                          <p className="font-black text-blue-700">R$ {Number(cycle.platform_commission).toFixed(2)}</p>
-                        </div>
-                        <div className="bg-orange-50 rounded-xl p-3">
-                          <p className="text-xs text-orange-600 mb-1">Taxa Entregas</p>
-                          <p className="font-black text-orange-700">R$ {Number(cycle.delivery_fees_amount).toFixed(2)}</p>
-                        </div>
-                        <div className="bg-green-50 rounded-xl p-3">
-                          <p className="text-xs text-green-600 mb-1">Total a Cobrar</p>
-                          <p className="font-black text-green-700 text-lg">R$ {Number(cycle.total_due).toFixed(2)}</p>
-                        </div>
-                      </div>
-
-                      {cycle.due_date && cycle.status === 'charged' && (
-                        <p className={`text-xs font-bold mb-3 flex items-center gap-1 ${isOverdue ? 'text-red-600' : 'text-yellow-600'}`}>
-                          <Clock size={12} />
-                          {isOverdue ? 'VENCIDO em' : 'Vence em'} {new Date(cycle.due_date).toLocaleDateString('pt-BR')}
-                        </p>
-                      )}
-
-                      <div className="flex flex-wrap gap-2">
-                        {cycle.status === 'open' && (
-                          <button onClick={() => handleMarkCharged(cycle.id)} className="px-4 py-2 bg-yellow-500 text-white rounded-xl font-bold text-sm hover:bg-yellow-600 flex items-center gap-1">
-                            <DollarSign size={14} /> Marcar como Cobrado
-                          </button>
-                        )}
-                        {(cycle.status === 'charged' || cycle.status === 'overdue') && (
-                          <button onClick={() => handleMarkPaid(cycle.id)} className="px-4 py-2 bg-green-500 text-white rounded-xl font-bold text-sm hover:bg-green-600 flex items-center gap-1">
-                            <CheckCircle size={14} /> Confirmar Pagamento
-                          </button>
-                        )}
-                        {(isOverdue || cycle.status === 'overdue') && !cycle.stores?.is_suspended && (
-                          <button onClick={() => handleSuspendStore(cycle.id, cycle.store_id)} className="px-4 py-2 bg-red-500 text-white rounded-xl font-bold text-sm hover:bg-red-600 flex items-center gap-1">
-                            <Ban size={14} /> Suspender Loja
-                          </button>
-                        )}
-                        {cycle.stores?.is_suspended && (
-                          <button onClick={() => handleUnsuspendStore(cycle.store_id)} className="px-4 py-2 bg-gray-600 text-white rounded-xl font-bold text-sm hover:bg-gray-700 flex items-center gap-1">
-                            <CheckCircle size={14} /> Reativar Loja
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-xs text-gray-500 uppercase tracking-wide">
+                        <th className="text-left px-4 py-3 font-semibold">Ciclo</th>
+                        <th className="text-left px-4 py-3 font-semibold">Loja</th>
+                        <th className="text-left px-4 py-3 font-semibold hidden md:table-cell">Período</th>
+                        <th className="text-right px-4 py-3 font-semibold hidden md:table-cell">Pedidos</th>
+                        <th className="text-right px-4 py-3 font-semibold hidden md:table-cell">Comissão</th>
+                        <th className="text-right px-4 py-3 font-semibold">Total</th>
+                        <th className="text-center px-4 py-3 font-semibold">Status</th>
+                        <th className="px-4 py-3 font-semibold">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredCycles.map((cycle, idx) => {
+                        const isOv = cycleIsOverdue(cycle);
+                        return (
+                          <tr key={cycle.id} onClick={() => openFinStoreModal(cycle)} className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors ${idx % 2 === 0 ? '' : 'bg-gray-50/40'}`}>
+                            <td className="px-4 py-3">
+                              <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-gray-100 text-xs font-black text-gray-600">#{cycleNumbers[cycle.id]}</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                {cycle.stores?.logo_url
+                                  ? <img src={cycle.stores.logo_url} className="w-7 h-7 rounded-lg object-cover flex-shrink-0" />
+                                  : <div className="w-7 h-7 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0"><Store size={13} className="text-gray-400" /></div>
+                                }
+                                <div>
+                                  <span className="font-semibold text-gray-800">{cycle.stores?.name || '—'}</span>
+                                  {cycle.stores?.is_suspended && <span className="ml-1.5 text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-md font-bold">Suspensa</span>}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-gray-500 text-xs hidden md:table-cell whitespace-nowrap">
+                              {new Date(cycle.period_start).toLocaleDateString('pt-BR')} – {new Date(cycle.period_end).toLocaleDateString('pt-BR')}
+                            </td>
+                            <td className="px-4 py-3 text-right text-gray-700 hidden md:table-cell">R$ {Number(cycle.total_orders_amount).toFixed(2)}</td>
+                            <td className="px-4 py-3 text-right text-blue-600 font-medium hidden md:table-cell">R$ {Number(cycle.platform_commission).toFixed(2)}</td>
+                            <td className="px-4 py-3 text-right font-black text-gray-800">R$ {Number(cycle.total_due).toFixed(2)}</td>
+                            <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                              <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${storeStatusCls(cycle)}`}>{storeStatusLabel(cycle)}</span>
+                              {isOv && cycle.due_date && (
+                                <p className="text-xs text-red-500 mt-0.5 whitespace-nowrap">Venceu {new Date(cycle.due_date).toLocaleDateString('pt-BR')}</p>
+                              )}
+                            </td>
+                            <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                              <div className="flex gap-1.5 flex-wrap">
+                                {cycle.status === 'open' && (
+                                  <button onClick={() => handleMarkCharged(cycle.id)} className="px-2.5 py-1.5 bg-yellow-500 text-white rounded-lg font-bold text-xs hover:bg-yellow-600 whitespace-nowrap">Cobrar</button>
+                                )}
+                                {(cycle.status === 'charged' || cycle.status === 'overdue') && (
+                                  <button onClick={() => handleMarkPaid(cycle.id)} className="px-2.5 py-1.5 bg-green-500 text-white rounded-lg font-bold text-xs hover:bg-green-600 whitespace-nowrap">Confirmar</button>
+                                )}
+                                {(isOv || cycle.status === 'overdue') && !cycle.stores?.is_suspended && (
+                                  <button onClick={() => handleSuspendStore(cycle.id, cycle.store_id)} className="px-2.5 py-1.5 bg-red-500 text-white rounded-lg font-bold text-xs hover:bg-red-600 whitespace-nowrap">Suspender</button>
+                                )}
+                                {cycle.stores?.is_suspended && (
+                                  <button onClick={() => handleUnsuspendStore(cycle.store_id)} className="px-2.5 py-1.5 bg-gray-500 text-white rounded-lg font-bold text-xs hover:bg-gray-600 whitespace-nowrap">Reativar</button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
             ) : (
-              <div className="space-y-4">
-                {courierPayments.length === 0 ? (
-                  <div className="bg-white rounded-2xl p-12 text-center text-gray-400">
-                    <Bike size={40} className="mx-auto mb-3 opacity-30" />
-                    <p>Nenhum pagamento de motoboy encontrado.</p>
+              <div className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
+                {filteredPayments.length === 0 ? (
+                  <div className="p-12 text-center text-gray-400">
+                    <Bike size={36} className="mx-auto mb-3 opacity-30" />
+                    <p className="font-medium">Nenhum pagamento encontrado</p>
                   </div>
-                ) : courierPayments.map(payment => (
-                  <div key={payment.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 flex items-center justify-between">
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-100 text-xs text-gray-500 uppercase tracking-wide">
+                        <th className="text-left px-4 py-3 font-semibold">Motoboy</th>
+                        <th className="text-left px-4 py-3 font-semibold hidden md:table-cell">Semana</th>
+                        <th className="text-right px-4 py-3 font-semibold hidden md:table-cell">Entregas</th>
+                        <th className="text-right px-4 py-3 font-semibold">Total</th>
+                        <th className="text-center px-4 py-3 font-semibold">Status</th>
+                        <th className="px-4 py-3 font-semibold">Ação</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredPayments.map((payment, idx) => (
+                        <tr key={payment.id} onClick={() => openFinCourierModal(payment)} className={`border-b border-gray-50 hover:bg-gray-50 cursor-pointer transition-colors ${idx % 2 === 0 ? '' : 'bg-gray-50/40'}`}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              {payment.couriers?.users?.avatar_url
+                                ? <img src={payment.couriers.users.avatar_url} className="w-7 h-7 rounded-full object-cover" />
+                                : <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center"><Bike size={13} className="text-gray-400" /></div>
+                              }
+                              <span className="font-semibold text-gray-800">{payment.couriers?.users?.name || 'Motoboy'}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-gray-500 text-xs hidden md:table-cell whitespace-nowrap">
+                            {new Date(payment.week_start).toLocaleDateString('pt-BR')} – {new Date(payment.week_end).toLocaleDateString('pt-BR')}
+                          </td>
+                          <td className="px-4 py-3 text-right text-gray-700 hidden md:table-cell">{payment.total_deliveries}</td>
+                          <td className="px-4 py-3 text-right font-black text-brand-primary">R$ {Number(payment.total_amount).toFixed(2)}</td>
+                          <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
+                            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${payment.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                              {payment.status === 'paid' ? 'Pago ✓' : 'Pendente'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                            {payment.status === 'pending' && (
+                              <button onClick={() => handleMarkCourierPaid(payment.id)} className="px-2.5 py-1.5 bg-brand-primary text-white rounded-lg font-bold text-xs hover:bg-green-600 whitespace-nowrap">Marcar pago</button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            {/* ── Modal Loja ── */}
+            {finStoreModal && (
+              <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setFinStoreModal(null)}>
+                <div className="bg-white rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between p-5 border-b border-gray-100">
                     <div className="flex items-center gap-3">
-                      {payment.couriers?.users?.avatar_url ? (
-                        <img src={payment.couriers.users.avatar_url} className="w-10 h-10 rounded-full object-cover" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"><Bike size={18} className="text-gray-400" /></div>
-                      )}
+                      {finStoreModal.stores?.logo_url
+                        ? <img src={finStoreModal.stores.logo_url} className="w-10 h-10 rounded-xl object-cover" />
+                        : <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center"><Store size={18} className="text-gray-400" /></div>
+                      }
                       <div>
-                        <p className="font-bold text-gray-800">{payment.couriers?.users?.name || 'Motoboy'}</p>
-                        <p className="text-xs text-gray-400">
-                          {new Date(payment.week_start).toLocaleDateString('pt-BR')} até {new Date(payment.week_end).toLocaleDateString('pt-BR')}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-0.5">{payment.total_deliveries} entrega{payment.total_deliveries !== 1 ? 's' : ''}</p>
+                        <h3 className="font-black text-gray-800 text-lg">{finStoreModal.stores?.name || 'Loja'}</h3>
+                        <p className="text-xs text-gray-400">Ciclo #{cycleNumbers[finStoreModal.id]}</p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="font-black text-xl text-brand-primary">R$ {Number(payment.total_amount).toFixed(2)}</p>
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${payment.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                          {payment.status === 'paid' ? 'Pago ✓' : 'Pendente'}
-                        </span>
-                      </div>
-                      {payment.status === 'pending' && (
-                        <button onClick={() => handleMarkCourierPaid(payment.id)} className="px-4 py-2 bg-brand-primary text-white rounded-xl font-bold text-sm hover:bg-green-600 flex items-center gap-1">
-                          <CheckCircle size={14} /> Marcar Pago
-                        </button>
-                      )}
-                    </div>
+                    <button onClick={() => setFinStoreModal(null)} className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center"><X size={18} /></button>
                   </div>
-                ))}
+                  {/* Dados cadastrais */}
+                  {(() => {
+                    const storeData = stores.find(s => s.id === finStoreModal.store_id);
+                    return storeData ? (
+                      <div className="p-5 border-b border-gray-100">
+                        <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Dados cadastrais</p>
+                        <div className="space-y-2 text-sm">
+                          {storeData.users?.name && <div className="flex justify-between"><span className="text-gray-500">Responsável</span><span className="font-medium text-gray-800">{storeData.users.name}</span></div>}
+                          {storeData.users?.email && <div className="flex justify-between"><span className="text-gray-500">E-mail</span><span className="font-medium text-gray-800">{storeData.users.email}</span></div>}
+                          {storeData.users?.phone && <div className="flex justify-between"><span className="text-gray-500">Telefone</span><span className="font-medium text-gray-800">{storeData.users.phone}</span></div>}
+                          {storeData.cnpj && <div className="flex justify-between"><span className="text-gray-500">CNPJ</span><span className="font-medium text-gray-800">{storeData.cnpj}</span></div>}
+                          {storeData.addresses?.[0] && (
+                            <div className="flex justify-between">
+                              <span className="text-gray-500">Endereço</span>
+                              <span className="font-medium text-gray-800 text-right max-w-[60%]">
+                                {[storeData.addresses[0].street, storeData.addresses[0].number, storeData.addresses[0].neighborhood, storeData.addresses[0].city].filter(Boolean).join(', ')}
+                              </span>
+                            </div>
+                          )}
+                          <div className="flex justify-between">
+                            <span className="text-gray-500">Status da loja</span>
+                            <span className={`font-bold text-xs px-2 py-0.5 rounded-full ${storeData.is_suspended ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
+                              {storeData.is_suspended ? 'Suspensa' : 'Ativa'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
+                  {/* Histórico de ciclos */}
+                  <div className="p-5">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Histórico de ciclos</p>
+                    {finStoreModalLoading ? (
+                      <div className="flex justify-center py-6"><Loader2 size={20} className="animate-spin text-brand-primary" /></div>
+                    ) : finStoreHistory.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-4">Nenhum histórico.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {finStoreHistory.map((h, i) => {
+                          const isOvH = h.status === 'charged' && h.due_date && new Date(h.due_date) < new Date();
+                          return (
+                            <div key={h.id} className={`flex items-center justify-between rounded-xl p-3 text-sm ${h.id === finStoreModal.id ? 'bg-brand-primary/10 border border-brand-primary/20' : 'bg-gray-50'}`}>
+                              <div>
+                                <span className="text-xs font-black text-gray-500 mr-2">#{finStoreHistory.length - i}</span>
+                                <span className="text-gray-700">{new Date(h.period_start).toLocaleDateString('pt-BR')} – {new Date(h.period_end).toLocaleDateString('pt-BR')}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-gray-800">R$ {Number(h.total_due).toFixed(2)}</span>
+                                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isOvH || h.status === 'overdue' ? 'bg-red-100 text-red-600' : h.status === 'paid' ? 'bg-green-100 text-green-700' : h.status === 'charged' ? 'bg-yellow-100 text-yellow-700' : 'bg-blue-100 text-blue-600'}`}>
+                                  {isOvH ? 'Vencido' : { open:'Aberto', charged:'Aguardando', paid:'Pago', overdue:'Inadimplente', suspended:'Suspenso' }[h.status as string] ?? h.status}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Modal Motoboy ── */}
+            {finCourierModal && (
+              <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setFinCourierModal(null)}>
+                <div className="bg-white rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                    <div className="flex items-center gap-3">
+                      {finCourierModal.couriers?.users?.avatar_url
+                        ? <img src={finCourierModal.couriers.users.avatar_url} className="w-10 h-10 rounded-full object-cover" />
+                        : <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"><Bike size={18} className="text-gray-400" /></div>
+                      }
+                      <div>
+                        <h3 className="font-black text-gray-800 text-lg">{finCourierModal.couriers?.users?.name || 'Motoboy'}</h3>
+                        <p className="text-xs text-gray-400">Semana {new Date(finCourierModal.week_start).toLocaleDateString('pt-BR')} – {new Date(finCourierModal.week_end).toLocaleDateString('pt-BR')}</p>
+                      </div>
+                    </div>
+                    <button onClick={() => setFinCourierModal(null)} className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center"><X size={18} /></button>
+                  </div>
+                  {/* Dados pessoais */}
+                  {(() => {
+                    const courierData = couriers.find(c => c.id === finCourierModal.courier_id);
+                    return courierData ? (
+                      <div className="p-5 border-b border-gray-100">
+                        <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Dados pessoais</p>
+                        <div className="space-y-2 text-sm">
+                          {courierData.users?.name && <div className="flex justify-between"><span className="text-gray-500">Nome</span><span className="font-medium text-gray-800">{courierData.users.name}</span></div>}
+                          {courierData.users?.email && <div className="flex justify-between"><span className="text-gray-500">E-mail</span><span className="font-medium text-gray-800">{courierData.users.email}</span></div>}
+                          {courierData.users?.phone && <div className="flex justify-between"><span className="text-gray-500">Telefone</span><span className="font-medium text-gray-800">{courierData.users.phone}</span></div>}
+                          {courierData.cpf && <div className="flex justify-between"><span className="text-gray-500">CPF</span><span className="font-medium text-gray-800">{courierData.cpf}</span></div>}
+                          {courierData.vehicle_type && <div className="flex justify-between"><span className="text-gray-500">Veículo</span><span className="font-medium text-gray-800 capitalize">{courierData.vehicle_type}</span></div>}
+                          {courierData.vehicle_plate && <div className="flex justify-between"><span className="text-gray-500">Placa</span><span className="font-medium text-gray-800">{courierData.vehicle_plate}</span></div>}
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
+                  {/* Corridas do ciclo atual */}
+                  <div className="p-5 border-b border-gray-100">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Corridas neste ciclo ({finCourierModal.total_deliveries})</p>
+                    {finCourierModalLoading ? (
+                      <div className="flex justify-center py-4"><Loader2 size={20} className="animate-spin text-brand-primary" /></div>
+                    ) : finCourierDeliveries.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-3">Nenhuma corrida registrada.</p>
+                    ) : (
+                      <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                        {finCourierDeliveries.filter(d => {
+                          const date = new Date(d.created_at ?? d.orders?.created_at);
+                          return date >= new Date(finCourierModal.week_start) && date <= new Date(finCourierModal.week_end);
+                        }).map((d, i) => (
+                          <div key={d.id ?? i} className="flex items-center justify-between text-sm bg-gray-50 rounded-lg px-3 py-2">
+                            <div>
+                              <span className="font-medium text-gray-700">{d.orders?.stores?.name || 'Loja'}</span>
+                              <span className="text-xs text-gray-400 ml-2">{d.created_at ? new Date(d.created_at).toLocaleDateString('pt-BR') : ''}</span>
+                            </div>
+                            <span className="font-bold text-brand-primary text-xs">R$ {Number(d.courier_earning ?? 0).toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {/* Histórico de pagamentos */}
+                  <div className="p-5">
+                    <p className="text-xs font-bold text-gray-500 uppercase tracking-wide mb-3">Histórico de pagamentos</p>
+                    {finCourierHistory.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-3">Nenhum histórico.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {finCourierHistory.map(h => (
+                          <div key={h.id} className={`flex items-center justify-between rounded-xl p-3 text-sm ${h.id === finCourierModal.id ? 'bg-brand-primary/10 border border-brand-primary/20' : 'bg-gray-50'}`}>
+                            <div>
+                              <span className="text-gray-600">{new Date(h.week_start).toLocaleDateString('pt-BR')} – {new Date(h.week_end).toLocaleDateString('pt-BR')}</span>
+                              <span className="text-xs text-gray-400 ml-2">{h.total_deliveries} entregas</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-gray-800">R$ {Number(h.total_amount).toFixed(2)}</span>
+                              <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${h.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                                {h.status === 'paid' ? 'Pago' : 'Pendente'}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>
-        )}
+          );
+        })()}
 
         {activeTab === 'repasses' && (
           <div className="max-w-6xl mx-auto">
