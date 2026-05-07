@@ -252,6 +252,19 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     };
   }, [courier?.is_online]);
 
+  // Quando app volta ao foreground (usuario tocou na notificacao), busca corridas imediatamente
+  useEffect(() => {
+    if (!courier?.is_online) return;
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        setTimeout(checkPendingOffers, 300);
+        setTimeout(checkPendingOffers, 1500);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [courier?.is_online]);
+
   const toggleOnline = async () => {
     if (!courier) return;
 
