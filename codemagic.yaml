@@ -73,7 +73,7 @@ workflows:
         script: |
           PLIST="ios/App/App/Info.plist"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.8" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 2.0" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :ITSAppUsesNonExemptEncryption bool false" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Set :ITSAppUsesNonExemptEncryption false" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Tá Na Mão" "$PLIST" 2>/dev/null || \
@@ -88,6 +88,22 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :NSLocationWhenInUseUsageDescription string 'Precisamos da sua localização para rastrear entregas em tempo real'" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :NSLocationAlwaysAndWhenInUseUsageDescription 'Precisamos da sua localização em segundo plano para rastreamento contínuo das entregas'" "$PLIST" 2>/dev/null || \
           /usr/libexec/PlistBuddy -c "Add :NSLocationAlwaysAndWhenInUseUsageDescription string 'Precisamos da sua localização em segundo plano para rastreamento contínuo das entregas'" "$PLIST"
+      - name: Set up APNs entitlements for production push notifications
+        script: |
+          ENTITLEMENTS_PATH="ios/App/App/App.entitlements"
+          mkdir -p ios/App/App
+          cat > "$ENTITLEMENTS_PATH" << 'ENTEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>aps-environment</key>
+              <string>production</string>
+          </dict>
+          </plist>
+          ENTEOF
+          echo "Entitlements criado em $ENTITLEMENTS_PATH"
+          cat "$ENTITLEMENTS_PATH"
       - name: Set up code signing settings on Xcode project
         script: |
           xcode-project use-profiles
