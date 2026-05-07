@@ -206,22 +206,22 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         return;
       }
 
-      if (true) {
+      // Só mostra oferta se motoboy está online
+      if (!courierRef.current?.is_online) return;
 
-        const hydratedOrder = await hydrateDeliveryOrder(delivery);
+      const hydratedOrder = await hydrateDeliveryOrder(delivery);
 
-        if (hydratedOrder && deliveryStateRef.current === 'none') {
-          setDeliveryState('offered');
-          
-          let timeLeft = 60 - Math.floor(elapsed / 1000);
-          if (timeLeft < 1 || timeLeft > 60) timeLeft = 60;
-          setAcceptTimer(timeLeft);
+      if (hydratedOrder && deliveryStateRef.current === 'none') {
+        setDeliveryState('offered');
+        
+        let timeLeft = 60 - Math.floor(elapsed / 1000);
+        if (timeLeft < 1 || timeLeft > 60) timeLeft = 60;
+        setAcceptTimer(timeLeft);
 
-          await sendNotification('🏍️ Nova Corrida Disponível!', {
-            body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${hydratedOrder.stores?.name}. Aceite rápido!`,
-          });
-          navigator.vibrate?.([300, 100, 300, 100, 300]);
-        }
+        await sendNotification('🏍️ Nova Corrida Disponível!', {
+          body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${hydratedOrder.stores?.name}. Aceite rápido!`,
+        });
+        navigator.vibrate?.([300, 100, 300, 100, 300]);
       }
     } catch (err) {
       console.error('Erro ao buscar ofertas:', err);
@@ -308,10 +308,10 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
     const refreshCourierWork = () => {
       restoreActiveDelivery();
-      if (courierRef.current?.is_online) {
-        setTimeout(checkPendingOffers, 300);
-        setTimeout(checkPendingOffers, 1500);
-      }
+      // Sempre tenta buscar ofertas ao receber push ou voltar ao foreground,
+      // independente do estado cached de is_online (pode estar desatualizado)
+      setTimeout(checkPendingOffers, 300);
+      setTimeout(checkPendingOffers, 1500);
     };
 
     const handleVisibilityChange = () => {
@@ -483,14 +483,37 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     if (deliveryState === 'offered' && acceptTimer > 0) {
       interval = setInterval(() => setAcceptTimer(prev => prev - 1), 1000);
     } else if (deliveryState === 'offered' && acceptTimer <= 0) {
-      showToast('Tempo esgotado.', 'warning');
-      // Cancela a oferta no banco para não travar outros motoboys
+      showToast('Tempo esgotado. Repassando para outro motoboy...', 'warning');
+      // Cancela oferta atual e cria nova para outro motoboy pegar
       if (activeDelivery?.id) {
+        const orderId = activeDelivery.order_id;
+        const courierEarning = activeDelivery.courier_earning;
         supabase.from('deliveries')
           .update({ status: 'cancelled' })
           .eq('id', activeDelivery.id)
           .eq('status', 'offered')
-          .then(() => {});
+          .then(async () => {
+            // Cria nova oferta aberta para qualquer motoboy
+            await supabase.from('deliveries').insert({
+              order_id: orderId,
+              status: 'offered',
+              courier_id: null,
+              courier_earning: courierEarning,
+            });
+            // Renotifica motoboys disponíveis
+            try {
+              await supabase.functions.invoke('send-push', {
+                body: {
+                  title: '🏍️ Nova Corrida Disponível!',
+                  body: `Ganho de R$ ${courierEarning?.toFixed(2)}. Aceite rápido!`,
+                  data: { type: 'delivery_offer', orderId },
+                  targetType: 'couriers',
+                }
+              });
+            } catch (e) {
+              console.warn('Erro ao renotificar motoboys:', e);
+            }
+          });
       }
       setDeliveryState('none');
       setActiveDelivery(null);
