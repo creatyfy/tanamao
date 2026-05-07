@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { Toast } from '../components/Toast';
-import { usePushNotifications } from '../hooks/usePushNotifications';
+import { PUSH_NOTIFICATION_EVENT, usePushNotifications } from '../hooks/usePushNotifications';
 import { Power, MapPin, DollarSign, Navigation, CheckCircle, User, Store, Loader2, LogOut, AlertTriangle, CreditCard, Banknote, Bike, FileText, BellRing, Map, Trash2 } from 'lucide-react';
 
 // Helper — detecta se está rodando dentro do app Capacitor nativo
@@ -128,6 +128,56 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     }
   };
 
+
+  const deliveryUiStateByStatus = (status: string) => {
+    if (status === 'going_to_store') return 'going_to_store';
+    if (status === 'at_store') return 'at_store';
+    if (status === 'delivering') return 'going_to_client';
+    return status;
+  };
+
+  const hydrateDeliveryOrder = async (delivery: any) => {
+    const { data: order, error } = await supabase
+      .from('orders')
+      .select('*, stores(name, addresses(*)), addresses(*), users:client_id(name, phone), order_items(*)')
+      .eq('id', delivery.order_id)
+      .maybeSingle();
+
+    if (error || !order) {
+      console.warn('Erro ao carregar pedido da corrida:', error);
+      return null;
+    }
+
+    setActiveDelivery({ ...delivery, order });
+    return order;
+  };
+
+  const restoreActiveDelivery = async () => {
+    const currentCourier = courierRef.current;
+    if (!currentCourier?.id || deliveryStateRef.current !== 'none') return;
+
+    const { data: delivery, error } = await supabase
+      .from('deliveries')
+      .select('*')
+      .eq('courier_id', currentCourier.id)
+      .in('status', ['going_to_store', 'at_store', 'delivering'])
+      .order('accepted_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('Erro ao restaurar corrida ativa:', error);
+      return;
+    }
+    if (!delivery) return;
+
+    const hydratedOrder = await hydrateDeliveryOrder(delivery);
+    if (hydratedOrder) {
+      setDeliveryState(deliveryUiStateByStatus(delivery.status));
+      setActiveTab('home');
+    }
+  };
+
   // POLING DE CORRIDAS PENDENTES
   const checkPendingOffers = async () => {
     if (deliveryStateRef.current !== 'none') return;
@@ -158,14 +208,9 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
       if (true) {
 
-        const { data: order } = await supabase
-          .from('orders')
-          .select('*, stores(name, addresses(*)), addresses(*), users:client_id(name, phone), order_items(*)')
-          .eq('id', delivery.order_id)
-          .maybeSingle();
+        const hydratedOrder = await hydrateDeliveryOrder(delivery);
 
-        if (order && deliveryStateRef.current === 'none') {
-          setActiveDelivery({ ...delivery, order });
+        if (hydratedOrder && deliveryStateRef.current === 'none') {
           setDeliveryState('offered');
           
           let timeLeft = 60 - Math.floor(elapsed / 1000);
@@ -173,7 +218,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           setAcceptTimer(timeLeft);
 
           await sendNotification('🏍️ Nova Corrida Disponível!', {
-            body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${order.stores?.name}. Aceite rápido!`,
+            body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${hydratedOrder.stores?.name}. Aceite rápido!`,
           });
           navigator.vibrate?.([300, 100, 300, 100, 300]);
         }
@@ -211,6 +256,11 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     }
     return () => clearInterval(interval);
   }, [courier?.is_online, deliveryState]);
+
+  useEffect(() => {
+    if (!courier?.id) return;
+    restoreActiveDelivery();
+  }, [courier?.id]);
 
   const subscribeToDeliveries = (courierId: number) => {
     const channel = supabase.channel(`courier_offers_${courierId}_${Date.now()}`)
@@ -254,16 +304,30 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
   // Quando app volta ao foreground (usuario tocou na notificacao), busca corridas imediatamente
   useEffect(() => {
-    if (!courier?.is_online) return;
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+    if (!courier?.id) return;
+
+    const refreshCourierWork = () => {
+      restoreActiveDelivery();
+      if (courierRef.current?.is_online) {
         setTimeout(checkPendingOffers, 300);
         setTimeout(checkPendingOffers, 1500);
       }
     };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') refreshCourierWork();
+    };
+
+    window.addEventListener(PUSH_NOTIFICATION_EVENT, refreshCourierWork);
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [courier?.is_online]);
+    window.addEventListener('focus', refreshCourierWork);
+
+    return () => {
+      window.removeEventListener(PUSH_NOTIFICATION_EVENT, refreshCourierWork);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', refreshCourierWork);
+    };
+  }, [courier?.id]);
 
   const toggleOnline = async () => {
     if (!courier) return;
@@ -555,6 +619,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         await notifyClient(clientId, '🏍️ Motoboy a caminho!', 'Um motoboy aceitou seu pedido e está indo buscar.');
       }
 
+      setActiveDelivery((prev: any) => ({ ...prev, ...updated }));
       setDeliveryState('going_to_store');
       showToast('Corrida aceita! Siga para a loja.');
     } catch (e: any) {
