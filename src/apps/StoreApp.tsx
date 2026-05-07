@@ -60,12 +60,17 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const showToast = (message: string, type: 'success' | 'error' | 'warning' = 'success') => setToast({ message, type });
   const audioLoopRef = React.useRef<boolean>(false);
   const audioLoopTimeoutRef = React.useRef<number | null>(null);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
 
   const stopNotificationSound = () => {
     audioLoopRef.current = false;
     if (audioLoopTimeoutRef.current) {
       clearTimeout(audioLoopTimeoutRef.current);
       audioLoopTimeoutRef.current = null;
+    }
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
     }
   };
 
@@ -76,28 +81,48 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     const playLoop = () => {
       if (!audioLoopRef.current) return;
       try {
-        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-        const playDing = (freq: number, startTime: number) => {
-          const osc = audioCtx.createOscillator();
-          const gain = audioCtx.createGain();
-          osc.connect(gain);
-          gain.connect(audioCtx.destination);
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(freq, startTime);
-          osc.frequency.exponentialRampToValueAtTime(freq * 0.95, startTime + 0.3);
-          gain.gain.setValueAtTime(0, startTime);
-          gain.gain.linearRampToValueAtTime(0.8, startTime + 0.01);
-          gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.8);
-          osc.start(startTime);
-          osc.stop(startTime + 0.8);
-        };
-        const t = audioCtx.currentTime;
-        playDing(1200, t);
-        playDing(900, t + 0.35);
-        playDing(1200, t + 0.7);
-        playDing(900, t + 1.05);
+        // Beep em base64 — funciona em webview Capacitor sem precisar de arquivo externo
+        if (!audioRef.current) {
+          audioRef.current = new Audio(
+            'data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU' +
+            'dvT18AAAAAAAAAAAAAAP//AgAFAAoADgASABUAGAAaABsAGwAaABgAFQASAA4ACgAFAAIA' +
+            'AAD//wIA/f/7//j/9v/0//P/8v/x//H/8v/z//T/9v/4//v//f8AAAIABQAIAAMA'
+          );
+        }
+        audioRef.current.loop = false;
+        audioRef.current.volume = 1.0;
+        audioRef.current.currentTime = 0;
+        audioRef.current.play().catch(() => {
+          // Fallback para AudioContext se o Audio element falhar
+          try {
+            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const playDing = (freq: number, startTime: number) => {
+              const osc = audioCtx.createOscillator();
+              const gain = audioCtx.createGain();
+              osc.connect(gain);
+              gain.connect(audioCtx.destination);
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(freq, startTime);
+              gain.gain.setValueAtTime(0, startTime);
+              gain.gain.linearRampToValueAtTime(0.8, startTime + 0.01);
+              gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.8);
+              osc.start(startTime);
+              osc.stop(startTime + 0.8);
+            };
+            const t = audioCtx.currentTime;
+            playDing(1200, t);
+            playDing(900, t + 0.35);
+            playDing(1200, t + 0.7);
+            playDing(900, t + 1.05);
+            audioLoopTimeoutRef.current = window.setTimeout(() => {
+              audioCtx.close();
+            }, 1500);
+          } catch (e) {
+            console.warn('Audio não suportado:', e);
+          }
+        });
+        // Repete a cada 3 segundos enquanto audioLoopRef for true
         audioLoopTimeoutRef.current = window.setTimeout(() => {
-          audioCtx.close();
           playLoop();
         }, 3000);
       } catch (e) {
@@ -523,12 +548,25 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
   const fetchOrders = async (storeId: number) => {
     const { data, error } = await supabase.from('orders')
-      .select(`*, users:client_id(name, phone), order_items(*, order_item_selections(*)), addresses:delivery_address_id(*), order_chats(*), couriers(users(name, phone), vehicle_type, license_plate), deliveries(id, status, created_at)`)
+      .select(`*, users:client_id(name, phone), order_items(*, order_item_selections(*)), addresses:delivery_address_id(*), order_chats(*), couriers(users(name, phone), vehicle_type, license_plate), deliveries(id, status, created_at, order_id)`)
       .eq('store_id', storeId)
       .in('status', ['pending', 'preparing', 'ready', 'delivering'])
       .order('created_at', { ascending: false });
     if (error) { console.warn(`orders(store_id=${storeId}):`, error.message); return; }
-    if (data) setOrders(data);
+    if (data) {
+      setOrders(data);
+      // Limpa deliveries expiradas (>65s sem aceite) para nao travar pedidos
+      const expiredDeliveries = data.flatMap((o: any) =>
+        (o.deliveries || []).filter((d: any) =>
+          d.status === 'offered' &&
+          (Date.now() - new Date(d.created_at).getTime()) > 65000
+        )
+      );
+      for (const d of expiredDeliveries) {
+        supabase.from('deliveries').update({ status: 'cancelled' }).eq('id', d.id).eq('status', 'offered').then(() => {});
+        supabase.from('orders').update({ status: 'preparing' }).eq('id', d.order_id).then(() => {});
+      }
+    }
   };
 
   useEffect(() => {
