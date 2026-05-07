@@ -78,59 +78,44 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const playNotificationSound = () => {
     if (audioLoopRef.current) return;
     audioLoopRef.current = true;
-    
-    const playLoop = () => {
+
+    const playDing = () => {
       if (!audioLoopRef.current) return;
       try {
-        // Beep em base64 — funciona em webview Capacitor sem precisar de arquivo externo
-        if (!audioRef.current) {
-          audioRef.current = new Audio(
-            'data:audio/wav;base64,UklGRl9vT19XQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YU' +
-            'dvT18AAAAAAAAAAAAAAP//AgAFAAoADgASABUAGAAaABsAGwAaABgAFQASAA4ACgAFAAIA' +
-            'AAD//wIA/f/7//j/9v/0//P/8v/x//H/8v/z//T/9v/4//v//f8AAAIABQAIAAMA'
-          );
-        }
-        audioRef.current.loop = false;
-        audioRef.current.volume = 1.0;
-        audioRef.current.currentTime = 0;
-        audioRef.current.play().catch(() => {
-          // Fallback para AudioContext se o Audio element falhar
-          try {
-            const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-            const playDing = (freq: number, startTime: number) => {
-              const osc = audioCtx.createOscillator();
-              const gain = audioCtx.createGain();
-              osc.connect(gain);
-              gain.connect(audioCtx.destination);
-              osc.type = 'sine';
-              osc.frequency.setValueAtTime(freq, startTime);
-              gain.gain.setValueAtTime(0, startTime);
-              gain.gain.linearRampToValueAtTime(0.8, startTime + 0.01);
-              gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.8);
-              osc.start(startTime);
-              osc.stop(startTime + 0.8);
-            };
-            const t = audioCtx.currentTime;
-            playDing(1200, t);
-            playDing(900, t + 0.35);
-            playDing(1200, t + 0.7);
-            playDing(900, t + 1.05);
-            audioLoopTimeoutRef.current = window.setTimeout(() => {
-              audioCtx.close();
-            }, 1500);
-          } catch (e) {
-            console.warn('Audio não suportado:', e);
-          }
-        });
-        // Repete a cada 3 segundos enquanto audioLoopRef for true
-        audioLoopTimeoutRef.current = window.setTimeout(() => {
-          playLoop();
-        }, 3000);
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const playNote = (freq: number, start: number, duration: number) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, ctx.currentTime + start);
+          gain.gain.setValueAtTime(0, ctx.currentTime + start);
+          gain.gain.linearRampToValueAtTime(0.7, ctx.currentTime + start + 0.01);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + duration);
+          osc.start(ctx.currentTime + start);
+          osc.stop(ctx.currentTime + start + duration);
+        };
+        // Sequência: ding-dong-ding
+        playNote(1200, 0, 0.3);
+        playNote(900, 0.35, 0.3);
+        playNote(1200, 0.7, 0.4);
+        // Fecha o contexto após tocar e agenda próximo loop
+        window.setTimeout(() => {
+          try { ctx.close(); } catch(e) {}
+          // Agenda próxima repetição se ainda deve tocar
+          audioLoopTimeoutRef.current = window.setTimeout(playDing, 2500);
+        }, 1400);
       } catch (e) {
         console.warn('Audio não suportado:', e);
+        // Tenta de novo mesmo com erro
+        audioLoopTimeoutRef.current = window.setTimeout(playDing, 2500);
       }
     };
-    playLoop();
+
+    playDing();
   };
   
 
