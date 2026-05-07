@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 // Detecta se está rodando no Capacitor (app nativo)
+export const PUSH_NOTIFICATION_EVENT = 'tanamao:push-notification';
+
+const emitPushNotificationEvent = (detail: any) => {
+  window.dispatchEvent(new CustomEvent(PUSH_NOTIFICATION_EVENT, { detail }));
+};
+
 const isNative = () => {
   return typeof (window as any).Capacitor !== 'undefined' &&
     (window as any).Capacitor.isNativePlatform();
@@ -66,6 +72,7 @@ export function usePushNotifications() {
       // Toca som porque o sistema não toca automaticamente quando app está aberto
       PushNotifications.addListener('pushNotificationReceived', (notification) => {
         console.log('Push received (foreground):', notification);
+        emitPushNotificationEvent({ type: 'received', notification });
         // Toca som local quando app está aberto
         playAlertSound();
         if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 600]);
@@ -74,6 +81,7 @@ export function usePushNotifications() {
       // Listener: usuário tocou na notificação
       PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
         console.log('Push action:', action);
+        emitPushNotificationEvent({ type: 'action', action, notification: action.notification });
       });
 
     } catch (err) {

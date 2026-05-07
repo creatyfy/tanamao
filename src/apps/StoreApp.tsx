@@ -61,6 +61,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   const audioLoopRef = React.useRef<boolean>(false);
   const audioLoopTimeoutRef = React.useRef<number | null>(null);
   const audioRef = React.useRef<HTMLAudioElement | null>(null);
+  const pendingOrderIdsRef = React.useRef<Set<number>>(new Set());
 
   const stopNotificationSound = () => {
     audioLoopRef.current = false;
@@ -132,6 +133,35 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     playLoop();
   };
   
+
+  useEffect(() => {
+    const unlockNotificationAudio = () => {
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        gain.gain.setValueAtTime(0.001, ctx.currentTime);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.01);
+        window.setTimeout(() => ctx.close(), 50);
+      } catch (error) {
+        console.warn('Não foi possível desbloquear áudio:', error);
+      }
+    };
+
+    window.addEventListener('pointerdown', unlockNotificationAudio, { once: true });
+    window.addEventListener('keydown', unlockNotificationAudio, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', unlockNotificationAudio);
+      window.removeEventListener('keydown', unlockNotificationAudio);
+    };
+  }, []);
+
   const [store, setStore] = useState<Store | null>(null);
   const [orders, setOrders] = useState<any[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -375,6 +405,30 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [orders, activeChatOrderId, activeTab]);
 
+
+  useEffect(() => {
+    const pendingIds = new Set(
+      orders
+        .filter((order) => order.status === 'pending')
+        .map((order) => Number(order.id))
+    );
+
+    const hasPendingOrders = pendingIds.size > 0;
+    const hasNewPendingOrder = [...pendingIds].some((id) => !pendingOrderIdsRef.current.has(id));
+    pendingOrderIdsRef.current = pendingIds;
+
+    if (hasPendingOrders) {
+      if (hasNewPendingOrder) {
+        sendNotification('🔔 Novo Pedido Recebido!', {
+          body: 'Há pedido novo aguardando aceite ou recusa no painel da loja.',
+        });
+      }
+      playNotificationSound();
+    } else {
+      stopNotificationSound();
+    }
+  }, [orders]);
+
   const handleCourierTimeout = async (orderId: number, deliveryId: number) => {
     if (actionLoading === orderId) return;
     setActionLoading(orderId);
@@ -596,6 +650,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                   body: {
                     title: '🔔 Novo Pedido Recebido!',
                     body: `Pedido #${payload.new.id} no valor de R$ ${Number(payload.new.total).toFixed(2)}. Acesse o painel para aceitar.`,
+                    data: { type: 'new_order', orderId: payload.new.id },
                     targetType: 'specific_tokens',
                     tokens: tokenData.map((t: any) => t.token),
                   }
@@ -1026,6 +1081,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
             body: {
               title: '🏍️ Nova Corrida Disponível!',
               body: `Ganho de R$ ${courierFee.toFixed(2)}. Aceite rápido!`,
+              data: { type: 'delivery_offer', orderId },
               targetType: 'couriers',
             }
           });

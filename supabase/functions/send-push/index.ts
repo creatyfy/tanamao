@@ -56,7 +56,7 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
-    const { notificationId, title, body, targetType, targetCity, storeId } = await req.json()
+    const { notificationId, title, body, targetType, targetCity, storeId, tokens: directTokens, data } = await req.json()
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -86,6 +86,8 @@ serve(async (req) => {
         .from('push_tokens')
         .select('token')
         .in('user_id', userIds)
+    } else if (targetType === 'specific_tokens' && Array.isArray(directTokens)) {
+      query = supabase.from('push_tokens').select('token').in('token', directTokens)
     } else if (targetType === 'couriers') {
       const { data: courierUsers } = await supabase
         .from('couriers')
@@ -134,13 +136,18 @@ serve(async (req) => {
               message: {
                 token,
                 notification: { title, body },
+                data: Object.fromEntries(
+                  Object.entries(data || {}).map(([key, value]) => [key, String(value)])
+                ),
                 android: {
+                  priority: 'HIGH',
                   notification: {
                     sound: 'default',
-                    channelId: 'default',
+                    channelId: 'high_importance_channel',
                   }
                 },
                 apns: {
+                  headers: { 'apns-priority': '10' },
                   payload: {
                     aps: { sound: 'default', badge: 1 }
                   }
