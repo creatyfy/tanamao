@@ -1851,7 +1851,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
 
           {/* KANBAN PEDIDOS */}
           {activeTab === 'orders' && (
-            <div className="max-w-7xl mx-auto h-full flex flex-col">
+            <div className="max-w-7xl mx-auto h-full flex flex-col min-h-0">
               <h2 className="text-2xl font-bold text-brand-dark mb-6">Gestor de Pedidos</h2>
               <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-y-auto md:overflow-hidden pb-10 md:pb-0">
                 
@@ -1931,7 +1931,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                 </div>
 
                 {/* Em Preparo */}
-                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[500px] md:h-full">
+                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[600px] md:h-full">
                   <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
                     Em Preparo <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'preparing').length}</span>
                   </h3>

@@ -181,67 +181,42 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   // POLING DE CORRIDAS PENDENTES
   const checkPendingOffers = async () => {
     if (deliveryStateRef.current !== 'none') return;
-    
     try {
-      // Verifica is_online sempre do banco — courierRef pode estar desatualizado
-      // quando o motoboy volta do background após receber push
       let isOnline = courierRef.current?.is_online;
       if (!isOnline) {
         const courierId = courierRef.current?.id;
         if (!courierId) return;
         const { data: freshCourier } = await supabase
-          .from('couriers')
-          .select('is_online, id')
-          .eq('id', courierId)
-          .maybeSingle();
+          .from('couriers').select('is_online, id').eq('id', courierId).maybeSingle();
         if (freshCourier) {
           isOnline = freshCourier.is_online;
-          // Atualiza o ref para próximas checagens
           if (courierRef.current) courierRef.current.is_online = freshCourier.is_online;
         }
       }
       if (!isOnline) return;
-
-      const { data: delivery } = await supabase
-        .from('deliveries')
-        .select('*')
-        .eq('status', 'offered')
-        .is('courier_id', null)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
+      const { data: delivery } = await supabase.from('deliveries').select('*')
+        .eq('status', 'offered').is('courier_id', null)
+        .order('created_at', { ascending: true }).limit(1).maybeSingle();
       if (!delivery) return;
-
       const elapsed = Date.now() - new Date(delivery.created_at).getTime();
-
-      // Corrida expirada — cancela no banco e checa a próxima imediatamente
       if (elapsed > 65000) {
-        await supabase.from('deliveries')
-          .update({ status: 'cancelled' })
-          .eq('id', delivery.id)
-          .eq('status', 'offered');
+        await supabase.from('deliveries').update({ status: 'cancelled' })
+          .eq('id', delivery.id).eq('status', 'offered');
         setTimeout(checkPendingOffers, 100);
         return;
       }
-
       const hydratedOrder = await hydrateDeliveryOrder(delivery);
-
       if (hydratedOrder && deliveryStateRef.current === 'none') {
         setDeliveryState('offered');
-        
         let timeLeft = 60 - Math.floor(elapsed / 1000);
         if (timeLeft < 1 || timeLeft > 60) timeLeft = 60;
         setAcceptTimer(timeLeft);
-
         await sendNotification('🏍️ Nova Corrida Disponível!', {
           body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${hydratedOrder.stores?.name}. Aceite rápido!`,
         });
         navigator.vibrate?.([300, 100, 300, 100, 300]);
       }
-    } catch (err) {
-      console.error('Erro ao buscar ofertas:', err);
-    }
+    } catch (err) { console.error('Erro ao buscar ofertas:', err); }
   };
 
   // Realtime: sincroniza estado do courier em tempo real (is_online, etc)
@@ -324,10 +299,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
 
     const refreshCourierWork = () => {
       restoreActiveDelivery();
-      // Sempre tenta buscar ofertas ao receber push ou voltar ao foreground,
-      // independente do estado cached de is_online (pode estar desatualizado)
-      setTimeout(checkPendingOffers, 300);
-      setTimeout(checkPendingOffers, 1500);
+      checkPendingOffers();
     };
 
     const handleVisibilityChange = () => {
@@ -500,41 +472,26 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
       interval = setInterval(() => setAcceptTimer(prev => prev - 1), 1000);
     } else if (deliveryState === 'offered' && acceptTimer <= 0) {
       showToast('Tempo esgotado. Repassando para outro motoboy...', 'warning');
-      // Cancela oferta atual e cria nova para outro motoboy pegar
       if (activeDelivery?.id) {
         const orderId = activeDelivery.order_id;
         const courierEarning = activeDelivery.courier_earning;
-        supabase.from('deliveries')
-          .update({ status: 'cancelled' })
-          .eq('id', activeDelivery.id)
-          .eq('status', 'offered')
+        supabase.from('deliveries').update({ status: 'cancelled' })
+          .eq('id', activeDelivery.id).eq('status', 'offered')
           .then(async () => {
-            // Cria nova oferta aberta para qualquer motoboy
             await supabase.from('deliveries').insert({
-              order_id: orderId,
-              status: 'offered',
-              courier_id: null,
-              courier_earning: courierEarning,
+              order_id: orderId, status: 'offered', courier_id: null, courier_earning: courierEarning,
             });
-            // Renotifica motoboys disponíveis
             try {
               await supabase.functions.invoke('send-push', {
-                body: {
-                  title: '🏍️ Nova Corrida Disponível!',
+                body: { title: '🏍️ Nova Corrida Disponível!',
                   body: `Ganho de R$ ${courierEarning?.toFixed(2)}. Aceite rápido!`,
-                  data: { type: 'delivery_offer', orderId },
-                  targetType: 'couriers',
-                }
+                  data: { type: 'delivery_offer', orderId }, targetType: 'couriers' }
               });
-            } catch (e) {
-              console.warn('Erro ao renotificar motoboys:', e);
-            }
+            } catch (e) { console.warn('Erro ao renotificar:', e); }
           });
       }
-      setDeliveryState('none');
-      setActiveDelivery(null);
-      setDeliveryCodeInput('');
-      setDeliveryCodeError(false);
+      setDeliveryState('none'); setActiveDelivery(null);
+      setDeliveryCodeInput(''); setDeliveryCodeError(false);
     }
     return () => clearInterval(interval);
   }, [deliveryState, acceptTimer]);
