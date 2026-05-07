@@ -183,6 +183,22 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     }
   };
 
+  // Realtime: sincroniza estado do courier em tempo real (is_online, etc)
+  useEffect(() => {
+    if (!courier?.id) return;
+    const channel = supabase.channel(`courier_state_${courier.id}`)
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'couriers',
+        filter: `id=eq.${courier.id}`
+      }, (payload) => {
+        setCourier((prev: any) => ({ ...prev, ...payload.new }));
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [courier?.id]);
+
   // Checa a cada 3 segundos se há corridas pendentes
   useEffect(() => {
     let interval: NodeJS.Timeout;
