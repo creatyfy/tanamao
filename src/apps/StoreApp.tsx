@@ -861,13 +861,13 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
   };
 
   const handleAcceptOrder = async (order: any) => {
-    stopNotificationSound();
+    // Não para o som aqui — o useEffect cuida quando não houver mais pedidos pending
     await updateOrderStatus(order.id, 'preparing');
     printOrder(order);
   };
 
   const handleRejectOrder = async (orderId: number) => {
-    stopNotificationSound();
+    // Não para o som aqui — o useEffect cuida quando não houver mais pedidos pending
     await updateOrderStatus(orderId, 'cancelled');
   };
 
@@ -1853,10 +1853,10 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
           {activeTab === 'orders' && (
             <div className="max-w-7xl mx-auto h-full flex flex-col">
               <h2 className="text-2xl font-bold text-brand-dark mb-6">Gestor de Pedidos</h2>
-              <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-y-auto md:overflow-hidden pb-10 md:pb-0">
+              <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-3 gap-6 overflow-y-auto md:overflow-hidden pb-10 md:pb-0">
                 
                 {/* Novos */}
-                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[500px] md:h-full">
+                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[600px] md:h-full">
                   <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
                     Novos <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'pending').length}</span>
                   </h3>
@@ -2010,7 +2010,7 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
                 </div>
 
                 {/* Prontos */}
-                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[500px] md:h-full">
+                <div className="bg-gray-100 rounded-2xl p-4 flex flex-col h-[600px] md:h-full">
                   <h3 className="font-bold text-gray-700 mb-4 flex justify-between items-center">
                     Prontos / Rota <span className="bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full text-xs">{orders.filter(o => o.status === 'ready' || o.status === 'delivering').length}</span>
                   </h3>
