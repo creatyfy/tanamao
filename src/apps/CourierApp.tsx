@@ -183,6 +183,25 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     if (deliveryStateRef.current !== 'none') return;
     
     try {
+      // Verifica is_online sempre do banco — courierRef pode estar desatualizado
+      // quando o motoboy volta do background após receber push
+      let isOnline = courierRef.current?.is_online;
+      if (!isOnline) {
+        const courierId = courierRef.current?.id;
+        if (!courierId) return;
+        const { data: freshCourier } = await supabase
+          .from('couriers')
+          .select('is_online, id')
+          .eq('id', courierId)
+          .maybeSingle();
+        if (freshCourier) {
+          isOnline = freshCourier.is_online;
+          // Atualiza o ref para próximas checagens
+          if (courierRef.current) courierRef.current.is_online = freshCourier.is_online;
+        }
+      }
+      if (!isOnline) return;
+
       const { data: delivery } = await supabase
         .from('deliveries')
         .select('*')
@@ -205,9 +224,6 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
         setTimeout(checkPendingOffers, 100);
         return;
       }
-
-      // Só mostra oferta se motoboy está online
-      if (!courierRef.current?.is_online) return;
 
       const hydratedOrder = await hydrateDeliveryOrder(delivery);
 
