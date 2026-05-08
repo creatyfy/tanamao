@@ -594,17 +594,6 @@ export default function StoreApp({ onExit }: { onExit: () => void }) {
     if (error) { console.warn(`orders(store_id=${storeId}):`, error.message); return; }
     if (data) {
       setOrders(data);
-      // Limpa deliveries expiradas (>65s sem aceite) para nao travar pedidos
-      const expiredDeliveries = data.flatMap((o: any) =>
-        (o.deliveries || []).filter((d: any) =>
-          d.status === 'offered' &&
-          (Date.now() - new Date(d.created_at).getTime()) > 65000
-        )
-      );
-      for (const d of expiredDeliveries) {
-        supabase.from('deliveries').update({ status: 'cancelled' }).eq('id', d.id).eq('status', 'offered').then(() => {});
-        supabase.from('orders').update({ status: 'preparing' }).eq('id', d.order_id).then(() => {});
-      }
     }
   };
 
