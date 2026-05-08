@@ -179,6 +179,50 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   };
 
   // POLING DE CORRIDAS PENDENTES
+  const courierSoundLoopRef = React.useRef<boolean>(false);
+  const courierSoundTimeoutRef = React.useRef<number | null>(null);
+
+  const stopCourierAlertSound = () => {
+    courierSoundLoopRef.current = false;
+    if (courierSoundTimeoutRef.current) {
+      clearTimeout(courierSoundTimeoutRef.current);
+      courierSoundTimeoutRef.current = null;
+    }
+  };
+
+  const startCourierAlertSound = () => {
+    if (courierSoundLoopRef.current) return;
+    courierSoundLoopRef.current = true;
+    const playBeep = () => {
+      if (!courierSoundLoopRef.current) return;
+      try {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        // Beep suave e moderno — frequência média, sem ding dong
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime);
+        gain.gain.setValueAtTime(0, ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.5, ctx.currentTime + 0.3);
+        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5);
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.5);
+        setTimeout(() => { try { ctx.close(); } catch(e) {} }, 600);
+        // Repete a cada 2 segundos
+        courierSoundTimeoutRef.current = window.setTimeout(playBeep, 2000);
+      } catch(e) {
+        console.warn('Audio courier não suportado:', e);
+        courierSoundTimeoutRef.current = window.setTimeout(playBeep, 2000);
+      }
+    };
+    playBeep();
+  };
+
   const checkPendingOffers = async () => {
     if (deliveryStateRef.current !== 'none') return;
     try {
@@ -215,6 +259,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
           body: `Ganho de R$ ${delivery.courier_earning?.toFixed(2)}. Coleta em ${hydratedOrder.stores?.name}. Aceite rápido!`,
         });
         navigator.vibrate?.([300, 100, 300, 100, 300]);
+        startCourierAlertSound();
       }
     } catch (err) { console.error('Erro ao buscar ofertas:', err); }
   };
@@ -471,6 +516,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
     if (deliveryState === 'offered' && acceptTimer > 0) {
       interval = setInterval(() => setAcceptTimer(prev => prev - 1), 1000);
     } else if (deliveryState === 'offered' && acceptTimer <= 0) {
+      stopCourierAlertSound();
       showToast('Tempo esgotado. Repassando para outro motoboy...', 'warning');
       if (activeDelivery?.id) {
         const orderId = activeDelivery.order_id;
@@ -581,6 +627,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   };
 
   const handleAccept = async () => {
+    stopCourierAlertSound();
     setActionLoading(true);
     try {
       const { data: updated, error: delErr } = await supabase
@@ -626,6 +673,7 @@ export default function CourierApp({ onExit }: { onExit: () => void }) {
   };
 
   const handleReject = () => {
+    stopCourierAlertSound();
     setDeliveryState('none');
     setActiveDelivery(null);
     setDeliveryCodeInput('');
