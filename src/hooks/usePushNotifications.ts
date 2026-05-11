@@ -24,6 +24,30 @@ export function usePushNotifications() {
         setPermission(Notification.permission as any);
       }
     }
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        const pendingToken = localStorage.getItem('pending_push_token');
+        const pendingPlatform = localStorage.getItem('pending_push_platform');
+        if (pendingToken && pendingPlatform) {
+          try {
+            await supabase.from('push_tokens').upsert({
+              user_id: session.user.id,
+              token: pendingToken,
+              platform: pendingPlatform,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'user_id,token' });
+            localStorage.removeItem('pending_push_token');
+            localStorage.removeItem('pending_push_platform');
+            console.log('Token pendente salvo apos login!');
+          } catch (err) {
+            console.warn('Erro ao salvar token pendente:', err);
+          }
+        }
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
   const initNativePush = async () => {
@@ -97,15 +121,20 @@ export function usePushNotifications() {
 
   const saveTokenWithRetry = async (token: string, platform: string, attempt = 0) => {
     try {
+      // Salva no localStorage como backup enquanto usuário nao estiver logado
+      localStorage.setItem('pending_push_token', token);
+      localStorage.setItem('pending_push_platform', platform);
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        // Usuário não logado ainda — tenta novamente em 3 segundos
-        if (attempt < 5) {
+        if (attempt < 20) {
           setTimeout(() => saveTokenWithRetry(token, platform, attempt + 1), 3000);
         }
         return;
       }
       await saveToken(token, platform);
+      localStorage.removeItem('pending_push_token');
+      localStorage.removeItem('pending_push_platform');
     } catch (err) {
       console.warn('Failed to save push token:', err);
     }
